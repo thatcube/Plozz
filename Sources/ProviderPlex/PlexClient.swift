@@ -64,6 +64,10 @@ public struct PlexClient: Sendable {
     /// See ``PlexConnectionResolver/hasConfirmedReachableConnection``.
     public var hasConfirmedReachableConnection: Bool { resolver.hasConfirmedReachableConnection }
 
+    /// See ``PlexConnectionResolver/confirmedBaseURL``. Prefer this over pairing
+    /// `hasConfirmedReachableConnection` with `baseURL` — the pair can tear.
+    public var confirmedBaseURL: URL? { resolver.confirmedBaseURL }
+
     /// Fixed-URL initializer: the client always talks to `baseURL` (no probing).
     /// Used for manually-entered hosts and unit tests.
     public init(

@@ -100,8 +100,11 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         // that's actually dead. Reporting `.local` for it would wrongly win
         // best-source selection over a genuinely reachable remote twin. Report
         // `.unknown` until reachability is confirmed. (r6-plex-unreachable-local)
-        guard client.hasConfirmedReachableConnection else { return .unknown }
-        return SourceLocalityClassifier.classify(url: client.baseURL)
+        // ONE lock acquisition: reading the confirmation flag and the URL
+        // separately lets a concurrent failure report clear the cache in between,
+        // so an unproven LAN-shaped fallback gets classified `.local`.
+        guard let url = client.confirmedBaseURL else { return .unknown }
+        return SourceLocalityClassifier.classify(url: url)
     }
 
     public func libraries() async throws -> [MediaLibrary] {

@@ -41,9 +41,14 @@ public final class PlexConnectionResolver: Sendable {
     /// Bundled rather than left as loose properties beside an `NSLock` so the
     /// type system enforces what a convention used to: there is no way to read
     /// or write any of it without holding the lock, because there is no way to
-    /// name it from outside `withLock`. That is what lets the class be honestly
-    /// `Sendable` instead of `@unchecked Sendable` — the previous spelling was a
-    /// promise that the locking was right, and this one is checked.
+    /// name it from outside `withLock`, so the lock cannot be forgotten at a use
+    /// site.
+    ///
+    /// Note what this does NOT buy: `Mutex` is declared `@unchecked Sendable`
+    /// unconditionally, with no `Value: Sendable` requirement, so putting a
+    /// non-`Sendable` field in `State` still compiles and is still unsound. The
+    /// `@unchecked` moved into `Mutex`; it was not eliminated. Keep every field
+    /// below `Sendable` (or provably value-copied out) by hand.
     private struct State {
         var candidates: [URL]
         var cached: URL?
@@ -124,6 +129,22 @@ public final class PlexConnectionResolver: Sendable {
         state.withLock { state in
             if state.cached != nil { return true }
             return !state.reachabilityInvalidated && reachableSeed != nil
+        }
+    }
+
+    /// `current`, but only when its locality can be trusted — the confirmation
+    /// check and the URL it guards read from a SINGLE acquisition of the lock.
+    ///
+    /// Callers must NOT compose this from `hasConfirmedReachableConnection` and
+    /// `current` separately: a `reportFailure` landing between those two reads
+    /// clears `cached`, so the guard passes on the old confirmed address while
+    /// `current` returns the unproven `candidates[0]` — which is exactly the dead
+    /// LAN-shaped guess the guard exists to reject. (r6-plex-unreachable-local)
+    public var confirmedBaseURL: URL? {
+        state.withLock { state in
+            if let cached = state.cached { return cached }
+            guard !state.reachabilityInvalidated else { return nil }
+            return reachableSeed
         }
     }
 

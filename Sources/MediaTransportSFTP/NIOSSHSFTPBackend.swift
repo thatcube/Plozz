@@ -26,8 +26,11 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
 
     /// Everything this backend mutates, held INSIDE the mutex so there is no way
     /// to reach it without the lock. See `PlexConnectionResolver` for the same
-    /// reasoning: `@unchecked Sendable` beside loose properties is a promise the
-    /// compiler cannot check, and this is the checked spelling of it.
+    /// reasoning: it makes the lock impossible to forget, because the state
+    /// cannot be named outside `withLock`. It does NOT make `Sendable` checked —
+    /// `Mutex` is `@unchecked Sendable` unconditionally, and this type's safety
+    /// still rests on the hand-audited `@unchecked Sendable` NIO handlers below,
+    /// which are event-loop-confined rather than lock-protected.
     private struct State {
         var connection: Connection?
         /// The in-flight handshake, so `shutdown()` can wait for it to unwind
@@ -36,7 +39,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
         /// locals inside `connect`, so nothing else can reach them; the
         /// `isClosed` check after the handshake is what tears them down, and
         /// this is what makes `shutdown()` outlast that teardown.
-        var handshake: Task<Void, Never>?
+        var handshake: Task<Result<Void, Error>, Never>?
         /// A handshake is in flight. Reserved BEFORE the first suspension so a
         /// second `connect` can be refused: `connection` stays nil for the whole
         /// handshake, so checking it alone let two callers both pass, both
@@ -74,39 +77,51 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
         credential: SFTPMediaTransportCredential,
         hostKeyPolicy: SFTPHostKeyPolicy
     ) async throws {
-        // Claim the slot under the lock, and throw after releasing it, so no
-        // error path can leave the lock held or block a cooperative thread.
-        let claimed = state.withLock { state -> Bool in
+        // Claiming the slot and publishing the handshake happen in ONE critical
+        // section. Split across two, a `shutdown()` landing in the gap saw
+        // `handshake == nil`, had nothing to join, and returned while the
+        // handshake it was supposed to outlast was about to start — which is the
+        // exact condition the stored handle exists to prevent.
+        //
+        // The result is carried out of the task rather than thrown from it, so
+        // the caller still sees the original error, and the task is stored
+        // directly rather than wrapped in a second `Task` purely to erase that
+        // result type.
+        let attempt: Task<Result<Void, Error>, Never>? = state.withLock { state in
             guard state.connection == nil, !state.isClosed, !state.isConnecting else {
-                return false
+                return nil
             }
             state.isConnecting = true
-            return true
+            let task = Task<Result<Void, Error>, Never> {
+                do {
+                    try await self.performConnect(
+                        host: host,
+                        port: port,
+                        credential: credential,
+                        hostKeyPolicy: hostKeyPolicy
+                    )
+                    return .success(())
+                } catch {
+                    return .failure(error)
+                }
+            }
+            state.handshake = task
+            return task
         }
-        guard claimed else {
+        guard let attempt else {
             throw MediaTransportError.invalidInput(reason: "SFTP backend already connected")
         }
-
-        // The handshake runs as a TASK, published under the lock, so a
-        // concurrent `shutdown()` can join it and outlast its teardown rather
-        // than returning while a socket, an auth exchange and an event-loop
-        // group are still live. The result is carried out rather than thrown
-        // from the task, so the caller still sees the original error.
-        let attempt = Task<Result<Void, Error>, Never> {
-            do {
-                try await self.performConnect(
-                    host: host,
-                    port: port,
-                    credential: credential,
-                    hostKeyPolicy: hostKeyPolicy
-                )
-                return .success(())
-            } catch {
-                return .failure(error)
-            }
+        // Cancellation has to be forwarded by hand. Running the handshake in an
+        // unstructured task is what lets `shutdown()` join it, but it also means
+        // the caller's task is no longer its parent — so a caller that gives up
+        // (navigating away from the add-share flow, say) would otherwise leave a
+        // socket, an SSH key exchange and an event-loop group running for the
+        // full handshake timeout with nobody waiting for the answer.
+        let outcome = await withTaskCancellationHandler {
+            await attempt.value
+        } onCancel: {
+            attempt.cancel()
         }
-        state.withLock { $0.handshake = Task { _ = await attempt.value } }
-        let outcome = await attempt.value
         // Cleared on every exit, including the throwing ones — otherwise a
         // failed handshake would wedge the backend into a state where no later
         // connect can ever claim the slot.
@@ -123,6 +138,9 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
         credential: SFTPMediaTransportCredential,
         hostKeyPolicy: SFTPHostKeyPolicy
     ) async throws {
+
+        // Cheap early out: cancelled before the socket is even opened.
+        try Task.checkCancellation()
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let authDelegate = SFTPUserAuthenticationDelegate(credential: credential)
@@ -199,6 +217,12 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
             // fires it closes the channel, which fails readyFuture.
             try await sftpHandler.readyFuture.get()
             deadlineHandler.cancel()
+            // NIO futures don't observe Swift cancellation, so the handshake
+            // itself runs to completion once started. Checking here means a
+            // caller that gave up mid-handshake tears the connection down
+            // instead of installing one nobody asked for any more; the `catch`
+            // below already closes the channels and the group.
+            try Task.checkCancellation()
 
             // Install the connection, or find we were closed while handshaking —
             // decided under the lock, with the teardown's `await`s outside it.
@@ -225,6 +249,13 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
                 state.withLock { $0.lastCapturedHostKeyFingerprint = fingerprint }
             }
             try? await group.shutdownGracefully()
+            // Report giving up as giving up. Otherwise a cancelled connect
+            // reaches `mapSFTPError` and comes back as a connection failure,
+            // which the share browser would treat as a server that is down —
+            // surfacing an error for something the person themselves stopped.
+            if error is CancellationError {
+                throw MediaTransportError.cancelled
+            }
             // A rejected/unaccepted credential surfaces here as an assorted
             // connection error; classify it as TERMINAL auth so the share browser
             // doesn't retry-loop on a wrong password.
@@ -437,7 +468,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
     func shutdown() async {
         // Decided under the lock; every teardown `await` happens after it is
         // released, so shutdown can never block a cooperative thread.
-        let (connection, handshake) = state.withLock { state -> (Connection?, Task<Void, Never>?) in
+        let (connection, handshake) = state.withLock { state -> (Connection?, Task<Result<Void, Error>, Never>?) in
             guard !state.isClosed else { return (nil, nil) }
             state.isClosed = true
             defer { state.connection = nil }
@@ -447,7 +478,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
         // the flag we just set, so it will refuse to install and tear its own
         // channel and event-loop group down — but without joining it here,
         // `shutdown()` would return while all of that was still live.
-        await handshake?.value
+        _ = await handshake?.value
         return await finishShutdown(connection)
     }
 

@@ -96,6 +96,9 @@ public protocol UniversalWatchlistHost: AnyObject {
     /// held in memory as well as on disk because watchlist membership is asked
     /// once per card and must not touch the filesystem to answer.
     var universalWatchlistNativeView: NativeWatchlistView { get set }
+    /// Maps an anime between the id spaces trackers and media servers use, which
+    /// otherwise never meet. See `AnimeIDBridgeStore`.
+    var universalWatchlistAnimeBridge: AnimeIDBridgeStore { get }
     var universalWatchlistNativeViewStore:
         (any NativeWatchlistViewStoring)? { get set }
     var universalWatchlistDestinationIDs:
@@ -529,12 +532,19 @@ public extension UniversalWatchlistHost {
         )
         var resolvedByDestination:
             [WatchlistDestinationID: [(MediaAliasID, WatchlistDestinationEntry)]] = [:]
+        // Widen every entry's ids before anything is resolved. A tracker's row
+        // knows a show only as AniList/MAL and a server's row only as
+        // AniDB/TMDb/TVDb, so without this they share nothing to match on and
+        // the ledger — correctly refusing to merge records with no common
+        // evidence — mints two aliases for one show. The viewer then sees it
+        // twice: once as the copy they own, once as one to request.
+        let animeBridge = await universalWatchlistAnimeBridge.refreshIfNeeded()
         for read in report.successes {
             for entry in read.entries {
                 guard let evidence = entry.mediaAliasEvidence else { continue }
                 guard let aliasID = try? await mediaAliasLedger.resolveOrCreate(
                     profileID: profileID,
-                    evidence: evidence
+                    evidence: evidence.bridgingAnimeIdentities(using: animeBridge)
                 ) else { continue }
                 resolvedByDestination[read.destinationID, default: []]
                     .append((aliasID, entry))

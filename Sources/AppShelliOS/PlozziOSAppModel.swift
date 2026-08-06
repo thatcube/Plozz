@@ -392,6 +392,10 @@ final class PlozziOSAppModel {
     @ObservationIgnored var universalWatchlistReconciler: WatchlistReconciler?
     @ObservationIgnored var universalWatchlistMutationStore: DurableWatchlistMutationStore?
     @ObservationIgnored var universalWatchlistNativeView: NativeWatchlistView = .empty
+    @ObservationIgnored
+    private(set) lazy var universalWatchlistAnimeBridge = AnimeIDBridgeStore(
+        directoryURL: Self.universalWatchlistStorageDirectory()
+    )
     @ObservationIgnored var universalWatchlistNativeViewStore:
         (any NativeWatchlistViewStoring)?
     @ObservationIgnored var universalWatchlistDestinationIDs:

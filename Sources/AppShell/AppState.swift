@@ -110,6 +110,10 @@ public final class AppState {
     @ObservationIgnored
     public var universalWatchlistNativeView: NativeWatchlistView = .empty
     @ObservationIgnored
+    public private(set) lazy var universalWatchlistAnimeBridge = AnimeIDBridgeStore(
+        directoryURL: Self.universalWatchlistStorageDirectory()
+    )
+    @ObservationIgnored
     public var universalWatchlistNativeViewStore:
         (any NativeWatchlistViewStoring)?
     @ObservationIgnored

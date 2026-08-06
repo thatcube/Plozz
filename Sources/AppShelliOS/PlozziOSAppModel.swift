@@ -610,6 +610,12 @@ final class PlozziOSAppModel {
             profilesModel: profiles,
             switchProfile: { [weak self] profileID in
                 self?.selectProfile(profileID)
+            },
+            // Same seam as tvOS: watching as someone else changes whose library,
+            // watch state and watchlist this is, without moving the profile or
+            // the account set, so nothing else asks anything to reload.
+            onIdentityChanged: { [weak self] in
+                self?.refreshForPlexIdentityChange()
             }
         )
         accountsProviders.tokenResolver = { [weak self] accountID in
@@ -1094,6 +1100,17 @@ final class PlozziOSAppModel {
     /// for.
     func concludeIdentityPrompt(for accountID: String) {
         resolveIdentityPrompt(for: accountID)
+    }
+
+    /// Re-reads everything scoped to the Plex identity after "watching as"
+    /// changes. See `AppState.refreshForPlexIdentityChange()` — the shells keep
+    /// this in step deliberately.
+    func refreshForPlexIdentityChange() {
+        accountsProviders.reloadAccounts()
+        Task { [weak self] in
+            await self?.ensureTrackersScopedToActiveProfile()
+            await self?.prepareUniversalWatchlist()
+        }
     }
 
     /// Clears the question once a user is chosen.

@@ -395,44 +395,6 @@ public extension UniversalWatchlistHost {
             indexedSources: identityIndex.identitySourcesProvider,
             capabilities: .detected()
         ).map(\.item)) ?? []
-        // What the viewer actually SEES, which is a different question from
-        // whether the index could find a copy: an entry can resolve to an owned
-        // copy and still be rendered from the discovery row it arrived as.
-        // `playable` is the count that should match the library.
-        let union = universalWatchlistUnion
-        // Same title, two alias ids. The ledger's duplicate reconciler runs on
-        // every write, so anything still paired here is a pair it REFUSED to
-        // merge — which it only does when the two carry conflicting strong ids
-        // (same namespace, different values). Naming them is the difference
-        // between "the merge is broken" and "two servers disagree about what
-        // this title is".
-        var byTitle: [String: [MediaAliasID]] = [:]
-        for entry in union.orderedEntries {
-            guard let key = WatchlistUnion.titleKey(
-                kind: entry.kind,
-                presentation: entry.presentation
-            ) else { continue }
-            byTitle[key, default: []].append(entry.aliasID)
-        }
-        let dupes = byTitle.filter { $0.value.count > 1 }
-        if !dupes.isEmpty {
-            FanoutDiagnostics.emit(
-                "watchlist.duplicates count=\(dupes.count) titles=\(dupes.keys.sorted().prefix(8))"
-            )
-            for (_, ids) in dupes.prefix(3) {
-                let evidence = ids.compactMap { id -> String? in
-                    guard let record = mediaAliasLedger.activeSnapshot
-                        .record(for: id) else { return nil }
-                    return record.strongEvidence
-                        .map { "\($0.namespace.canonicalKey):\($0.value)" }
-                        .sorted().joined(separator: ",")
-                }
-                FanoutDiagnostics.emit("watchlist.duplicate evidence=\(evidence)")
-            }
-        }
-        FanoutDiagnostics.emit(
-            "watchlist.render total=\(resolved.count) playable=\(resolved.filter(\.locallyValidatedPlayableSource).count) serverOwned=\(union.orderedEntries.filter { $0.ownedSource != nil }.count) liveCandidate=\(current.count)"
-        )
         return resolved
     }
 
@@ -762,6 +724,14 @@ public extension UniversalWatchlistHost {
         // How many union titles the ledger can actually IDENTIFY. A record with
         // no strong external id can only ever match on title+year, which is why
         // a film sitting in the library still renders as "not in your library".
+        //
+        // Behind the gate: this walks every entry, and `emit` would discard the
+        // result anyway when diagnostics are off — which is the default in a
+        // shipping build. Counting first and checking after would pay the cost
+        // for nobody.
+        guard FanoutDiagnostics.isEnabled else { return }
+        // Nothing below this point does anything but describe what just
+        // happened, so returning here skips only the description.
         let ledger = mediaAliasLedger.activeSnapshot
         var weakOnly = 0
         var noRecord = 0
@@ -773,71 +743,7 @@ public extension UniversalWatchlistHost {
             }
             if record.strongEvidence.isEmpty { weakOnly += 1 } else { matchable += 1 }
         }
-        // Does the identity index know a copy on one of the viewer's servers for
-        // each union title? This is the question the alias ledger does NOT answer
-        // — it says what a title IS, not which item on which server it is — and
-        // it is what decides "in your library" vs "request it".
-        let sourcesProvider = identityIndex.identitySourcesProvider
-        var indexedHit = 0
-        var kindMismatch = 0
-        var missMovie = 0
-        var missSeries = 0
-        var missNames: [String] = []
-        var missNamespaces: [String: Int] = [:]
-        var hitNamespaces: [String: Int] = [:]
-        for entry in union.orderedEntries {
-            guard let record = ledger.record(for: entry.aliasID) else { continue }
-            var probe = MediaItem(
-                id: entry.aliasID.description,
-                title: record.presentation?.title ?? "",
-                kind: entry.kind,
-                productionYear: record.presentation?.year,
-                providerIDs: record.strongEvidence.reduce(into: [:]) {
-                    $0[$1.namespace.canonicalKey] = $1.value
-                },
-                availability: .unknown,
-                locallyValidatedPlayableSource: false
-            )
-            probe.watchlistAliasID = entry.aliasID
-            let refs = sourcesProvider(probe)
-            if !refs.filter({
-                $0.kind == nil || $0.kind == entry.kind
-            }).isEmpty {
-                indexedHit += 1
-                for evidence in record.strongEvidence {
-                    hitNamespaces[evidence.namespace.canonicalKey, default: 0] += 1
-                }
-            } else if !refs.isEmpty {
-                // The index knows this title but only under another KIND. TMDb
-                // and TVDb reuse one integer id space across movies and series,
-                // so the kind scope is load-bearing — a mismatch here means the
-                // watchlist and the library disagree about what the title is,
-                // not that the copy is missing.
-                kindMismatch += 1
-            } else {
-                switch entry.kind {
-                case .series: missSeries += 1
-                default: missMovie += 1
-                }
-                // Name them. A count alone can't distinguish "the lookup is
-                // broken" from "you don't actually own this one", and that is
-                // the entire question when someone says a film they own is
-                // asking to be requested. Capped so a large watchlist can't
-                // flood the log.
-                if missNames.count < 25 {
-                    missNames.append(record.presentation?.title ?? "?")
-                }
-                // WHICH ids the miss carries. If the watchlist entry knows a
-                // title only by TMDb while the library copy was matched by
-                // IMDb, the two share no identity atom and nothing can bridge
-                // them — a namespace gap, not a missing film.
-                for evidence in record.strongEvidence {
-                    missNamespaces[evidence.namespace.canonicalKey, default: 0] += 1
-                }
-            }
-        }
-        let indexSnapshot = identityIndex.identitySnapshot
-        let unionLine = "watchlist.index ownedCopyFound=\(indexedHit)/\(union.orderedEntries.count) missMovie=\(missMovie) missSeries=\(missSeries) kindMismatch=\(kindMismatch) missNS=\(missNamespaces.sorted { $0.key < $1.key }) hitNS=\(hitNamespaces.sorted { $0.key < $1.key }) missing=\(missNames.sorted()) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count) | total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
+        let unionLine = "watchlist.union total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
         PlozzLog.app.info("Watchlist \(unionLine)")
         // Mirrored through the fan-out diagnostics seam so `devicectl … --console`
         // can stream it: `os_log` alone doesn't reach stdout, which is the only

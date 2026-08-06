@@ -2364,7 +2364,6 @@ public final class AppState {
         //
         // Tracker re-scoping itself is cheap and idempotent, so it still runs
         // unconditionally below; it is only the index flush that is gated.
-        FanoutDiagnostics.emit("trackers.rescope ns=\(ns ?? "-") gen=\(plexHomeUsers.plexIdentityGeneration)")
         let indexScope = "\(ns ?? "")#\(plexHomeUsers.plexIdentityGeneration)"
         let viewerChanged = indexScopeKey != indexScope
         if viewerChanged {
@@ -2409,7 +2408,6 @@ public final class AppState {
     /// re-aggregate, and the watchlist prepare re-reads the native list and
     /// rebuilds its reconciler against the new identity.
     private func refreshForPlexIdentityChange() {
-        FanoutDiagnostics.emit("plex.identity refresh — reloading accounts")
         // Rebuilds the providers against the new token, which is what makes Home
         // and Continue Watching re-aggregate as the person now watching.
         accountsProviders.reloadAccounts()

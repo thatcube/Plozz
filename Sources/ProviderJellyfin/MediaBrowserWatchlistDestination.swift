@@ -3,7 +3,7 @@ import Foundation
 
 /// Jellyfin and Emby Favorites adapter. Writes require a locally corroborated
 /// provider binding; synced binding hints alone never pass `resolve`.
-public struct MediaBrowserWatchlistDestination: WatchlistDestination {
+public struct MediaBrowserWatchlistDestination: WatchlistLibraryResolving {
     public let id: WatchlistDestinationID
     public let capabilities = WatchlistDestinationCapabilities(
         readable: true,
@@ -31,6 +31,27 @@ public struct MediaBrowserWatchlistDestination: WatchlistDestination {
               ) else { return nil }
         self.id = id
         self.provider = provider
+    }
+
+    /// Which item in the viewer's own library this entry is.
+    ///
+    /// Free here, and exactly answered: a Jellyfin/Emby watchlist IS a set of
+    /// library items, so the entry already carries the real item id in its
+    /// corroborated binding. No lookup, no network call, and no dependence on a
+    /// client-side catalogue scan having finished — which is what left a
+    /// watchlisted show reporting "seasons unavailable" until a later refresh
+    /// happened to land.
+    public func resolveLibraryCopy(
+        for entry: WatchlistDestinationEntry
+    ) async -> MediaSourceRef? {
+        guard let binding = entry.corroboratedProviderBinding,
+              binding.accountDescriptorID == provider.accountID else { return nil }
+        return MediaSourceRef(
+            accountID: provider.accountID,
+            itemID: binding.providerItemID,
+            kind: entry.kind,
+            providerKind: provider.kind
+        )
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {

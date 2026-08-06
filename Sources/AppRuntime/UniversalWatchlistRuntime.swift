@@ -64,6 +64,25 @@ public enum NativeWatchlistAccounts {
     }
 }
 
+/// One memoized membership set, keyed by the revision that changes whenever the
+/// watchlist would. Main-actor isolated and process-wide because the hosts are
+/// per-shell singletons and a stale revision simply misses the cache.
+@MainActor
+final class UniversalWatchlistMembershipCache {
+    static let shared = UniversalWatchlistMembershipCache()
+    private var revision: UInt64?
+    private var cached: Set<MediaAliasID> = []
+
+    func ids(for revision: UInt64) -> Set<MediaAliasID>? {
+        self.revision == revision ? cached : nil
+    }
+
+    func store(_ ids: Set<MediaAliasID>, revision: UInt64) {
+        self.revision = revision
+        cached = ids
+    }
+}
+
 @MainActor
 public protocol UniversalWatchlistHost: AnyObject {
     var runtimeFeatureFlags: RuntimeFeatureFlags { get }
@@ -306,6 +325,24 @@ public extension UniversalWatchlistHost {
     /// `titleIdentityResolver`: it is a value over state the shells already
     /// observe. Take one per prepared-state pass and reuse it; never call this
     /// from a SwiftUI `body`.
+    /// The alias ids on the watchlist, memoized against the same revision the
+    /// card-level membership cache keys on.
+    ///
+    /// Separate from `universalWatchlistUnion` because the two have opposite
+    /// shapes: a card asks "is this one title on the list" thousands of times
+    /// and needs a Set, while the row asks "what is on the list, in order" once
+    /// and needs the sorted entries. Serving the first from the second rebuilt
+    /// and re-sorted the whole watchlist per card.
+    var universalWatchlistMembershipIDs: Set<MediaAliasID> {
+        let revision = universalWatchlistMembershipRevision
+        if let cached = UniversalWatchlistMembershipCache.shared.ids(for: revision) {
+            return cached
+        }
+        let ids = universalWatchlistUnion.activeAliasIDs
+        UniversalWatchlistMembershipCache.shared.store(ids, revision: revision)
+        return ids
+    }
+
     var universalWatchlistUnion: WatchlistUnion {
         universalWatchlist.union(
             profileID: profiles.activeProfileID,
@@ -331,7 +368,12 @@ public extension UniversalWatchlistHost {
         // with the page it opens.
         let resolved = mediaAliasLedger.activeSnapshot.resolvedAliasID(for: aliasID)
             ?? aliasID
-        return universalWatchlistUnion.contains(aliasID: resolved)
+        // The MEMBERSHIP SET, not the union. This is a per-card path, and
+        // building the union means allocating and SORTING every entry — 178 of
+        // them on the reporting device — once per card body. That is the exact
+        // trade the comment on `universalWatchlistMembershipRevision` warns
+        // against, and it turned a Set lookup into the app's startup stall.
+        return universalWatchlistMembershipIDs.contains(resolved)
     }
 
     func resolvedUniversalWatchlistItems(

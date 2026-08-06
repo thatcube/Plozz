@@ -195,7 +195,7 @@ public struct WatchlistUnion: Sendable, Equatable {
     /// A conservative "same title" key for suppressing an unowned duplicate.
     /// `nil` when there isn't enough to be sure — no title, or no year — so a
     /// sparse entry is never suppressed on a guess.
-    static func titleKey(
+    public static func titleKey(
         kind: MediaItemKind,
         presentation: MediaAliasPresentation?
     ) -> String? {

@@ -355,6 +355,36 @@ public extension UniversalWatchlistHost {
         // copy and still be rendered from the discovery row it arrived as.
         // `playable` is the count that should match the library.
         let union = universalWatchlistUnion
+        // Same title, two alias ids. The ledger's duplicate reconciler runs on
+        // every write, so anything still paired here is a pair it REFUSED to
+        // merge — which it only does when the two carry conflicting strong ids
+        // (same namespace, different values). Naming them is the difference
+        // between "the merge is broken" and "two servers disagree about what
+        // this title is".
+        var byTitle: [String: [MediaAliasID]] = [:]
+        for entry in union.orderedEntries {
+            guard let key = WatchlistUnion.titleKey(
+                kind: entry.kind,
+                presentation: entry.presentation
+            ) else { continue }
+            byTitle[key, default: []].append(entry.aliasID)
+        }
+        let dupes = byTitle.filter { $0.value.count > 1 }
+        if !dupes.isEmpty {
+            FanoutDiagnostics.emit(
+                "watchlist.duplicates count=\(dupes.count) titles=\(dupes.keys.sorted().prefix(8))"
+            )
+            for (_, ids) in dupes.prefix(3) {
+                let evidence = ids.compactMap { id -> String? in
+                    guard let record = mediaAliasLedger.activeSnapshot
+                        .record(for: id) else { return nil }
+                    return record.strongEvidence
+                        .map { "\($0.namespace.canonicalKey):\($0.value)" }
+                        .sorted().joined(separator: ",")
+                }
+                FanoutDiagnostics.emit("watchlist.duplicate evidence=\(evidence)")
+            }
+        }
         FanoutDiagnostics.emit(
             "watchlist.render total=\(resolved.count) playable=\(resolved.filter(\.locallyValidatedPlayableSource).count) serverOwned=\(union.orderedEntries.filter { $0.ownedSource != nil }.count) liveCandidate=\(current.count)"
         )

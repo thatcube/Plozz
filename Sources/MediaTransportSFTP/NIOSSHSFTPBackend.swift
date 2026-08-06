@@ -1,5 +1,6 @@
 import Crypto
 import Foundation
+import Synchronization
 import MediaTransportCore
 import NIOConcurrencyHelpers
 import NIOCore
@@ -14,7 +15,7 @@ import NIOSSH
 ///
 /// swift-nio-ssh owns everything security-critical; this type only frames the
 /// SFTP messages we issue and correlates their replies by request id.
-final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
+final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
     private struct Connection {
         let group: EventLoopGroup
         let channel: Channel
@@ -23,11 +24,18 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         let validator: SFTPHostKeyValidator
     }
 
-    private let lock = NSLock()
-    private var connection: Connection?
-    private var lastCapturedHostKeyFingerprint: [UInt8]?
-    private var isClosed = false
-    private var nextRequestID: UInt32 = 0
+    /// Everything this backend mutates, held INSIDE the mutex so there is no way
+    /// to reach it without the lock. See `PlexConnectionResolver` for the same
+    /// reasoning: `@unchecked Sendable` beside loose properties is a promise the
+    /// compiler cannot check, and this is the checked spelling of it.
+    private struct State {
+        var connection: Connection?
+        var lastCapturedHostKeyFingerprint: [UInt8]?
+        var isClosed = false
+        var nextRequestID: UInt32 = 0
+    }
+
+    private let state = Mutex(State())
 
     private static let connectTimeout: TimeAmount = .seconds(20)
     /// Bounds the whole post-TCP SSH negotiation (banner/kex/auth) + subsystem +
@@ -40,9 +48,9 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
     private static let operationTimeout: TimeAmount = .seconds(30)
 
     var capturedHostKeyFingerprint: [UInt8]? {
-        lock.withLock {
-            connection?.validator.capturedFingerprint
-                ?? lastCapturedHostKeyFingerprint
+        state.withLock {
+            $0.connection?.validator.capturedFingerprint
+                ?? $0.lastCapturedHostKeyFingerprint
         }
     }
 
@@ -55,11 +63,10 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
     ) async throws {
         // Decided under the lock; the throw happens after it is released, so no
         // error path can leave the lock held or block a cooperative thread.
-        let alreadyConnected = lock.withLock { connection != nil || isClosed }
+        let alreadyConnected = state.withLock { $0.connection != nil || $0.isClosed }
         guard !alreadyConnected else {
             throw MediaTransportError.invalidInput(reason: "SFTP backend already connected")
         }
-        lock.unlock()
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let authDelegate = SFTPUserAuthenticationDelegate(credential: credential)
@@ -139,9 +146,9 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
 
             // Install the connection, or find we were closed while handshaking —
             // decided under the lock, with the teardown's `await`s outside it.
-            let wasClosed = lock.withLock { () -> Bool in
-                if isClosed { return true }
-                connection = Connection(
+            let wasClosed = state.withLock { state -> Bool in
+                if state.isClosed { return true }
+                state.connection = Connection(
                     group: group,
                     channel: channel,
                     sftpChannel: sftpChannel,
@@ -159,9 +166,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         } catch {
             deadlineHandler.cancel()
             if let fingerprint = serverAuthDelegate.capturedFingerprint {
-                lock.withLock {
-                    lastCapturedHostKeyFingerprint = fingerprint
-                }
+                state.withLock { $0.lastCapturedHostKeyFingerprint = fingerprint }
             }
             try? await group.shutdownGracefully()
             // A rejected/unaccepted credential surfaces here as an assorted
@@ -374,15 +379,14 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
     }
 
     func shutdown() async {
-        lock.lock()
-        guard !isClosed else {
-            lock.unlock()
-            return
+        // Decided under the lock; every teardown `await` happens after it is
+        // released, so shutdown can never block a cooperative thread.
+        let connection = state.withLock { state -> Connection? in
+            guard !state.isClosed else { return nil }
+            state.isClosed = true
+            defer { state.connection = nil }
+            return state.connection
         }
-        isClosed = true
-        let connection = self.connection
-        self.connection = nil
-        lock.unlock()
 
         guard let connection else { return }
         connection.handler.failAll(error: MediaTransportError.cancelled)
@@ -460,19 +464,19 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
     }
 
     private func currentConnection() throws -> Connection {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !isClosed, let connection else {
-            throw MediaTransportError.cancelled
+        try state.withLock { state in
+            guard !state.isClosed, let connection = state.connection else {
+                throw MediaTransportError.cancelled
+            }
+            return connection
         }
-        return connection
     }
 
     private func nextID() -> UInt32 {
-        lock.lock()
-        defer { lock.unlock() }
-        nextRequestID &+= 1
-        return nextRequestID
+        state.withLock { state in
+            state.nextRequestID &+= 1
+            return state.nextRequestID
+        }
     }
 
     private func backendEntry(name: String, attributes: SFTP.FileAttributes) -> SFTPBackendEntry {

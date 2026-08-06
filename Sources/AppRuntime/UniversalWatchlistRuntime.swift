@@ -565,16 +565,43 @@ public extension UniversalWatchlistHost {
                 destinationID: read.destinationID,
                 candidates: candidatesByDestination[read.destinationID] ?? []
             )) ?? [:]
-            let entries = resolvedByDestination[read.destinationID, default: []]
-                .enumerated()
-                .compactMap { offset, resolved in
-                    NativeWatchlistEntry(
-                        aliasID: resolved.0,
-                        kind: resolved.1.kind,
-                        presentation: resolved.1.presentation,
-                        index: offset
-                    )
+            // Ask the server which of these it actually holds. It is the same
+            // server that just handed us the list, so the answer arrives with
+            // the watchlist rather than waiting on a full client-side catalogue
+            // scan to complete and publish — which is what used to decide this,
+            // and what made a film sitting in the library read as one to go and
+            // request until the scan landed.
+            //
+            // Bounded and cached: only entries whose owned copy isn't already
+            // known are asked, and the answer is persisted with the view, so a
+            // steady watchlist costs nothing on later refreshes.
+            let known = Dictionary(
+                universalWatchlistNativeView.bucket(for: read.destinationID)?
+                    .entries.compactMap { entry in
+                        entry.ownedSource.map { (entry.aliasID, $0) }
+                    } ?? [],
+                uniquingKeysWith: { first, _ in first }
+            )
+            let resolver = await reconciler.libraryResolver(for: read.destinationID)
+            var entries: [NativeWatchlistEntry] = []
+            for (offset, resolved) in resolvedByDestination[
+                read.destinationID,
+                default: []
+            ].enumerated() {
+                let (aliasID, entry) = resolved
+                var owned = known[aliasID]
+                if owned == nil, let resolver {
+                    owned = await resolver(entry)
                 }
+                guard let value = NativeWatchlistEntry(
+                    aliasID: aliasID,
+                    kind: entry.kind,
+                    presentation: entry.presentation,
+                    index: offset,
+                    ownedSource: owned
+                ) else { continue }
+                entries.append(value)
+            }
             // A successful read REPLACES what this destination held, empty
             // included: the viewer clearing a server's watchlist is an answer,
             // not a blip. Home learned the same lesson the expensive way.

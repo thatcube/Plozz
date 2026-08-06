@@ -1789,6 +1789,21 @@ extension PlexProvider: WatchlistProviding {
     /// unified Watchlist row renders them as saved. Discover items carry global
     /// ids that won't resolve for playback against a specific server (documented
     /// limitation); they appear in the row but may not direct-play.
+    /// The item in THIS server's library matching a global id, if it has one.
+    ///
+    /// Asks the server per title rather than inferring it from a client-side
+    /// catalogue scan. Tries each id in turn because a library item is indexed
+    /// under whichever agent matched it, so a watchlist entry knowing a title by
+    /// TMDb can still find a copy the server matched by IMDb.
+    public func libraryItem(matchingAnyOf guids: [String]) async -> MediaItem? {
+        for guid in guids where !guid.isEmpty {
+            guard let match = try? await client.libraryItems(matchingGuid: guid),
+                  let first = match.first else { continue }
+            return map(metadata: first)
+        }
+        return nil
+    }
+
     public func watchlist() async throws -> [MediaItem] {
         try await watchlist(using: client)
     }

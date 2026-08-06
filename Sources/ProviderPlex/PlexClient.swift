@@ -232,6 +232,33 @@ public struct PlexClient: Sendable {
         return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer.Metadata ?? []
     }
 
+    /// `GET /library/all?guid={guid}` — the library item matching a global id,
+    /// or nothing when this server doesn't have it.
+    ///
+    /// Asks the server the question directly instead of inferring the answer
+    /// from a client-side catalogue scan. "Is this title in my library?" is a
+    /// question Plex can answer per title; walking every library to build a map
+    /// and then consulting the map is a much larger machine that has to be
+    /// complete, current and successfully published before it can answer at all
+    /// — and while it isn't, a film sitting in the library reads as one to go
+    /// and request.
+    ///
+    /// `guid` accepts a global id (`imdb://tt…`, `tmdb://…`, `tvdb://…`) as well
+    /// as Plex's own `plex://` form.
+    func libraryItems(matchingGuid guid: String) async throws -> [PlexMetadata] {
+        let query = [
+            URLQueryItem(name: "guid", value: guid),
+            URLQueryItem(name: "includeGuids", value: "1"),
+            URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
+            URLQueryItem(name: "X-Plex-Container-Size", value: "5")
+        ]
+        let endpoint = Endpoint(path: "/library/all", queryItems: query, headers: headers)
+        return try await decode(
+            PlexMediaContainerResponse.self,
+            endpoint
+        ).MediaContainer.Metadata ?? []
+    }
+
     /// `GET /library/all?{field}={id}` — everything in the library on which a
     /// person worked. `type=1,2` keeps the result to whole movies and shows
     /// rather than individual episodes, matching the Jellyfin side.

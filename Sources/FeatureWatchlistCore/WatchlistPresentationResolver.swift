@@ -61,6 +61,21 @@ public enum WatchlistPresentationResolver {
                    candidate.availability == nil {
                     candidate.availability = .unknown
                 }
+                // The server's own answer wins, and needs nothing else to be
+                // ready. The index can only answer once a full catalogue scan
+                // has completed and published; this came back with the
+                // watchlist itself, so a title the viewer owns is recognised as
+                // owned from the first paint rather than after a scan lands.
+                if let owned = entry.ownedSource,
+                   !candidate.locallyValidatedPlayableSource {
+                    var resolved = candidate.selectingSource(owned)
+                    resolved.availability = nil
+                    resolved.watchlistAliasID = aliasID
+                    return WatchlistPresentationEntry(
+                        aliasID: aliasID,
+                        item: resolved
+                    )
+                }
                 // Falls back to the MARKED candidate, not the original. A Plex
                 // watchlist entry is a Discover row carrying no availability at
                 // all, and with none the UI reads it as an ordinary library
@@ -111,7 +126,13 @@ public enum WatchlistPresentationResolver {
                     capabilities: capabilities
                 )
             }
-            var item = resolved ?? placeholder
+            // Same precedence for an entry with no live candidate: the server's
+            // answer first, the index only as a fallback.
+            var item = entry.ownedSource.map {
+                var owned = placeholder.selectingSource($0)
+                owned.availability = nil
+                return owned
+            } ?? resolved ?? placeholder
             item.watchlistAliasID = aliasID
             return WatchlistPresentationEntry(aliasID: aliasID, item: item)
         }

@@ -13,18 +13,29 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
     /// Position in the destination's own list, preserved so the union can order
     /// entries the way the server does rather than by hash order.
     public let index: Int
+    /// The item in the viewer's OWN library this entry is, as answered by the
+    /// server that holds the list.
+    ///
+    /// Recorded here so deciding "do I own this?" doesn't depend on a
+    /// client-side catalogue index being complete, current and published first.
+    /// `nil` means the server was asked and said no, or hasn't been asked yet —
+    /// both of which correctly present as not-in-library rather than as a
+    /// library title with nothing to play.
+    public let ownedSource: MediaSourceRef?
 
     public init?(
         aliasID: MediaAliasID,
         kind: MediaItemKind,
         presentation: MediaAliasPresentation? = nil,
-        index: Int
+        index: Int,
+        ownedSource: MediaSourceRef? = nil
     ) {
         guard kind == .movie || kind == .series else { return nil }
         self.aliasID = aliasID
         self.kind = kind
         self.presentation = presentation?.sanitizedForSync()
         self.index = index
+        self.ownedSource = ownedSource
     }
 }
 

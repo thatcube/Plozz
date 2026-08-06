@@ -480,6 +480,20 @@ public actor WatchlistReconciler {
         await mutationStore.earliestNextAttempt(profileID: profileID)
     }
 
+    /// A closure that asks `destinationID` which library item an entry is, or
+    /// `nil` when that destination can't answer (a tracker knows what you want
+    /// to watch, not what you own).
+    ///
+    /// Handed out as a closure so callers need not know the destination types,
+    /// and so the registry stays the single place destinations are looked up.
+    public func libraryResolver(
+        for destinationID: WatchlistDestinationID
+    ) -> (@Sendable (WatchlistDestinationEntry) async -> MediaSourceRef?)? {
+        guard let destination = registry[destinationID]
+                as? any WatchlistLibraryResolving else { return nil }
+        return { entry in await destination.resolveLibraryCopy(for: entry) }
+    }
+
     public func eligibleDestinationIDs(
         for target: WatchlistMutationTarget
     ) -> Set<WatchlistDestinationID> {

@@ -443,6 +443,21 @@ public protocol WatchlistDestination: Sendable {
     ) async throws
 }
 
+/// A destination that can also say which item in the viewer's own library a
+/// watchlist entry IS.
+///
+/// Separate from `WatchlistDestination` because only a destination backed by a
+/// media server can answer it — a tracker knows what you want to watch, not what
+/// you own. Asking the server directly is what removes the dependency on a
+/// complete, current, successfully-published client-side catalogue index just to
+/// decide whether a title is in the library.
+public protocol WatchlistLibraryResolving: WatchlistDestination {
+    /// The owned copy of `entry`, or `nil` when this server doesn't have it.
+    func resolveLibraryCopy(
+        for entry: WatchlistDestinationEntry
+    ) async -> MediaSourceRef?
+}
+
 public extension WatchlistDestination {
     var routing: WatchlistDestinationRouting {
         WatchlistDestinationRouting(

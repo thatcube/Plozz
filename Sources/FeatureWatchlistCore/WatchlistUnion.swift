@@ -10,17 +10,22 @@ public struct WatchlistUnionEntry: Identifiable, Hashable, Sendable {
     /// True when a durable intent puts this here — the viewer asked for it.
     /// False when it is here only because an enabled server's own list holds it.
     public let isExplicit: Bool
+    /// The viewer's own copy, as answered by the server that holds the list.
+    /// See `NativeWatchlistEntry.ownedSource`.
+    public let ownedSource: MediaSourceRef?
 
     public init(
         aliasID: MediaAliasID,
         kind: MediaItemKind,
         presentation: MediaAliasPresentation?,
-        isExplicit: Bool
+        isExplicit: Bool,
+        ownedSource: MediaSourceRef? = nil
     ) {
         self.aliasID = aliasID
         self.kind = kind
         self.presentation = presentation
         self.isExplicit = isExplicit
+        self.ownedSource = ownedSource
     }
 }
 
@@ -78,6 +83,21 @@ public struct WatchlistUnion: Sendable, Equatable {
 
         // Explicit intent first, in the order the viewer arranged it. Adds
         // allocate at the front, so this is already the list they built.
+        // What each server said it owns, keyed by alias, so an explicit intent
+        // that a server ALSO holds still picks up the owned copy.
+        var ownedByAlias: [MediaAliasID: MediaSourceRef] = [:]
+        for (rawID, bucket) in nativeView.bucketsByDestinationID {
+            guard let destinationID = WatchlistDestinationID(rawValue: rawID),
+                  enabledDestinationIDs.contains(destinationID) else { continue }
+            for entry in bucket.entries where entry.ownedSource != nil {
+                let aliasID = aliasSnapshot.resolvedAliasID(for: entry.aliasID)
+                    ?? entry.aliasID
+                if ownedByAlias[aliasID] == nil {
+                    ownedByAlias[aliasID] = entry.ownedSource
+                }
+            }
+        }
+
         for intent in snapshot.orderedEntries {
             let aliasID = aliasSnapshot.resolvedAliasID(for: intent.aliasID)
                 ?? snapshot.resolvedAliasID(for: intent.aliasID)
@@ -86,7 +106,8 @@ public struct WatchlistUnion: Sendable, Equatable {
                 aliasID: aliasID,
                 kind: intent.kind,
                 presentation: intent.presentation,
-                isExplicit: true
+                isExplicit: true,
+                ownedSource: ownedByAlias[aliasID]
             ))
         }
 
@@ -125,7 +146,8 @@ public struct WatchlistUnion: Sendable, Equatable {
                 aliasID: aliasID,
                 kind: entry.kind,
                 presentation: entry.presentation,
-                isExplicit: false
+                isExplicit: false,
+                ownedSource: entry.ownedSource ?? ownedByAlias[aliasID]
             ))
         }
 

@@ -296,6 +296,107 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
         )
     }
 
+    /// The server's own answer needs no index at all.
+    ///
+    /// This is the point of asking it: the index can only answer once a full
+    /// catalogue scan has completed AND published, and until then a film sitting
+    /// in the library reads as one to go and request. The server answered with
+    /// the watchlist itself.
+    func testServerAnsweredCopyResolvesWithNoIndex() throws {
+        let aliasID = MediaAliasID()
+        let destination = WatchlistDestinationID(rawValue: "plex")!
+        var nativeView = NativeWatchlistView()
+        nativeView.applySuccess(
+            destinationID: destination,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: aliasID,
+                    kind: .series,
+                    presentation: MediaAliasPresentation(title: "Your Honor", year: 2020),
+                    index: 0,
+                    ownedSource: MediaSourceRef(
+                        accountID: "plex-account",
+                        itemID: "library-rating-key",
+                        kind: .series,
+                        providerKind: .plex
+                    )
+                )!
+            ]
+        )
+        let union = WatchlistUnion(
+            snapshot: .empty,
+            nativeView: nativeView,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [destination]
+        )
+
+        let discovery = MediaItem(
+            id: "discover-series",
+            title: "Your Honor",
+            kind: .series,
+            locallyValidatedPlayableSource: false
+        )
+
+        let resolved = WatchlistPresentationResolver.resolve(
+            union: union,
+            aliasSnapshot: .empty,
+            currentItemsByAliasID: [aliasID: discovery],
+            // No index whatsoever — the scan has not run.
+            indexedSources: { _ in [] }
+        )
+
+        let item = try XCTUnwrap(resolved.first?.item)
+        XCTAssertEqual(
+            item.id,
+            "library-rating-key",
+            "The entry must point at the owned copy, not the Discover row"
+        )
+        XCTAssertTrue(item.locallyValidatedPlayableSource)
+        XCTAssertNil(item.availability)
+    }
+
+    /// And with no live candidate either — a watchlisted title that appears in
+    /// no other row still resolves to the copy the server named.
+    func testServerAnsweredCopyResolvesWithoutALiveCandidate() throws {
+        let aliasID = MediaAliasID()
+        let destination = WatchlistDestinationID(rawValue: "plex")!
+        var nativeView = NativeWatchlistView()
+        nativeView.applySuccess(
+            destinationID: destination,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: aliasID,
+                    kind: .movie,
+                    presentation: MediaAliasPresentation(title: "Coco", year: 2017),
+                    index: 0,
+                    ownedSource: MediaSourceRef(
+                        accountID: "plex-account",
+                        itemID: "owned-42",
+                        kind: .movie,
+                        providerKind: .plex
+                    )
+                )!
+            ]
+        )
+        let union = WatchlistUnion(
+            snapshot: .empty,
+            nativeView: nativeView,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [destination]
+        )
+
+        let resolved = WatchlistPresentationResolver.resolve(
+            union: union,
+            aliasSnapshot: .empty,
+            currentItemsByAliasID: [:],
+            indexedSources: { _ in [] }
+        )
+
+        let item = try XCTUnwrap(resolved.first?.item)
+        XCTAssertEqual(item.id, "owned-42")
+        XCTAssertTrue(item.locallyValidatedPlayableSource)
+    }
+
     /// The upgrade must never invent a match. Retargeting on title+year alone
     /// wouldn't just mislabel a card, it would route playback to another work.
     func testCandidateWithoutAStrongIDIsLeftAlone() throws {

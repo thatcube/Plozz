@@ -1,7 +1,7 @@
 import CoreModels
 import Foundation
 
-public struct PlexWatchlistDestination: WatchlistDestination {
+public struct PlexWatchlistDestination: WatchlistLibraryResolving {
     public let id: WatchlistDestinationID
     public let capabilities = WatchlistDestinationCapabilities(
         readable: true,
@@ -98,6 +98,33 @@ public struct PlexWatchlistDestination: WatchlistDestination {
                 )
             )
         }
+    }
+
+    /// Which item in the viewer's own library this watchlist entry is.
+    ///
+    /// The server that just told us the title is on the watchlist is the same
+    /// one that knows whether it holds a copy, so it is asked directly. That
+    /// removes the dependency on a client-side catalogue index being complete,
+    /// current and published before a watchlisted film can be recognised as one
+    /// the viewer already owns.
+    ///
+    /// Uses the account's own client, not the Discover one: the watchlist is an
+    /// account-level list, but the LIBRARY belongs to the server.
+    public func resolveLibraryCopy(
+        for entry: WatchlistDestinationEntry
+    ) async -> MediaSourceRef? {
+        let guids = entry.externalIDs.map {
+            "\($0.namespace.rawValue)://\($0.value)"
+        }
+        guard let item = await provider.libraryItem(matchingAnyOf: guids) else {
+            return nil
+        }
+        return MediaSourceRef(
+            accountID: provider.accountID,
+            itemID: item.id,
+            kind: item.kind,
+            providerKind: .plex
+        )
     }
 
     /// Plex has no exact strong-external-id resolution endpoint in the existing

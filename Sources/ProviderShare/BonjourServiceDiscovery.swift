@@ -102,11 +102,20 @@ public final class BonjourServiceDiscovery: @unchecked Sendable {
     public func discover(timeout: TimeInterval = 6) -> AsyncStream<DiscoveredNetworkService> {
         AsyncStream { continuation in
             let box = ResolveBox(continuation: continuation)
-            var browsers: [NWBrowser] = []
             let queue = DispatchQueue(label: "com.plozz.bonjour.discovery")
 
-            for serviceType in mapping.serviceTypes {
-                guard let transport = mapping.transport(for: serviceType) else { continue }
+            // Built here and then never mutated, so the termination handler
+            // below captures a value rather than a mutable variable.
+            //
+            // `onTermination` runs on whatever thread the consumer stops
+            // iterating on, and a `var` is captured by reference — so anything
+            // that appended to the list after the handler was installed would be
+            // mutating an array while another thread read it, which for an Array
+            // is a crash rather than a stale read. Nothing does that today; this
+            // makes it impossible to start rather than relying on the order two
+            // statements happen to be in.
+            let browsers: [NWBrowser] = mapping.serviceTypes.compactMap { serviceType in
+                guard let transport = mapping.transport(for: serviceType) else { return nil }
                 let params = NWParameters()
                 params.includePeerToPeer = true
                 let browser = NWBrowser(
@@ -131,8 +140,8 @@ public final class BonjourServiceDiscovery: @unchecked Sendable {
                     }
                 }
                 browser.start(queue: queue)
-                browsers.append(browser)
                 PlozzLog.boot("bonjour-discovery: browsing \(serviceType)")
+                return browser
             }
 
             if browsers.isEmpty { continuation.finish(); return }

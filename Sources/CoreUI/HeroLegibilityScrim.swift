@@ -39,6 +39,7 @@ public struct HeroLegibilityScrim: View {
     private let edgePeak: Double
     private let wash: Double
     private let edges: Edges
+    private let sideDarkeningStart: Double
 
     /// - Parameters:
     ///   - tone: Mode-appropriate scrim colour (dark in dark mode, light in light).
@@ -47,16 +48,22 @@ public struct HeroLegibilityScrim: View {
     ///   - wash: Flat opacity applied across the whole image (the subtle overall
     ///     darkening). Defaults to a gentle 6%.
     ///   - edges: Which edges to darken. Defaults to all four.
+    ///   - sideDarkeningStart: How far DOWN the hero the left/right darkening
+    ///     ramps in, as a fraction of height. `0` darkens the full column
+    ///     evenly (the symmetric default). A higher value keeps the upper
+    ///     corners clean and brings the wash in only where content sits.
     public init(
         tone: Color,
         edgePeak: Double,
         wash: Double = 0.06,
-        edges: Edges = .all
+        edges: Edges = .all,
+        sideDarkeningStart: Double = 0
     ) {
         self.tone = tone
         self.edgePeak = edgePeak
         self.wash = wash
         self.edges = edges
+        self.sideDarkeningStart = sideDarkeningStart
     }
 
     public var body: some View {
@@ -69,6 +76,7 @@ public struct HeroLegibilityScrim: View {
                     startsDark: edges.contains(.leading),
                     endsDark: edges.contains(.trailing)
                 )
+                .mask(sideDarkeningMask)
             }
             if edges.contains(.top) || edges.contains(.bottom) {
                 edgeGradient(
@@ -78,6 +86,30 @@ public struct HeroLegibilityScrim: View {
                     endsDark: edges.contains(.bottom)
                 )
             }
+        }
+    }
+
+    /// Ramps the side darkening in vertically, so the upper corners keep the
+    /// artwork's own contrast while the wash still arrives at full strength over
+    /// the title, metadata and buttons lower down. A plain column of darkening
+    /// dimmed the top corner for no legibility gain — nothing is drawn over it.
+    ///
+    /// Opaque (no masking) when `sideDarkeningStart` is 0, so the symmetric
+    /// default is untouched.
+    @ViewBuilder
+    private var sideDarkeningMask: some View {
+        if sideDarkeningStart <= 0 {
+            Color.black
+        } else {
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0), location: 0),
+                    .init(color: .black.opacity(0.35), location: sideDarkeningStart),
+                    .init(color: .black, location: min(1, sideDarkeningStart + 0.28))
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
     }
 

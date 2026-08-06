@@ -1256,16 +1256,32 @@ private struct PlozziOSPullResponsiveHomeBackdrop<Backdrop: View>: View {
         let pullOffset = max(pullDistance - upwardScaleGrowth, 0)
             + (pullDistance > 0 ? 2 : 0)
 
+        // ONE mask over the composited image + scrim, which is what tvOS does
+        // (`.overlay(scrim).mask(dissolveMask)`) and what this app's own iOS
+        // DETAIL hero does ("dissolve the whole stack ... the tvOS approach").
+        //
+        // Masking each layer separately is not the same operation: it fades the
+        // image into the page background FIRST and then lays a separately-faded
+        // scrim on top, so the scrim darkens a surface that is already part
+        // background. The bottom of the hero came out greyer and flatter than
+        // tvOS's, and no amount of re-tuning the gradients could close the gap,
+        // because the compositing - not the curve - was what differed.
         ZStack {
+            // The backdrop's EXTRA travel only. The shared `-pullDistance` is
+            // applied to the masked composite below, so the two still land at
+            // -pullOffset and -pullDistance respectively.
             backdrop(pullScale)
-                .mask { PlozziOSHeroFadeMask() }
                 .scaleEffect(pullScale, anchor: .center)
-                .offset(y: -pullOffset)
+                .offset(y: -(pullOffset - pullDistance))
 
             PlozziOSStationaryHeroScrim(style: style, height: heroHeight)
-                .mask { PlozziOSHeroFadeMask() }
-                .offset(y: -pullDistance)
         }
+        // Masked BEFORE the pull offset, exactly as tvOS masks before its recede
+        // lift. Applied after, the mask sits in the fixed parent space: the hero
+        // slid under a stationary fade, so pulling down exposed the page
+        // background above the image and left a hard unfaded edge below.
+        .mask { PlozziOSHeroFadeMask() }
+        .offset(y: -pullDistance)
     }
 }
 

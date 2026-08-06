@@ -646,23 +646,36 @@ struct PlozziOSHeroScrim: View {
     }
 }
 
+/// The hero's bottom dissolve: opaque keeps the image, clear lets the page
+/// background show through.
+///
+/// This is `HomeHeroBackdrop.easedVerticalFade` from tvOS, stop for stop, with
+/// the same mode-dependent start. The previous curve began dissolving at 0.33
+/// in BOTH modes, which left the image semi-transparent through its whole middle
+/// — in dark mode it blended with the page into a flat grey plateau that then
+/// met the rows at a visible edge, instead of tvOS's solid image melting away
+/// over the last third. The comment claimed it used "the tvOS start point
+/// (~0.33)"; tvOS actually holds full opacity until 0.62 in dark mode.
 struct PlozziOSHeroFadeMask: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Where the melt begins. Light mode starts higher because a light page
+    /// swallows the artwork's edge sooner; dark mode holds the image longer so
+    /// it doesn't wash out against the background.
+    private var meltStart: CGFloat {
+        colorScheme == .dark ? 0.62 : 0.38
+    }
+
     var body: some View {
-        LinearGradient(
+        let start = meltStart
+        let span = max(1 - start, 0.0001)
+        return LinearGradient(
             stops: [
                 .init(color: .black, location: 0),
-                // Begin the dissolve at the tvOS start point (~0.33) and ease it out
-                // over a long, many-stepped tail so opacity approaches zero
-                // asymptotically — no perceptible edge where the hero meets the page
-                // background at the very bottom.
-                .init(color: .black, location: 0.33),
-                .init(color: .black.opacity(0.94), location: 0.48),
-                .init(color: .black.opacity(0.80), location: 0.60),
-                .init(color: .black.opacity(0.60), location: 0.72),
-                .init(color: .black.opacity(0.40), location: 0.82),
-                .init(color: .black.opacity(0.22), location: 0.90),
-                .init(color: .black.opacity(0.10), location: 0.955),
-                .init(color: .black.opacity(0.03), location: 0.985),
+                .init(color: .black, location: start),
+                .init(color: .black.opacity(0.72), location: start + span * 0.32),
+                .init(color: .black.opacity(0.36), location: start + span * 0.60),
+                .init(color: .black.opacity(0.10), location: start + span * 0.83),
                 .init(color: .clear, location: 1)
             ],
             startPoint: .top,
@@ -671,37 +684,37 @@ struct PlozziOSHeroFadeMask: View {
     }
 }
 
-/// A gentle BLACK legibility darkening for the hero (bottom + landscape leading),
-/// designed to sit UNDER the dissolve mask: it deepens the image cleanly behind
-/// the title (rather than washing it grey) and is carried to the page background
-/// by the enclosing dissolve — mirroring the tvOS hero, which keeps the image's
-/// true colours and fades it to transparent instead of painting grey over it.
+/// The hero's legibility darkening, delegated to the SHARED
+/// ``HeroLegibilityScrim`` so iOS and tvOS render the same shape.
+///
+/// It used to hand-roll its own gradient, and the shape had drifted badly: the
+/// bottom darkening ramped in from 34% and reached 0.66, where the shared
+/// vignette stays clear until 58% and only reaches its peak at the very edge.
+/// The image was therefore ~0.4-0.6 darkened through its whole middle, which
+/// over a light poster produced a flat grey plateau that met the rows at a
+/// visible edge instead of melting into them.
+///
+/// Delegating rather than re-tuning is the point: the two platforms had already
+/// drifted twice here (a hardcoded black tone, and this shape), and a shared
+/// component is what stops it happening a third time.
 struct PlozziOSHeroLegibilityScrim: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let style: HeroArtworkStyle
 
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .clear, location: 0.34),
-                    .init(color: .black.opacity(0.20), location: 0.52),
-                    .init(color: .black.opacity(0.44), location: 0.70),
-                    .init(color: .black.opacity(0.60), location: 0.86),
-                    .init(color: .black.opacity(0.66), location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+    private var tone: Color {
+        colorScheme == .dark ? .black : .white
+    }
 
-            if style == .landscape {
-                LinearGradient(
-                    colors: [.black.opacity(0.45), .clear],
-                    startPoint: .leading,
-                    endPoint: .center
-                )
-            }
-        }
+    var body: some View {
+        HeroLegibilityScrim(
+            tone: tone,
+            edgePeak: 0.55,
+            // A portrait hero has no room for a side wash; only the landscape
+            // layout puts the title in a left-hand column.
+            edges: style == .landscape ? [.leading, .bottom] : [.bottom],
+            sideDarkeningStart: 0.34
+        )
     }
 }
 

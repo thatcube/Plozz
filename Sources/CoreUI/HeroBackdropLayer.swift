@@ -142,7 +142,10 @@ public struct HeroBackdropLayer<Video: View>: View {
         HeroLegibilityScrim(
             tone: scrimTone,
             edgePeak: 0.55,
-            edges: [.leading, .bottom]
+            edges: [.leading, .bottom],
+            // Keep the top-left clean: nothing is drawn over it, so darkening it
+            // only flattens the artwork. The wash arrives where the content is.
+            sideDarkeningStart: 0.34
         )
     }
 

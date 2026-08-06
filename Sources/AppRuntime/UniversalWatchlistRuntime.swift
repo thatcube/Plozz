@@ -705,7 +705,13 @@ public extension UniversalWatchlistHost {
         await reconcileUniversalWatchlistIdentity(profileID: profileID)
 
         let union = universalWatchlistUnion
-        let refreshLine = "watchlist.refresh destinations=\(view.bucketsByDestinationID.count) accounts=\(nativeWatchlistAccounts.count) enabled=\(universalWatchlistDestinationIDs.count) reads=\(report.successes.count) entries=\(report.successes.reduce(0) { $0 + $1.entries.count }) failures=\(report.failures.map { "\($0.destinationID.rawValue):\($0.classification)" }) superseded=\(supersededCount) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
+        // Off the startup path entirely: detached so nothing awaits it, and it
+        // only fetches when the cached copy is actually stale. The next launch
+        // reads the fresher mapping from disk instantly.
+        Task.detached(priority: .utility) { [box = universalWatchlistAnimeBridge] in
+            await box.refreshIfNeeded()
+        }
+        let refreshLine = "watchlist.refresh destinations=\(view.bucketsByDestinationID.count) accounts=\(nativeWatchlistAccounts.count) enabled=\(universalWatchlistDestinationIDs.count) reads=\(report.successes.count) entries=\(report.successes.reduce(0) { $0 + $1.entries.count }) failures=\(report.failures.map { "\($0.destinationID.rawValue):\($0.classification)" }) superseded=\(supersededCount) bridge=\(animeBridge.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
         PlozzLog.app.info("Watchlist \(refreshLine)")
         FanoutDiagnostics.emit(refreshLine)
         // Counts only — no titles, ids or server names. `nativeOnly` is the half

@@ -86,6 +86,7 @@ public struct WatchlistUnion: Sendable, Equatable {
         // What each server said it owns, keyed by alias, so an explicit intent
         // that a server ALSO holds still picks up the owned copy.
         var ownedByAlias: [MediaAliasID: MediaSourceRef] = [:]
+        var ownedTitleKeys: Set<String> = []
         for (rawID, bucket) in nativeView.bucketsByDestinationID {
             guard let destinationID = WatchlistDestinationID(rawValue: rawID),
                   enabledDestinationIDs.contains(destinationID) else { continue }
@@ -94,6 +95,12 @@ public struct WatchlistUnion: Sendable, Equatable {
                     ?? entry.aliasID
                 if ownedByAlias[aliasID] == nil {
                     ownedByAlias[aliasID] = entry.ownedSource
+                }
+                if let key = Self.titleKey(
+                    kind: entry.kind,
+                    presentation: entry.presentation
+                ) {
+                    ownedTitleKeys.insert(key)
                 }
             }
         }
@@ -123,6 +130,18 @@ public struct WatchlistUnion: Sendable, Equatable {
             for entry in bucket.entries { native.append((destinationID, entry)) }
         }
         native.sort {
+            // An entry that KNOWS the viewer's own copy wins the dedup below.
+            //
+            // Several destinations can list the same title, and only a media
+            // server can say you own it — a tracker knows what you want to
+            // watch, not what you have. Sorting by destination name alone let
+            // "anilist" beat "mediabrowser…" purely alphabetically, so the
+            // tracker's copy represented the title and the owned copy sitting
+            // right beside it was discarded: a show in the library rendered as
+            // one to go and request.
+            let leftOwned = $0.1.ownedSource != nil
+            let rightOwned = $1.1.ownedSource != nil
+            if leftOwned != rightOwned { return leftOwned }
             if $0.0.rawValue != $1.0.rawValue {
                 return $0.0.rawValue < $1.0.rawValue
             }
@@ -134,6 +153,23 @@ public struct WatchlistUnion: Sendable, Equatable {
             let aliasID = aliasSnapshot.resolvedAliasID(for: entry.aliasID)
                 ?? snapshot.resolvedAliasID(for: entry.aliasID)
             guard seen.insert(aliasID).inserted else { continue }
+            // The same title can reach here under TWO alias ids — one minted
+            // from Plex's evidence, one from Jellyfin's — when the ledger hasn't
+            // merged them yet. Deduping by alias alone then shows the title
+            // twice: once as the copy you own, and once as one to go and
+            // request.
+            //
+            // Deliberately narrow: this only ever suppresses a duplicate that
+            // does NOT know an owned copy, when one that DOES is already on
+            // screen. It cannot hide a title (something is always shown for it),
+            // and it cannot merge two genuinely different works into one entry —
+            // the worst it can do to a title/year collision is drop a second
+            // "not in your library" row while the owned one stays.
+            if entry.ownedSource == nil,
+               let key = Self.titleKey(kind: entry.kind, presentation: entry.presentation),
+               ownedTitleKeys.contains(key) {
+                continue
+            }
             // A removal the viewer made here outranks a server that still lists
             // the title. Without this, deleting something that lives on Plex
             // would simply come back on the next read.
@@ -154,6 +190,19 @@ public struct WatchlistUnion: Sendable, Equatable {
         orderedEntries = entries
         activeAliasIDs = Set(entries.map(\.aliasID))
         hasStaleDestinations = stale
+    }
+
+    /// A conservative "same title" key for suppressing an unowned duplicate.
+    /// `nil` when there isn't enough to be sure — no title, or no year — so a
+    /// sparse entry is never suppressed on a guess.
+    static func titleKey(
+        kind: MediaItemKind,
+        presentation: MediaAliasPresentation?
+    ) -> String? {
+        guard let presentation, let year = presentation.year else { return nil }
+        let title = MediaItemIdentity.normalizedTitle(presentation.title)
+        guard !title.isEmpty else { return nil }
+        return "\(kind.rawValue)|\(title)|\(year)"
     }
 
     public func contains(aliasID: MediaAliasID) -> Bool {

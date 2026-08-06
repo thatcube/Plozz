@@ -354,8 +354,9 @@ public extension UniversalWatchlistHost {
         // whether the index could find a copy: an entry can resolve to an owned
         // copy and still be rendered from the discovery row it arrived as.
         // `playable` is the count that should match the library.
+        let union = universalWatchlistUnion
         FanoutDiagnostics.emit(
-            "watchlist.render total=\(resolved.count) playable=\(resolved.filter(\.locallyValidatedPlayableSource).count) liveCandidate=\(current.count)"
+            "watchlist.render total=\(resolved.count) playable=\(resolved.filter(\.locallyValidatedPlayableSource).count) serverOwned=\(union.orderedEntries.filter { $0.ownedSource != nil }.count) liveCandidate=\(current.count)"
         )
         return resolved
     }
@@ -608,6 +609,9 @@ public extension UniversalWatchlistHost {
             view.applySuccess(
                 destinationID: read.destinationID,
                 entries: entries
+            )
+            FanoutDiagnostics.emit(
+                "watchlist.owned dest=\(read.destinationID.rawValue) entries=\(entries.count) resolved=\(entries.filter { $0.ownedSource != nil }.count) hadResolver=\(resolver != nil)"
             )
             for (aliasID, observation) in observations
             where observation == .nativeAddition {

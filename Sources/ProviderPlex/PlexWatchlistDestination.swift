@@ -113,9 +113,22 @@ public struct PlexWatchlistDestination: WatchlistLibraryResolving {
     public func resolveLibraryCopy(
         for entry: WatchlistDestinationEntry
     ) async -> MediaSourceRef? {
-        let guids = entry.externalIDs.map {
-            "\($0.namespace.rawValue)://\($0.value)"
-        }
+        // Plex's own id already carries its scheme (`plex://movie/…`), so
+        // prefixing it again produced `plex://plex://movie/…` and matched
+        // nothing. It is also the id most likely to match, because a library
+        // item and a watchlist entry for the same title share it exactly —
+        // whereas `/library/all?guid=` matching an EXTERNAL id depends on the
+        // server's agent, which is why it is tried after.
+        var guids = entry.externalIDs
+            .filter { $0.namespace == .plex }
+            .map(\.value)
+        guids.append(contentsOf: entry.externalIDs
+            .filter { $0.namespace != .plex && $0.namespace != .trakt }
+            .map { value -> String in
+                value.value.contains("://")
+                    ? value.value
+                    : "\(value.namespace.rawValue)://\(value.value)"
+            })
         guard let item = await provider.libraryItem(matchingAnyOf: guids) else {
             return nil
         }

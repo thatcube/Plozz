@@ -45,8 +45,18 @@ enum HomeRuntimeScope {
     /// the subtree, and the cached `HomeViewModel` went on serving the previous
     /// profile's content. The watchlist row was the visible symptom; every
     /// curated row had the same problem.
-    static func homeScopeKey(profileID: String, accounts: [Account]) -> String {
-        "\(profileID)|" + accountScopeKey(accounts)
+    /// - Parameter plexIdentityGeneration: bumps whenever the effective Plex
+    ///   identity changes. Switching "watching as" swaps the token behind the
+    ///   SAME account, so neither the profile nor the account list moves and the
+    ///   key was unchanged — Home and Search kept serving the previous user's
+    ///   rows until the viewer switched profiles away and back, which was the
+    ///   only thing that did move it.
+    static func homeScopeKey(
+        profileID: String,
+        accounts: [Account],
+        plexIdentityGeneration: Int = 0
+    ) -> String {
+        "\(profileID)|\(plexIdentityGeneration)|" + accountScopeKey(accounts)
     }
 }
 
@@ -328,6 +338,7 @@ public struct RootView: View {
                         activeAccountID: appState.accountsProviders.primaryActiveAccount?.id,
                         profiles: appState.profilesModel.profilesByRecency,
                         activeProfile: appState.profilesModel.activeProfile,
+                        plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration,
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
                         homeRuntime: HomeTabRuntime(
                             homeViewModel: homeViewModelBox,

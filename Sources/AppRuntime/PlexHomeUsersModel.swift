@@ -137,6 +137,7 @@ public final class PlexHomeUsersModel {
         plexAccountIdentityGenerations[accountID, default: 0] += 1
         plexIdentityGeneration += 1
         PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=\(site) acct=\(accountID)")
+        FanoutDiagnostics.emit("plex.identity bump gen=\(plexIdentityGeneration) site=\(site)")
         onIdentityChanged()
     }
     /// Runtime revision for the effective Plex Home-user credential. Owner

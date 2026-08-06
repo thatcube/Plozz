@@ -170,6 +170,10 @@ struct MainTabView: View {
     let activeAccountID: String?
     let profiles: [Profile]
     let activeProfile: Profile
+    /// Bumps when the effective Plex identity changes. Part of `homeScopeKey`,
+    /// because switching "watching as" changes whose rows these are without
+    /// changing the profile or the account list.
+    let plexIdentityGeneration: Int
     let askProfileOnStartup: Bool
     /// Session-scoped handles for the Home tab, assembled by `RootView`. Stored
     /// rather than computed here on purpose: this view's body is a `TabView`
@@ -310,7 +314,8 @@ struct MainTabView: View {
     private var homeScopeKey: String {
         HomeRuntimeScope.homeScopeKey(
             profileID: activeProfile.id,
-            accounts: accounts.map(\.account)
+            accounts: accounts.map(\.account),
+            plexIdentityGeneration: plexIdentityGeneration
         )
     }
 

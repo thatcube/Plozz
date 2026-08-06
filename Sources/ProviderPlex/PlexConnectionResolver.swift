@@ -156,7 +156,21 @@ public final class PlexConnectionResolver: Sendable {
                 return .ready(only)
             }
             if let inFlight = state.inFlight { return .join(inFlight) }
-            let task = Task<URL, Never> { await self.performResolve() }
+            // The task clears `inFlight` itself, BEFORE it publishes its result.
+            //
+            // Clearing it in the `.start` branch below instead meant only the
+            // starter cleared it, and only after being woken — so a joiner that
+            // resumed first could report the resolved URL as failed and
+            // immediately re-enter `resolved()`, find the completed task still
+            // stored, and be handed the very URL it had just reported dead.
+            // `PlexClient` calls `reportFailure` and `resolved()` back to back
+            // on exactly that path, so self-healing onto a live connection
+            // stopped happening: the retry matched the address that had failed.
+            let task = Task<URL, Never> {
+                let url = await self.performResolve()
+                self.state.withLock { $0.inFlight = nil }
+                return url
+            }
             state.inFlight = task
             return .start(task)
         }
@@ -167,9 +181,7 @@ public final class PlexConnectionResolver: Sendable {
         case let .join(task):
             return await task.value
         case let .start(task):
-            let url = await task.value
-            state.withLock { $0.inFlight = nil }
-            return url
+            return await task.value
         }
     }
 

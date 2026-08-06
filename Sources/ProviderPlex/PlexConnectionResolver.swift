@@ -90,8 +90,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     /// actually reachable, whereas the seed is by definition an address that worked
     /// last launch. The live probe still corrects both the moment it settles.
     public var current: URL {
-        lock.lock(); defer { lock.unlock() }
-        return cached ?? reachableSeed ?? candidates[0]
+        lock.withLock { cached ?? reachableSeed ?? candidates[0] }
     }
 
     /// True when the resolver has a connection whose locality can be trusted: a
@@ -109,9 +108,10 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     /// a confirmed-local candidate, so a genuinely reachable remote twin can take
     /// over playback instead of the selector clinging to the now-dead LAN box.
     public var hasConfirmedReachableConnection: Bool {
-        lock.lock(); defer { lock.unlock() }
-        if cached != nil { return true }
-        return !reachabilityInvalidated && reachableSeed != nil
+        lock.withLock {
+            if cached != nil { return true }
+            return !reachabilityInvalidated && reachableSeed != nil
+        }
     }
 
     /// The base URL to use for the next request. Probes for a reachable
@@ -151,10 +151,11 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     /// synchronous locality read reports `.unknown` until a fresh probe confirms a
     /// live connection (a dead server must not keep winning as `.local`).
     public func reportFailure(_ url: URL) {
-        lock.lock(); defer { lock.unlock() }
-        if cached == url {
-            cached = nil
-            reachabilityInvalidated = true
+        lock.withLock {
+            if cached == url {
+                cached = nil
+                reachabilityInvalidated = true
+            }
         }
     }
 
@@ -264,20 +265,21 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     }
 
     private func currentCandidates() -> [URL] {
-        lock.lock(); defer { lock.unlock() }
-        return candidates
+        lock.withLock { candidates }
     }
 
     private func replaceCandidates(_ urls: [URL]) {
-        lock.lock(); defer { lock.unlock() }
-        candidates = urls
+        lock.withLock { candidates = urls }
     }
 
     private func store(_ url: URL) {
-        lock.lock()
-        cached = url
-        reachabilityInvalidated = false
-        lock.unlock()
+        // The callback stays OUTSIDE the critical section, as it was: invoking
+        // it while holding the lock hands an unknown caller the chance to
+        // re-enter this resolver and deadlock.
+        lock.withLock {
+            cached = url
+            reachabilityInvalidated = false
+        }
         onReachable?(url)
     }
 

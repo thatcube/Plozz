@@ -342,9 +342,19 @@ public struct RootView: View {
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
                         homeRuntime: HomeTabRuntime(
                             homeViewModel: homeViewModelBox,
+                            // The key that governs the Home VIEW MODEL, which
+                            // lives here rather than in the tab tree so a
+                            // TabView re-host can't discard it mid-load. That
+                            // also means re-identifying the tab subtree does not
+                            // rebuild it: without the identity generation here,
+                            // switching "watching as" rebuilt the views and
+                            // handed them the same model, still holding rows
+                            // fetched as the previous user.
                             scopeKey: HomeRuntimeScope.homeScopeKey(
                                 profileID: appState.profilesModel.activeProfileID,
-                                accounts: accounts.map(\.account)
+                                accounts: accounts.map(\.account),
+                                plexIdentityGeneration:
+                                    appState.plexHomeUsers.plexIdentityGeneration
                             ),
                             pendingPlay: appState.pendingPlay
                         ),

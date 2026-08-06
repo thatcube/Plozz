@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import CoreModels
 
 /// Composite identity for a per-source circuit breaker: the ``MetadataSource`` plus an
@@ -33,42 +34,46 @@ public struct ProviderBreakerKey: Hashable, Sendable {
 /// Reference vending is synchronous (a plain lock), even though the breaker's own
 /// methods are `async` — so it slots into the synchronous provider-wrapping map without
 /// forcing that path to become async.
-public final class ProviderBreakerRegistry: @unchecked Sendable {
-    private let lock = NSLock()
-    private var breakers: [ProviderBreakerKey: ProviderCircuitBreaker]
+public final class ProviderBreakerRegistry: Sendable {
+    /// Held inside the mutex so it cannot be reached without the lock. See
+    /// `PlexConnectionResolver` for the reasoning.
+    private let breakers: Mutex<[ProviderBreakerKey: ProviderCircuitBreaker]>
     private let makeBreaker: @Sendable () -> ProviderCircuitBreaker
 
     public init(
         seed: [ProviderBreakerKey: ProviderCircuitBreaker] = [:],
         makeBreaker: @escaping @Sendable () -> ProviderCircuitBreaker = { ProviderCircuitBreaker() }
     ) {
-        self.breakers = seed
+        self.breakers = Mutex(seed)
         self.makeBreaker = makeBreaker
     }
 
     /// The stable breaker for `key`, creating and caching one on first use.
     public func breaker(for key: ProviderBreakerKey) -> ProviderCircuitBreaker {
-        lock.lock(); defer { lock.unlock() }
-        if let existing = breakers[key] { return existing }
-        let created = makeBreaker()
-        breakers[key] = created
-        return created
+        breakers.withLock { breakers in
+            if let existing = breakers[key] { return existing }
+            let created = makeBreaker()
+            breakers[key] = created
+            return created
+        }
     }
 
     /// The already-registered breaker for `key`, or `nil` if none has been vended —
     /// used to reset a credential's breaker on key removal without materializing one.
     public func existingBreaker(for key: ProviderBreakerKey) -> ProviderCircuitBreaker? {
-        lock.lock(); defer { lock.unlock() }
-        return breakers[key]
+        breakers.withLock { $0[key] }
     }
 
     /// Resets every registered breaker scoped to `credentialID` — used when a user
     /// replaces or removes their BYOK key so its bad-key auth trip doesn't linger the
     /// full auth cooldown before the (new/removed) credential is retried.
     public func resetBreakers(credentialID: String) async {
-        lock.lock()
-        let matching = breakers.filter { $0.key.credentialID == credentialID }.map(\.value)
-        lock.unlock()
+        // Selected under the lock, reset outside it: `reset()` suspends, and
+        // resetting an unbounded number of breakers is not work to do while
+        // holding one.
+        let matching = breakers.withLock {
+            $0.filter { $0.key.credentialID == credentialID }.map(\.value)
+        }
         for breaker in matching { await breaker.reset() }
     }
 }

@@ -18,17 +18,6 @@ public enum HomeContentNotice: Equatable, Sendable {
     /// Servers are on, but every library inside them is hidden from Home.
     case allLibrariesHidden
 
-    var title: LocalizedStringResource {
-        switch self {
-        case .noServersConfigured:
-            return "No servers yet"
-        case .allServersSwitchedOff:
-            return "No servers are switched on"
-        case .allLibrariesHidden:
-            return "Every library is hidden"
-        }
-    }
-
     var message: LocalizedStringResource {
         switch self {
         case .noServersConfigured:
@@ -65,17 +54,10 @@ struct HomeContentNoticeView: View {
     let onReload: () -> Void
 
     var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "rectangle.on.rectangle.slash")
-                .font(.system(size: 56))
-                .plozzForeground(.secondary)
-            Text(notice.title)
-                .font(.title2)
-            Text(notice.message)
-                .font(.title3)
-                .plozzForeground(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 22) {
+            // The same sad-Plozz empty state search and empty libraries use, so
+            // every legitimate dead end in the app looks like the same app.
+            PlozzEmptyStateView(notice.message)
             Button("Reload", action: onReload)
                 .buttonStyle(SettingsFocusButtonStyle())
         }

@@ -61,12 +61,21 @@ public enum WatchlistPresentationResolver {
                    candidate.availability == nil {
                     candidate.availability = .unknown
                 }
+                // Falls back to the MARKED candidate, not the original. A Plex
+                // watchlist entry is a Discover row carrying no availability at
+                // all, and with none the UI reads it as an ordinary library
+                // title: it offered no way to request the title, and opening it
+                // asked the server for the children of an id the server has
+                // never heard of — a page with no play button, no episodes and
+                // nothing to do. Saying "unknown" is the honest answer when no
+                // owned copy was found, and it is what makes the not-in-library
+                // treatment apply.
                 var item = indexedSources.flatMap {
                     candidate.retargetedToOwnedLibraryCopy(
                         indexedSources: $0,
                         capabilities: capabilities
                     )
-                } ?? item
+                } ?? candidate
                 item.watchlistAliasID = aliasID
                 return WatchlistPresentationEntry(aliasID: aliasID, item: item)
             }

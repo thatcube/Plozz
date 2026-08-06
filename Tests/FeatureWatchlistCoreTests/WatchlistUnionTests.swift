@@ -246,6 +246,56 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
         XCTAssertNil(item.availability)
     }
 
+    /// Before the index has warmed there IS no owned copy to find, and the
+    /// entry must say so.
+    ///
+    /// A Plex watchlist entry is a Discover row carrying no availability at all.
+    /// Handing that back unmarked made the UI read it as an ordinary library
+    /// title: no way to request it, and opening it asked the server for the
+    /// children of an id it has never heard of — a page with no play button, no
+    /// episodes, and nothing to do.
+    func testUnresolvedCandidateIsMarkedAsDiscoveryNotLibrary() throws {
+        let aliasID = MediaAliasID()
+        let union = WatchlistUnion(
+            snapshot: WatchlistSnapshot(intents: [
+                WatchlistIntent(
+                    aliasID: aliasID,
+                    kind: .series,
+                    desiredState: .present,
+                    rank: 0,
+                    origin: .local,
+                    presentation: MediaAliasPresentation(title: "Your Honor", year: 2020)
+                )!
+            ]),
+            nativeView: .empty,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: []
+        )
+        let discovery = MediaItem(
+            id: "discover-series",
+            title: "Your Honor",
+            kind: .series,
+            providerIDs: ["Imdb": "tt9174724"],
+            locallyValidatedPlayableSource: false
+        )
+
+        // Nothing indexed yet — the scan hasn't finished.
+        let resolved = WatchlistPresentationResolver.resolve(
+            union: union,
+            aliasSnapshot: .empty,
+            currentItemsByAliasID: [aliasID: discovery],
+            indexedSources: { _ in [] }
+        )
+
+        let item = try XCTUnwrap(resolved.first?.item)
+        XCTAssertFalse(item.locallyValidatedPlayableSource)
+        XCTAssertEqual(
+            item.availability,
+            .unknown,
+            "An entry with no owned copy must present as a discovery row, not as a library title with nothing to play"
+        )
+    }
+
     /// The upgrade must never invent a match. Retargeting on title+year alone
     /// wouldn't just mislabel a card, it would route playback to another work.
     func testCandidateWithoutAStrongIDIsLeftAlone() throws {

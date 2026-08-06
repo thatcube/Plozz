@@ -245,8 +245,20 @@ public struct RootView: View {
                     ProfileSelectionView(appState: appState, canCancel: appState.profileFlow.isProfileSelectionCancelable)
                         .transition(.opacity)
                 } else {
+                    // Rendered even when `homeAccounts` is EMPTY. Switching the
+                    // last server off used to skip this whole branch, so the
+                    // window held nothing: a blank screen with nothing
+                    // focusable, which the remote could not escape and which
+                    // persisted across relaunch because the choice is saved per
+                    // profile. Settings was unreachable, so the setting that
+                    // caused it could not be undone from inside the app.
+                    //
+                    // Watching nothing is a legitimate state, and the shell is
+                    // what makes it recoverable: the tab bar stays, Home shows
+                    // its own empty state, and Settings - which lists every
+                    // household server regardless of what is switched on - is
+                    // still one press away.
                     let accounts = appState.accountsProviders.homeAccounts
-                    if !accounts.isEmpty {
                     let detailCache = detailCacheFactory.cache(
                         for: DetailSnapshotCacheScope(
                             profileID: appState.profilesModel.activeProfileID,
@@ -414,7 +426,6 @@ public struct RootView: View {
                     )
                     .id(rootScopeIdentity)
                     .transition(.opacity)
-                    }
                     }
                 }
                 }

@@ -2,8 +2,8 @@
 import CoreUI
 import SwiftUI
 
-/// Shown when Home has nothing to draw — in practice, when every library has
-/// been hidden.
+/// Shown when Home has nothing to draw — when every library has been hidden, or
+/// every server switched off.
 ///
 /// This exists for FOCUS, not decoration. An empty Home renders an empty scroll
 /// view, and on tvOS a screen with no focusable view strands the viewer: focus
@@ -22,8 +22,8 @@ struct HomeNothingVisibleView: View {
             Text("Nothing to show here")
                 .font(.title2)
             Text(
-                "Every library is hidden from Home. Turn one back on in Settings › Libraries.",
-                comment: "Explains that Home is empty because the viewer hid all libraries, and where to undo it."
+                "Nothing is switched on for this profile. Turn a server or library back on in Settings › Libraries.",
+                comment: "Explains that Home is empty because the viewer switched off every server or library, and where to undo it."
             )
             .font(.title3)
             .plozzForeground(.secondary)

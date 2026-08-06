@@ -17,6 +17,18 @@ public enum LoadState<Value: Sendable>: Sendable {
         return nil
     }
 
+    /// A short, value-free name for telemetry. Deliberately omits the payload:
+    /// a diagnostic line must never print library or title names.
+    public var diagnosticName: String {
+        switch self {
+        case .idle: return "idle"
+        case .loading: return "loading"
+        case .loaded: return "loaded"
+        case .empty: return "empty"
+        case .failed: return "failed"
+        }
+    }
+
     public var isLoading: Bool {
         if case .loading = self { return true }
         return false

@@ -417,6 +417,7 @@ struct MainTabView: View {
             let _ = PlozzBodyRate.tick("homeTabContent")
             return HomeTab(
                 accounts: accounts,
+                configuredServerCount: displayAccounts.count,
                 detailSnapshotCache: detailSnapshotCache,
                 authenticatedHTTPResolver: authenticatedHTTPResolver,
                 seer: seer,

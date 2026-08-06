@@ -86,6 +86,10 @@ public struct HomeView: View {
     private let onSelectItem: (MediaItem) -> Void
     private let onPlayItem: (MediaItem) -> Void
     private let onSelectLibrary: (MediaLibrary) -> Void
+    /// Servers added to the device, and how many this profile has switched on.
+    /// Both are needed to tell "no servers yet" from "all of them turned off".
+    private let configuredServerCount: Int
+    private let enabledServerCount: Int
 
     /// Per-profile hero configuration. `nil` (or an inactive config) leaves Home
     /// rendering its classic rows unchanged.
@@ -210,7 +214,9 @@ public struct HomeView: View {
         navigationStyle: NavigationStyle = .default,
         onSelectItem: @escaping (MediaItem) -> Void,
         onPlayItem: @escaping (MediaItem) -> Void,
-        onSelectLibrary: @escaping (MediaLibrary) -> Void
+        onSelectLibrary: @escaping (MediaLibrary) -> Void,
+        configuredServerCount: Int = 1,
+        enabledServerCount: Int = 1
     ) {
         _viewModel = State(initialValue: viewModel)
         self.visibility = visibility
@@ -247,6 +253,8 @@ public struct HomeView: View {
         self.onSelectItem = onSelectItem
         self.onPlayItem = onPlayItem
         self.onSelectLibrary = onSelectLibrary
+        self.configuredServerCount = configuredServerCount
+        self.enabledServerCount = enabledServerCount
         if !heroRuntime.hasHydratedCache {
             heroRuntime.hasHydratedCache = true
             if let settings = heroSettings?.settings,
@@ -430,16 +438,22 @@ public struct HomeView: View {
                                 .accessibilityLabel("Loading featured content")
                         }
                         LazyVStack(alignment: .leading, spacing: metrics.rowSpacing) {
-                            // Hiding every library filters every row away, and a
-                            // Home with nothing focusable TRAPS the viewer: tvOS
-                            // focus has nowhere to land, so the remote stops
-                            // responding entirely and the tab bar — the only route
-                            // back to Settings to undo it — can't be reached. The
-                            // screen reads as a frozen blank (the app is fine; it
-                            // is just an empty scroll view over the app
-                            // background). Always keep one focusable thing here.
-                            if !heroLayoutActive, rows.allSatisfy(\.isEmptyOnHome) {
-                                HomeNothingVisibleView(
+                            // Shown ABOVE the rows, not instead of them. A
+                            // watchlist is durable and deliberately
+                            // server-independent, so titles saved earlier keep
+                            // appearing after every server is switched off — which
+                            // makes the silence around them more confusing, not
+                            // less. The notice names the setting responsible.
+                            //
+                            // It is also focusable, which is what keeps the screen
+                            // escapable: with everything hidden Home can otherwise
+                            // have nothing to focus at all, and on tvOS that
+                            // strands the viewer — focus has nowhere to land, the
+                            // remote stops responding, and the tab bar back to
+                            // Settings can't be reached.
+                            if let notice = contentNotice {
+                                HomeContentNoticeView(
+                                    notice: notice,
                                     onReload: { Task { await viewModel.load() } }
                                 )
                             }
@@ -634,6 +648,19 @@ public struct HomeView: View {
                 perfSampler.stop()
             }
         }
+    }
+
+    /// Why Home is sparse, when a SETTING is the reason rather than an empty
+    /// library. `nil` when there is nothing to explain.
+    ///
+    /// The two "nothing is on" cases are told apart deliberately: a viewer who
+    /// has never added a server needs a different instruction from one who
+    /// switched their servers off, and offering the wrong one sends them looking
+    /// in the wrong place.
+    private var contentNotice: HomeContentNotice? {
+        if configuredServerCount == 0 { return .noServersConfigured }
+        if enabledServerCount == 0 { return .allServersSwitchedOff }
+        return nil
     }
 
     private var shouldRefreshAsyncWatchHistory: Bool {

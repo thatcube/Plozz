@@ -32,6 +32,9 @@ struct HomeTab: View {
     @Environment(\.locale) private var locale
     @Environment(\.mediaItemActionHandler) private var mediaItemActionHandler
     let accounts: [ResolvedAccount]
+    /// Every server added to the device, regardless of what this profile has
+    /// switched on. Home needs it to tell "no servers yet" from "all off".
+    let configuredServerCount: Int
     /// Detail-snapshot cache scoped to the active content identity, threaded from
     /// `MainTabView` so revisit paints never cross a profile/account/credential.
     let detailSnapshotCache: DetailSnapshotCache
@@ -255,7 +258,9 @@ struct HomeTab: View {
                 onPlayItem: { requestPlay($0) },
                 onSelectLibrary: { library in
                     path.append(library)
-                }
+                },
+                configuredServerCount: configuredServerCount,
+                enabledServerCount: accounts.count
             )
             .navigationDestination(for: MediaLibrary.self) { library in
                 let browse = resolveLibraryBrowse(for: library, in: accounts, identitySources: identitySources)

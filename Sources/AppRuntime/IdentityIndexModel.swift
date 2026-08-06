@@ -561,13 +561,5 @@ public final class IdentityIndexModel {
         didRestorePersistedIndex = false
         identitySnapshot = .empty
         identitySnapshotStore.update(.empty)
-        // Flushing the index cancels the warm that was filling it, and nothing
-        // else asks again: the triggers are `.task(id: accounts)`, which does
-        // not re-fire when the account set is unchanged. So a reset — a profile
-        // becoming active, which happens at launch — left the index empty and
-        // permanently unscanned, and every title in the library resolved to no
-        // owned copy. Whoever empties it owns refilling it.
-        FanoutDiagnostics.emit("index.reset — rewarming")
-        warmIdentityIndex(force: true)
     }
 }

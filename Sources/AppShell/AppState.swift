@@ -757,7 +757,11 @@ public final class AppState {
     public private(set) lazy var plexHomeUsers: PlexHomeUsersModel = PlexHomeUsersModel(
         accountsProviders: accountsProviders,
         profilesModel: profilesModel,
-        switchProfile: { [weak self] id in self?.profileFlow.switchProfile(to: id) }
+        switchProfile: { [weak self] id in self?.profileFlow.switchProfile(to: id) },
+        // Watching as someone else changes whose library, watch state and
+        // watchlist this is — but neither the profile nor the account set moves,
+        // so nothing else asks anything to reload.
+        onIdentityChanged: { [weak self] in self?.refreshForPlexIdentityChange() }
     )
 
     /// The profile-flow + household facet — owns the launch-picker state and the
@@ -2305,15 +2309,31 @@ public final class AppState {
     /// `.some(nil)` is a real value — the default profile uses a `nil` namespace.
     @ObservationIgnored private var trackerScopedNamespace: String??
 
-    /// The profile the identity index was last flushed for. See
-    /// `updateTraktForActiveProfile()` — re-scoping trackers to the SAME profile
-    /// must not throw the library index away.
-    @ObservationIgnored private var indexScopedNamespace: String??
+    /// The profile AND Plex identity the index was last flushed for. See
+    /// `updateTraktForActiveProfile()` — re-scoping to the SAME viewer must not
+    /// throw the library index away, but switching Plex user must.
+    @ObservationIgnored private var indexScopeKey: String?
+
+    /// The Plex identity the trackers were last scoped for, so switching
+    /// "watching as" re-scopes even though the profile hasn't changed.
+    @ObservationIgnored private var trackerScopedIdentityGeneration: Int?
 
     /// See `UniversalWatchlistHost.ensureTrackersScopedToActiveProfile()`.
     public func ensureTrackersScopedToActiveProfile() async {
         let ns = profilesModel.activeNamespace
-        if let scoped = trackerScopedNamespace, scoped == ns { return }
+        // Scoped by the Plex identity as well as the profile. Switching
+        // "watching as" changes who the app is reading for without changing the
+        // profile, so a namespace-only check reported "already scoped" and
+        // returned — leaving Home, Continue Watching and the watchlist showing
+        // the PREVIOUS user's world until the viewer switched profiles away and
+        // back, which is the only thing that moved the namespace.
+        let generation = plexHomeUsers.plexIdentityGeneration
+        if let scoped = trackerScopedNamespace,
+           scoped == ns,
+           trackerScopedIdentityGeneration == generation {
+            return
+        }
+        trackerScopedIdentityGeneration = generation
         await updateTraktForActiveProfile()
     }
 
@@ -2321,18 +2341,37 @@ public final class AppState {
         let ns = profilesModel.activeNamespace
         trackerProfileGeneration &+= 1
         let generation = trackerProfileGeneration
-        // Only a real profile CHANGE invalidates the library index. This runs on
-        // every profile-flow event and on every watchlist prepare, and flushing
-        // the index cancels the library scan that was filling it — so re-scoping
-        // trackers to the profile that is already active destroyed the scan and
-        // started it over, indefinitely. The scan takes minutes; the events
-        // arrive far more often than that, so it never once finished, and every
-        // title in the library kept resolving to no owned copy.
+        // Only a real change of WHO IS WATCHING invalidates the library index.
+        // This runs on every profile-flow event and on every watchlist prepare,
+        // and flushing the index cancels the library scan that was filling it —
+        // so re-scoping trackers to the identity that is already active
+        // destroyed the scan and started it over, indefinitely. The scan takes
+        // minutes; the events arrive far more often than that, so it never once
+        // finished, and every title in the library kept resolving to no owned
+        // copy.
+        //
+        // Keyed by the profile AND the Plex identity, because switching "watching
+        // as" changes which library and watch state the index should hold
+        // WITHOUT changing the profile — gating on the profile alone left Home
+        // and the watchlist showing the previous user's world until the viewer
+        // switched profiles away and back. `plexIdentityGeneration` bumps on
+        // exactly that event, which is why the watchlist reconciler is keyed by
+        // it too.
         //
         // Tracker re-scoping itself is cheap and idempotent, so it still runs
         // unconditionally below; it is only the index flush that is gated.
-        if indexScopedNamespace != .some(ns) {
-            indexScopedNamespace = .some(ns)
+        let indexScope = "\(ns ?? "")#\(plexHomeUsers.plexIdentityGeneration)"
+        let viewerChanged = indexScopeKey != indexScope
+        if viewerChanged {
+            indexScopeKey = indexScope
+            // Emptying the index is only half of it. `reset()` is deliberately
+            // pure — it must leave the snapshot empty so an in-flight scan from
+            // the PREVIOUS viewer can't repopulate it — which means nothing
+            // refills it unless the caller asks. The usual trigger
+            // (`.task(id: accounts)`) doesn't re-fire when the account set is
+            // unchanged, and switching Plex user doesn't change it, so without
+            // this the index stayed empty until something else happened to move
+            // the accounts.
             identityIndex.reset()
         }
         guard generation == trackerProfileGeneration else { return }
@@ -2349,6 +2388,29 @@ public final class AppState {
         await lastfmService.setActiveProfile(namespace: ns)
         guard generation == trackerProfileGeneration else { return }
         trackerScopedNamespace = .some(ns)
+        // Refill what the reset emptied, now that the trackers are actually
+        // scoped to this viewer. Last, not inline with the reset: an index warmed
+        // before the re-scope finished would be built for whoever was watching a
+        // moment ago.
+        if viewerChanged { identityIndex.warmIdentityIndex(force: true) }
+    }
+
+    /// Re-reads everything scoped to the Plex identity after "watching as"
+    /// changes.
+    ///
+    /// The token override is installed synchronously, so the providers already
+    /// answer as the new user; what was missing was anyone asking them again.
+    /// Invalidating the account caches is what makes Home and Continue Watching
+    /// re-aggregate, and the watchlist prepare re-reads the native list and
+    /// rebuilds its reconciler against the new identity.
+    private func refreshForPlexIdentityChange() {
+        // Rebuilds the providers against the new token, which is what makes Home
+        // and Continue Watching re-aggregate as the person now watching.
+        accountsProviders.reloadAccounts()
+        Task { [weak self] in
+            await self?.ensureTrackersScopedToActiveProfile()
+            await self?.prepareUniversalWatchlist()
+        }
     }
 
     private func apply(_ event: SessionEvent) {

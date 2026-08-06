@@ -137,6 +137,7 @@ public final class PlexHomeUsersModel {
         plexAccountIdentityGenerations[accountID, default: 0] += 1
         plexIdentityGeneration += 1
         PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=\(site) acct=\(accountID)")
+        onIdentityChanged()
     }
     /// Runtime revision for the effective Plex Home-user credential. Owner
     /// credentials continue to use the account's persisted revision.
@@ -198,13 +199,27 @@ public final class PlexHomeUsersModel {
         accountsProviders: AccountsProvidersModel,
         profilesModel: ProfilesModel,
         plexHomeUserTokenCache: PlexHomeUserTokenCache = .makeDefault(),
-        switchProfile: @escaping @MainActor (String) -> Void
+        switchProfile: @escaping @MainActor (String) -> Void,
+        onIdentityChanged: @escaping @MainActor () -> Void = {}
     ) {
         self.accountsProviders = accountsProviders
         self.profilesModel = profilesModel
         self.plexHomeUserTokenCache = plexHomeUserTokenCache
         self.switchProfile = switchProfile
+        self.onIdentityChanged = onIdentityChanged
     }
+
+    /// Called after the effective Plex identity changes.
+    ///
+    /// Switching "watching as" changes whose library, watch state and watchlist
+    /// the app should be showing — but it changes neither the profile nor the
+    /// account set, so none of the usual refresh triggers fire. Nothing observed
+    /// `plexIdentityGeneration` either, so Home, Continue Watching and the
+    /// watchlist all went on showing the previous user's world until the viewer
+    /// switched profiles away and back, which was the only thing that moved the
+    /// namespace. Announcing it is the fix.
+    @ObservationIgnored
+    private let onIdentityChanged: @MainActor () -> Void
 
     // MARK: Token / credential resolution (the AccountsProviders hub seams)
 

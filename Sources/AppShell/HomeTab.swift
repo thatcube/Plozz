@@ -620,15 +620,21 @@ struct HomeTab: View {
 
     private func requestPlay(_ item: MediaItem) {
         let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
-        // A whole series can't be direct-played (its container has no media, so
-        // `playbackInfo` for a series ratingKey returns notFound). Resolve its
+        // A series OR season can't be direct-played (the container has no media,
+        // so `playbackInfo` for its ratingKey returns notFound). Resolve the
         // next-up / resume EPISODE and play that — matching Apple TV's hero Play.
         // If we can't resolve an episode (e.g. the show isn't really in the library
-        // or the fetch fails), fall back to opening the show's detail page.
-        if target.kind == .series {
+        // or the fetch fails), fall back to opening the detail page.
+        if target.kind.needsPlaybackTargetResolution {
             Task { @MainActor in
                 if let episode = await resolveSeriesNextUpEpisode(target) {
-                    presentPlay(bestSourcePlayItem(episode, accounts: accounts, identitySources: identitySources))
+                    presentPlay(
+                        bestSourcePlayItem(
+                            episode,
+                            accounts: accounts,
+                            identitySources: identitySources
+                        )
+                    )
                 } else {
                     navigate(target)
                 }

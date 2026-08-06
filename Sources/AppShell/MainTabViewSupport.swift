@@ -268,6 +268,30 @@ private func resolveHeroMetadata(
         hydratedTarget = hydratedTarget.taggingSource(accountID)
     }
 
+    // A season is never the right thing to SHOW. Its own record is deliberately
+    // sparse — a Plex season carries no ratings, no overview and no air schedule
+    // — and the viewer thinks of that row as the SHOW, not as "Season 2". Hoist
+    // the series for display and resolve a concrete episode to play, which is
+    // exactly how an episode candidate is already treated below: the merge step
+    // then copies the series' ratings, overview, logo and artwork across.
+    if hydratedTarget.kind == .season {
+        guard let seriesID = hydratedTarget.seriesID,
+              var root = try? await provider.item(id: seriesID) else {
+            return nil
+        }
+        if root.sourceAccountID == nil {
+            root = root.taggingSource(accountID)
+        }
+        var playTarget = await HeroPlayTargetResolver.resolve(
+            item: hydratedTarget,
+            provider: provider
+        )
+        if playTarget?.sourceAccountID == nil {
+            playTarget = playTarget?.taggingSource(accountID)
+        }
+        return HeroMetadataEnrichment(root: root, playTarget: playTarget)
+    }
+
     if hydratedTarget.kind == .episode {
         guard let seriesID = hydratedTarget.seriesID,
               var root = try? await provider.item(id: seriesID) else {
@@ -282,7 +306,7 @@ private func resolveHeroMetadata(
         )
     }
 
-    if hydratedTarget.kind == .series {
+    if hydratedTarget.kind.needsPlaybackTargetResolution {
         var playTarget = await HeroPlayTargetResolver.resolve(
             item: hydratedTarget,
             provider: provider

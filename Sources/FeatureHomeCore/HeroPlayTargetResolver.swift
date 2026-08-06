@@ -4,10 +4,10 @@ import Foundation
 public enum HeroPlayTargetResolver {
     /// What a "Play" tap should actually start for `item`.
     ///
-    /// A whole series can never be played: its container holds no media, so
+    /// A whole series or season can never be played: the container holds no media, so
     /// Jellyfin answers `PlaybackInfo` with a 500 and Plex reports `notFound` —
     /// both surfacing to the viewer as a generic playback error. Every platform
-    /// must therefore resolve a series to its next-up/resume EPISODE before
+    /// must therefore resolve it to its next-up/resume EPISODE before
     /// handing it to the player, which is what this does. Returns `nil` when no
     /// episode can be resolved (the caller should open the show instead of
     /// starting playback).
@@ -35,7 +35,10 @@ public enum HeroPlayTargetResolver {
         switch item.kind {
         case .movie, .episode, .video:
             return item
-        case .series:
+        case .series, .season:
+            // A season is resolved by the same walk: `children(of:)` returns its
+            // episodes directly, so the loose-episode branch below picks next-up
+            // without ever descending into the season loop.
             break
         default:
             return nil

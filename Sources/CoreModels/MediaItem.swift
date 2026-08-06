@@ -12,6 +12,25 @@ public enum MediaItemKind: String, Codable, Sendable {
     case unknown
 }
 
+public extension MediaItemKind {
+    /// True for container kinds that hold no media of their own, so handing one
+    /// to the player is always an error: Jellyfin answers `PlaybackInfo` with a
+    /// 500 and Plex reports `notFound`, both surfacing as a generic "we couldn't
+    /// find what you were looking for".
+    ///
+    /// A Play tap on one of these must first resolve a concrete episode via
+    /// ``HeroPlayTargetResolver``. Seasons matter as much as series here: Plex
+    /// and Jellyfin both return SEASONS in Recently Added for a show, so a season
+    /// reaches the hero and its Play button as readily as a series does.
+    ///
+    /// Deliberately not a general "is this playable" test — `.folder`,
+    /// `.collection` and `.unknown` keep their existing pass-through behaviour
+    /// rather than being rerouted on a guess.
+    var needsPlaybackTargetResolution: Bool {
+        self == .series || self == .season
+    }
+}
+
 /// Library-availability of a title, independent of any single provider.
 ///
 /// Mirrors Overseerr/Jellyseerr's `MediaStatus` enum (raw values are wire-stable

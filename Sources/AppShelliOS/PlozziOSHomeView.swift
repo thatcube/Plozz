@@ -502,9 +502,9 @@ struct PlozziOSHomeView: View {
 
     private func play(_ item: MediaItem) {
         trailerController.stop()
-        // A series can't be played directly (see `playbackTarget`), so resolve
-        // its next-up episode first. Every other kind plays as-is.
-        guard item.kind == .series else {
+        // A series or season can't be played directly (see `playbackTarget`), so
+        // resolve the next-up episode first. Every other kind plays as-is.
+        guard item.kind.needsPlaybackTargetResolution else {
             playbackRequest = PlozziOSPlaybackRequest(
                 item: item,
                 startPosition: item.resumePosition ?? 0,

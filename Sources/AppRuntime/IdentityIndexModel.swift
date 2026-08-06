@@ -283,9 +283,6 @@ public final class IdentityIndexModel {
                 accountsToWarm.append(resolvedAccount)
             }
 
-            FanoutDiagnostics.emit(
-                "index.select resolved=\(resolved.count) stale=\(stale.count) toWarm=\(accountsToWarm.count) cancelled=\(Task.isCancelled)"
-            )
             // Cancelled before a single account was selected, yet accounts still
             // need scanning: ask again rather than dropping the work silently.
             // Without this the wave that gets cancelled between the restore and
@@ -402,7 +399,16 @@ public final class IdentityIndexModel {
     ) async {
         let provider = resolved.provider
         let accountID = resolved.account.id
-        guard let libraries = try? await provider.libraries() else { return }
+        guard let libraries = try? await provider.libraries() else {
+            // Silent until now, and the difference matters: a scan that never
+            // starts because the library list wouldn't load looks exactly like
+            // a scan that was never asked for.
+            FanoutDiagnostics.emit("index.account libraries FAILED")
+            return
+        }
+        FanoutDiagnostics.emit(
+            "index.account libraries=\(libraries.count) kinds=\(libraries.map { "\($0.kind)" }.sorted())"
+        )
 
         // `libraries()` forced the connection resolver to probe and settle, so the
         // provider now reports its truly-reachable locality. Refresh the captured
@@ -435,9 +441,6 @@ public final class IdentityIndexModel {
         var inconclusive = false
         for library in libraries where library.kind == .movie || library.kind == .series {
             if Task.isCancelled { return }
-            FanoutDiagnostics.emit(
-                "index.library begin id=\(library.id) kind=\(library.kind)"
-            )
             var offset = 0
             while offset < maxPerLibrary {
                 if Task.isCancelled { return }
@@ -477,6 +480,9 @@ public final class IdentityIndexModel {
                 // empty-page break above to terminate in that case.
                 if page.totalCount > 0 && offset >= page.totalCount { break }
             }
+            FanoutDiagnostics.emit(
+                "index.library done id=\(library.id) kind=\(library.kind) scanned=\(offset) inconclusive=\(inconclusive)"
+            )
         }
         // Only mark conclusively built when every guid-less item was resolved; an
         // inconclusive scan stays cold so the next warm retries it (never warm-and-

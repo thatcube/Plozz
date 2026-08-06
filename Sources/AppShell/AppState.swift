@@ -2305,6 +2305,11 @@ public final class AppState {
     /// `.some(nil)` is a real value — the default profile uses a `nil` namespace.
     @ObservationIgnored private var trackerScopedNamespace: String??
 
+    /// The profile the identity index was last flushed for. See
+    /// `updateTraktForActiveProfile()` — re-scoping trackers to the SAME profile
+    /// must not throw the library index away.
+    @ObservationIgnored private var indexScopedNamespace: String??
+
     /// See `UniversalWatchlistHost.ensureTrackersScopedToActiveProfile()`.
     public func ensureTrackersScopedToActiveProfile() async {
         let ns = profilesModel.activeNamespace
@@ -2316,7 +2321,20 @@ public final class AppState {
         let ns = profilesModel.activeNamespace
         trackerProfileGeneration &+= 1
         let generation = trackerProfileGeneration
-        identityIndex.reset()
+        // Only a real profile CHANGE invalidates the library index. This runs on
+        // every profile-flow event and on every watchlist prepare, and flushing
+        // the index cancels the library scan that was filling it — so re-scoping
+        // trackers to the profile that is already active destroyed the scan and
+        // started it over, indefinitely. The scan takes minutes; the events
+        // arrive far more often than that, so it never once finished, and every
+        // title in the library kept resolving to no owned copy.
+        //
+        // Tracker re-scoping itself is cheap and idempotent, so it still runs
+        // unconditionally below; it is only the index flush that is gated.
+        if indexScopedNamespace != .some(ns) {
+            indexScopedNamespace = .some(ns)
+            identityIndex.reset()
+        }
         guard generation == trackerProfileGeneration else { return }
         await traktService.setActiveProfile(namespace: ns)
         guard generation == trackerProfileGeneration else { return }

@@ -40,10 +40,10 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
     private static let operationTimeout: TimeAmount = .seconds(30)
 
     var capturedHostKeyFingerprint: [UInt8]? {
-        lock.lock()
-        defer { lock.unlock() }
-        return connection?.validator.capturedFingerprint
-            ?? lastCapturedHostKeyFingerprint
+        lock.withLock {
+            connection?.validator.capturedFingerprint
+                ?? lastCapturedHostKeyFingerprint
+        }
     }
 
 
@@ -53,9 +53,10 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         credential: SFTPMediaTransportCredential,
         hostKeyPolicy: SFTPHostKeyPolicy
     ) async throws {
-        lock.lock()
-        guard connection == nil, !isClosed else {
-            lock.unlock()
+        // Decided under the lock; the throw happens after it is released, so no
+        // error path can leave the lock held or block a cooperative thread.
+        let alreadyConnected = lock.withLock { connection != nil || isClosed }
+        guard !alreadyConnected else {
             throw MediaTransportError.invalidInput(reason: "SFTP backend already connected")
         }
         lock.unlock()
@@ -136,22 +137,25 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
             try await sftpHandler.readyFuture.get()
             deadlineHandler.cancel()
 
-            lock.lock()
-            if isClosed {
-                lock.unlock()
+            // Install the connection, or find we were closed while handshaking —
+            // decided under the lock, with the teardown's `await`s outside it.
+            let wasClosed = lock.withLock { () -> Bool in
+                if isClosed { return true }
+                connection = Connection(
+                    group: group,
+                    channel: channel,
+                    sftpChannel: sftpChannel,
+                    handler: sftpHandler,
+                    validator: serverAuthDelegate
+                )
+                return false
+            }
+            if wasClosed {
                 try? await sftpChannel.close().get()
                 try? await channel.close().get()
                 try? await group.shutdownGracefully()
                 throw MediaTransportError.cancelled
             }
-            connection = Connection(
-                group: group,
-                channel: channel,
-                sftpChannel: sftpChannel,
-                handler: sftpHandler,
-                validator: serverAuthDelegate
-            )
-            lock.unlock()
         } catch {
             deadlineHandler.cancel()
             if let fingerprint = serverAuthDelegate.capturedFingerprint {

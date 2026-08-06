@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import CoreModels
 import CoreNetworking
 
@@ -24,7 +25,7 @@ import CoreNetworking
 /// A resolver with a single candidate and no refresh has nothing to choose
 /// between, so it returns that URL immediately without any network probe — this
 /// keeps the fixed-URL path (and unit tests) zero-cost and offline-safe.
-public final class PlexConnectionResolver: @unchecked Sendable {
+public final class PlexConnectionResolver: Sendable {
     /// Fetches a fresh, reachable-ordered candidate list from plex.tv (used only
     /// when none of the known candidates respond).
     public typealias Refresh = @Sendable () async -> [URL]
@@ -35,17 +36,29 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     private let refresh: Refresh?
     private let onReachable: (@Sendable (URL) -> Void)?
 
-    private let lock = NSLock()
-    private var candidates: [URL]
-    private var cached: URL?
-    private var inFlight: Task<URL, Never>?
-    /// Set once a reported failure clears the cache, or a full probe sweep finds
-    /// nothing reachable (the persisted seed itself was probed and failed). While
-    /// set, the last-known-good `reachableSeed` is no longer trusted for the
-    /// synchronous `hasConfirmedReachableConnection` read, so locality falls back
-    /// to `.unknown` until a fresh probe re-confirms a live connection. Cleared by
-    /// `store` the moment any probe succeeds. (r8-stale-reachability-locality)
-    private var reachabilityInvalidated = false
+    /// Everything this resolver mutates, held INSIDE the mutex.
+    ///
+    /// Bundled rather than left as loose properties beside an `NSLock` so the
+    /// type system enforces what a convention used to: there is no way to read
+    /// or write any of it without holding the lock, because there is no way to
+    /// name it from outside `withLock`. That is what lets the class be honestly
+    /// `Sendable` instead of `@unchecked Sendable` — the previous spelling was a
+    /// promise that the locking was right, and this one is checked.
+    private struct State {
+        var candidates: [URL]
+        var cached: URL?
+        var inFlight: Task<URL, Never>?
+        /// Set once a reported failure clears the cache, or a full probe sweep
+        /// finds nothing reachable (the persisted seed itself was probed and
+        /// failed). While set, the last-known-good `reachableSeed` is no longer
+        /// trusted for the synchronous `hasConfirmedReachableConnection` read,
+        /// so locality falls back to `.unknown` until a fresh probe re-confirms
+        /// a live connection. Cleared by `store` the moment any probe succeeds.
+        /// (r8-stale-reachability-locality)
+        var reachabilityInvalidated = false
+    }
+
+    private let state: Mutex<State>
     /// The last-known-good connection persisted across launches, if any. Probed
     /// first *within its rank group* so a warm server re-confirms on a single
     /// probe and the winner among otherwise-equivalent same-rank candidates is
@@ -72,7 +85,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         // a previously-reachable server resolves on the first probe instead of
         // re-discovering through dead/stale addresses.
         let seeded = reachableSeed.map { [$0] + candidates } ?? candidates
-        self.candidates = Self.prioritized(seeded)
+        state = Mutex(State(candidates: Self.prioritized(seeded)))
     }
 
     /// Best-known base URL available synchronously: the cached reachable URL, then
@@ -90,7 +103,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     /// actually reachable, whereas the seed is by definition an address that worked
     /// last launch. The live probe still corrects both the moment it settles.
     public var current: URL {
-        lock.withLock { cached ?? reachableSeed ?? candidates[0] }
+        state.withLock { $0.cached ?? reachableSeed ?? $0.candidates[0] }
     }
 
     /// True when the resolver has a connection whose locality can be trusted: a
@@ -108,9 +121,9 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     /// a confirmed-local candidate, so a genuinely reachable remote twin can take
     /// over playback instead of the selector clinging to the now-dead LAN box.
     public var hasConfirmedReachableConnection: Bool {
-        lock.withLock {
-            if cached != nil { return true }
-            return !reachabilityInvalidated && reachableSeed != nil
+        state.withLock { state in
+            if state.cached != nil { return true }
+            return !state.reachabilityInvalidated && reachableSeed != nil
         }
     }
 
@@ -118,31 +131,46 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     /// connection on first use (and after a reported failure), caching the
     /// result; concurrent callers share a single in-flight resolution.
     public func resolved() async -> URL {
-        // Fast path: a fixed URL (or an already-cached choice) needs no probe.
-        lock.lock()
-        if let cached {
-            lock.unlock()
-            return cached
+        // Decide under the lock, await outside it.
+        //
+        // The lock was previously taken and released by hand across several
+        // exit paths. That was correct — every `await` was reached only after an
+        // `unlock()` — but correctness rested on reading the whole function and
+        // checking each branch, and `NSLock.lock()` is `@available(*, noasync)`
+        // precisely because getting that wrong blocks a cooperative-pool thread
+        // and Swift has very few of those. Deciding first and suspending after
+        // makes it structural: there is no `await` inside the critical section
+        // to get wrong, and a future branch cannot introduce one.
+        enum Decision {
+            case ready(URL)
+            case join(Task<URL, Never>)
+            case start(Task<URL, Never>)
         }
-        if !(candidates.count > 1 || refresh != nil) {
-            let only = candidates[0]
-            cached = only
-            lock.unlock()
-            return only
-        }
-        if let inFlight {
-            lock.unlock()
-            return await inFlight.value
-        }
-        let task = Task<URL, Never> { await self.performResolve() }
-        inFlight = task
-        lock.unlock()
 
-        let url = await task.value
-        lock.lock()
-        inFlight = nil
-        lock.unlock()
-        return url
+        let decision: Decision = state.withLock { state in
+            // Fast path: a fixed URL (or an already-cached choice) needs no probe.
+            if let cached = state.cached { return .ready(cached) }
+            if !(state.candidates.count > 1 || refresh != nil) {
+                let only = state.candidates[0]
+                state.cached = only
+                return .ready(only)
+            }
+            if let inFlight = state.inFlight { return .join(inFlight) }
+            let task = Task<URL, Never> { await self.performResolve() }
+            state.inFlight = task
+            return .start(task)
+        }
+
+        switch decision {
+        case let .ready(url):
+            return url
+        case let .join(task):
+            return await task.value
+        case let .start(task):
+            let url = await task.value
+            state.withLock { $0.inFlight = nil }
+            return url
+        }
     }
 
     /// Reports that `url` failed to respond. If it was the cached choice, the
@@ -151,10 +179,10 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     /// synchronous locality read reports `.unknown` until a fresh probe confirms a
     /// live connection (a dead server must not keep winning as `.local`).
     public func reportFailure(_ url: URL) {
-        lock.withLock {
-            if cached == url {
-                cached = nil
-                reachabilityInvalidated = true
+        state.withLock { state in
+            if state.cached == url {
+                state.cached = nil
+                state.reachabilityInvalidated = true
             }
         }
     }
@@ -183,11 +211,10 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         // persisted seed was just probed (within its rank group) and did not
         // answer, so invalidate reachability confidence — the synchronous locality
         // read must now report `.unknown` rather than trusting a stale seed.
-        lock.lock()
-        reachabilityInvalidated = true
-        let fallback = candidates[0]
-        lock.unlock()
-        return fallback
+        return state.withLock { state in
+            state.reachabilityInvalidated = true
+            return state.candidates[0]
+        }
     }
 
     /// The first candidate that answers a lightweight `/identity` probe, or `nil`
@@ -265,20 +292,20 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     }
 
     private func currentCandidates() -> [URL] {
-        lock.withLock { candidates }
+        state.withLock { $0.candidates }
     }
 
     private func replaceCandidates(_ urls: [URL]) {
-        lock.withLock { candidates = urls }
+        state.withLock { $0.candidates = urls }
     }
 
     private func store(_ url: URL) {
         // The callback stays OUTSIDE the critical section, as it was: invoking
         // it while holding the lock hands an unknown caller the chance to
         // re-enter this resolver and deadlock.
-        lock.withLock {
-            cached = url
-            reachabilityInvalidated = false
+        state.withLock { state in
+            state.cached = url
+            state.reachabilityInvalidated = false
         }
         onReachable?(url)
     }
@@ -338,50 +365,61 @@ public final class PlexConnectionResolver: @unchecked Sendable {
 /// Coordinates a set of concurrent reachability probes, resuming its continuation
 /// the instant the first probe succeeds (cancelling the rest) or once every probe
 /// has failed. Thread-safe; resumes its continuation exactly once.
-private final class ProbeRace: @unchecked Sendable {
-    private let lock = NSLock()
-    private var remaining: Int
-    private var finished = false
-    private var continuation: CheckedContinuation<URL?, Never>?
-    private var tasks: [Task<Void, Never>] = []
+private final class ProbeRace: Sendable {
+    private struct State {
+        var remaining: Int
+        var finished = false
+        var continuation: CheckedContinuation<URL?, Never>?
+        var tasks: [Task<Void, Never>] = []
+    }
+
+    /// What to do once the lock is released. Cancelling losers and resuming the
+    /// continuation must both happen OUTSIDE the critical section — resuming a
+    /// continuation runs the awaiting code, which is an unbounded amount of work
+    /// to do while holding a lock, and cancellation can call back in. The
+    /// hand-written version got this right by unlocking on each path; returning
+    /// the follow-up work makes it impossible for a new path to forget.
+    private struct Outcome {
+        var losers: [Task<Void, Never>] = []
+        var continuation: CheckedContinuation<URL?, Never>?
+        var result: URL?
+    }
+
+    private let state: Mutex<State>
 
     init(remaining: Int, continuation: CheckedContinuation<URL?, Never>) {
-        self.remaining = remaining
-        self.continuation = continuation
+        state = Mutex(State(remaining: remaining, continuation: continuation))
     }
 
     func track(_ task: Task<Void, Never>) {
-        lock.lock()
-        if finished {
-            lock.unlock()
-            task.cancel()
-        } else {
-            tasks.append(task)
-            lock.unlock()
+        let alreadyFinished = state.withLock { state -> Bool in
+            if state.finished { return true }
+            state.tasks.append(task)
+            return false
         }
+        if alreadyFinished { task.cancel() }
     }
 
     func report(_ url: URL?) {
-        lock.lock()
-        guard !finished else { lock.unlock(); return }
-        if let url {
-            finished = true
-            let cont = continuation; continuation = nil
-            let losers = tasks; tasks = []
-            lock.unlock()
-            losers.forEach { $0.cancel() }
-            cont?.resume(returning: url)
-            return
+        let outcome: Outcome? = state.withLock { state in
+            guard !state.finished else { return nil }
+            if let url {
+                state.finished = true
+                defer { state.continuation = nil; state.tasks = [] }
+                return Outcome(
+                    losers: state.tasks,
+                    continuation: state.continuation,
+                    result: url
+                )
+            }
+            state.remaining -= 1
+            guard state.remaining <= 0 else { return nil }
+            state.finished = true
+            defer { state.continuation = nil; state.tasks = [] }
+            return Outcome(continuation: state.continuation, result: nil)
         }
-        remaining -= 1
-        if remaining <= 0 {
-            finished = true
-            let cont = continuation; continuation = nil
-            tasks = []
-            lock.unlock()
-            cont?.resume(returning: nil)
-            return
-        }
-        lock.unlock()
+        guard let outcome else { return }
+        outcome.losers.forEach { $0.cancel() }
+        outcome.continuation?.resume(returning: outcome.result)
     }
 }

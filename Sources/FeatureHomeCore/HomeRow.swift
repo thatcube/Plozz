@@ -90,6 +90,14 @@ public struct HomeRow: Identifiable, Equatable, Sendable {
     public var items: [MediaItem]
     public var libraries: [AggregatedLibrary]
 
+    /// True when this row would draw nothing on Home. A row survives the
+    /// visibility filter as an empty shell, so "are there any rows" is not the
+    /// same question as "will anything appear" — and only the latter tells Home
+    /// whether it is about to render a screen with nothing to focus.
+    public var isEmptyOnHome: Bool {
+        items.isEmpty && libraries.isEmpty
+    }
+
     public var id: HomeRowKind { kind }
     public var title: LocalizedStringResource { kind.title }
 

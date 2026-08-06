@@ -51,6 +51,11 @@ public final class HomeHeroRuntimeState {
     /// so a long session can't inflate every reconcile fold. Last-write-wins per
     /// target, which is exactly what folding the full history would resolve to.
     func registerWatchMutation(_ mutation: MediaItemMutation) {
+        HandoffDiagnostics.emit(
+            "hero WATCH_MUTATION ids=\(mutation.itemIDs.joined(separator: "|")) "
+                + "played=\(mutation.played.map(String.init(describing:)) ?? "nil") "
+                + "pending=\(watchMutations.count)"
+        )
         let key = Self.targetKey(for: mutation)
         watchMutations.removeAll { Self.targetKey(for: $0) == key }
         watchMutations.append(mutation)
@@ -425,6 +430,19 @@ public struct HomeView: View {
                                 .accessibilityLabel("Loading featured content")
                         }
                         LazyVStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                            // Hiding every library filters every row away, and a
+                            // Home with nothing focusable TRAPS the viewer: tvOS
+                            // focus has nowhere to land, so the remote stops
+                            // responding entirely and the tab bar — the only route
+                            // back to Settings to undo it — can't be reached. The
+                            // screen reads as a frozen blank (the app is fine; it
+                            // is just an empty scroll view over the app
+                            // background). Always keep one focusable thing here.
+                            if !heroLayoutActive, rows.allSatisfy(\.isEmptyOnHome) {
+                                HomeNothingVisibleView(
+                                    onReload: { Task { await viewModel.load() } }
+                                )
+                            }
                             if isAwaitingLiveContinueWatching {
                                 HomeSkeletonRowView(row: cachedContinueWatchingLayout)
                             }

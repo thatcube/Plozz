@@ -85,25 +85,34 @@ struct ProfileServerIdentityPromptView: View {
                 Button("Continue", action: onDecline)
             }
         case let .loaded(list):
+            // Same rows, card and focus treatment as the "watching as" picker
+            // (`PlexUserSelectionView`). This screen asks the same question about
+            // the same people, so it has no business inventing its own look — the
+            // hand-rolled row it used to draw had no avatar and a smaller focus
+            // target than the picker one screen over.
             VStack(spacing: 14) {
-                ForEach(list, id: \.id) { user in
-                    Button {
-                        appState.plexHomeUsers.setPlexHomeUserForActiveProfile(
-                            accountID: accountID,
-                            user: user
-                        )
-                        onFinish()
-                    } label: {
-                        HStack(spacing: 16) {
-                            Image(systemName: user.requiresPIN ? "lock.fill" : "person.crop.circle")
-                            Text(verbatim: user.name)
-                            Spacer()
-                            if user.isAdmin {
-                                Text("Owner").foregroundStyle(palette.secondaryText)
+                PlozzScrollCard {
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            ForEach(list, id: \.id) { user in
+                                Button {
+                                    appState.plexHomeUsers.setPlexHomeUserForActiveProfile(
+                                        accountID: accountID,
+                                        user: user
+                                    )
+                                    onFinish()
+                                } label: {
+                                    PlexHomeUserRow(
+                                        user: user,
+                                        showsOwnerBadge: user.isAdmin
+                                    )
+                                }
+                                .buttonStyle(SettingsFocusButtonStyle())
                             }
                         }
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 28)
                     }
-                    .buttonStyle(SettingsFocusButtonStyle())
                 }
                 // Backing out has to be sayable. Left as a dismissal it read as
                 // consent, and the consequence — this server's watchlist showing

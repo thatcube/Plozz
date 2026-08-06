@@ -220,7 +220,15 @@ public struct HomeHeroBackdrop: View {
     /// mask so it fades away with the image at the bottom and never tints the
     /// revealed background. Static across slides, so it never animates.
     private var scrim: some View {
-        HeroLegibilityScrim(tone: scrimTone, edgePeak: 0.55)
+        // TEST: top and trailing dropped, matching the detail page. The hero's
+        // logo, metadata and buttons all sit along the LEFT and the image melts
+        // into the rows at the BOTTOM, so those are the only edges doing
+        // legibility work — the other two just cost contrast on the artwork.
+        HeroLegibilityScrim(
+            tone: scrimTone,
+            edgePeak: 0.55,
+            edges: [.leading, .bottom]
+        )
     }
 
     /// A smooth, EASED vertical fade from opaque (`white × peak`) down to `clear`,

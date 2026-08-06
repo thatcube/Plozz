@@ -135,7 +135,15 @@ public struct HeroBackdropLayer<Video: View>: View {
     /// of pooling on one side — matching the Home hero. Lives *under* the dissolve
     /// mask so it fades away with the image and never tints the revealed background.
     private var scrim: some View {
-        HeroLegibilityScrim(tone: scrimTone, edgePeak: 0.55)
+        // TEST: top and trailing dropped. Detail-page content runs along the
+        // LEFT and fades out at the BOTTOM, so those two edges are the only ones
+        // doing legibility work; darkening the other two only costs contrast on
+        // the part of the artwork the viewer is actually looking at.
+        HeroLegibilityScrim(
+            tone: scrimTone,
+            edgePeak: 0.55,
+            edges: [.leading, .bottom]
+        )
     }
 
     /// Dissolves the backdrop's own alpha to transparent over the lower portion

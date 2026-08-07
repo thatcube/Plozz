@@ -193511,6 +193511,7 @@
     },
     "Owner" : {
       "comment" : "Badge marking the Plex account owner in a list of Plex Home users.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -207645,6 +207646,9 @@
           }
         }
       }
+    },
+    "Plozz will play as this person here, show their watchlist, and save to it." : {
+      "comment" : "Explains that picking a server user makes Plozz act as them: their watchlist is displayed, and watchlist changes are written to it."
     },
     "Point your camera at the code on your other device — pinch to zoom" : {
       "localizations" : {
@@ -222448,6 +222452,9 @@
           }
         }
       }
+    },
+    "Reload" : {
+
     },
     "Remember audio per series" : {
       "localizations" : {
@@ -320654,6 +320661,7 @@
     },
     "This profile will watch — and keep its watchlist — as whoever you pick." : {
       "comment" : "Explains that the chosen server user determines both playback identity and which watchlist is used.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -371648,6 +371656,42 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "待看清單"
+          }
+        }
+      }
+    },
+    "home.notice.librariesHidden" : {
+      "comment" : "Shown on Home when the profile has hidden every library from the Home screen.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Every library is hidden from Home. Turn one back on in Settings › Libraries."
+          }
+        }
+      }
+    },
+    "home.notice.noServers" : {
+      "comment" : "Shown on Home when no media server has been added to the device.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add a media server in Settings to see your libraries here."
+          }
+        }
+      }
+    },
+    "home.notice.serversOff" : {
+      "comment" : "Shown on Home when the profile has disabled every server it could watch from.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This profile has every server switched off, so its libraries aren't shown. Turn one back on in Settings › Libraries."
           }
         }
       }

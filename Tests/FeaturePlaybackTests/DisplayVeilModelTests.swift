@@ -272,6 +272,36 @@ final class DisplayVeilModelTests: XCTestCase {
         XCTAssertFalse(model.isEngaged)
     }
 
+    func testFadeOutDurationFollowsTheTransitionKind() {
+        // The frame-rate exit has nothing visibly settling underneath, so its
+        // fade IS the whole transition and must be the slower of the two.
+        let model = DisplayVeilModel(
+            configuration: .init(fadeOut: 0.4, frameRateFadeOut: 0.9)
+        )
+        model.engage(kind: .dynamicRange)
+        XCTAssertEqual(model.fadeOutDuration, 0.4, accuracy: 1e-9)
+
+        model.engage(kind: .frameRate)
+        XCTAssertEqual(model.fadeOutDuration, 0.9, accuracy: 1e-9)
+        // Still readable after lowering, so the fade-out transaction that is
+        // running can't have its duration yanked out from under it.
+        model.lower()
+        XCTAssertEqual(model.fadeOutDuration, 0.9, accuracy: 1e-9)
+    }
+
+    func testBothKindsHoldForTheSameBudget() async {
+        // A frame-rate handshake blanks the panel just like a dynamic-range one,
+        // so the black has to outlast it either way — an under-short hold is what
+        // makes the picture appear to snap in rather than fade.
+        let sleeper = TaggedSleeper()
+        let clock = MutableClock()
+        let model = makeModel(sleeper, clock: clock)
+
+        model.engage(kind: .frameRate)
+        await assertEventually { sleeper.hasPending(2.5) } // the shared no-settle hold
+        XCTAssertEqual(model.postSettleHold(forGap: 1.5), 1.5, accuracy: 1e-9)
+    }
+
     func testLowerClearsImmediately() {
         let model = DisplayVeilModel()
         model.engage()

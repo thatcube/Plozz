@@ -675,17 +675,11 @@ public struct RootView: View {
                 .opacity(displayVeil.veilOpacity)
                 .ignoresSafeArea()
                 .allowsHitTesting(displayVeil.veilOpacity > 0.01)
-                // Snap to black *instantly* on engage (rising edge → no animation)
-                // so the player's dismiss lands on an already-opaque window veil and
-                // Home never shows through. Only the fade-OUT (falling edge, after
-                // the panel settles) is animated, at the pace that suits the
-                // handshake being hidden — a frame-rate-only exit has nothing
-                // visibly settling underneath, so it needs a slower fade to read as
-                // one instead of snapping in after a pause.
-                .animation(displayVeil.veilOpacity == 0
-                           ? .easeInOut(duration: displayVeil.fadeOutDuration)
-                           : nil,
-                           value: displayVeil.veilOpacity)
+                // No `.animation` here on purpose. `engage()` must snap to black
+                // instantly so the player's dismiss lands on an already-opaque
+                // window veil and Home never shows through, and `lower()` owns its
+                // own fade-out transaction (at a duration that suits the handshake
+                // being hidden). A conditional modifier here would fight both.
         }
         .modifier(RootDisplaySettleObserver { displayVeil.displayDidSettle() })
         // Per-profile Night Shift: a warm/dim screen tint that multiplies the

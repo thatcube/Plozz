@@ -325,6 +325,10 @@ public final class PlexHomeUsersModel {
         clearPlexOverrides()
         if let fallback = profilesModel.profiles.first?.id,
            fallback != profilesModel.activeProfileID {
+            HandoffDiagnostics.emit(
+                "profile PLEXPIN_CANCEL fallback=" + fallback
+                    + " leaving=" + profilesModel.activeProfileID
+            )
             switchProfile(fallback)
         }
     }

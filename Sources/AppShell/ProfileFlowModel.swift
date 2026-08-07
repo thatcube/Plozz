@@ -196,7 +196,7 @@ public final class ProfileFlowModel {
     /// person hasn't proved they can open.
     public func switchProfile(to id: String) {
         guard let target = profilesModel.profiles.first(where: { $0.id == id }) else {
-            performSwitch(to: id)
+            performSwitch(to: id, reason: "switchProfile-unknown")
             return
         }
         // The hold wins over `activeProfile`: after an involuntary fall-through
@@ -220,7 +220,7 @@ public final class ProfileFlowModel {
             pendingLockedProfile = target
             return
         }
-        performSwitch(to: target.id)
+        performSwitch(to: target.id, reason: "continueSwitch")
     }
 
     /// Checks `pin` against the household's Parental PIN and, on a match, lets
@@ -260,8 +260,19 @@ public final class ProfileFlowModel {
     /// the profile you just left into the profile you just opened, and writes it
     /// to disk. Everything the UI needs synchronously still happens
     /// synchronously; only the import waits.
-    private func performSwitch(to id: String) {
+    /// - Parameter reason: which call site asked for the switch. Recorded in the
+    ///   trace because "the active profile moved" is otherwise indistinguishable
+    ///   between the five paths that can move it, and an unexplained switch
+    ///   during profile setup sends every later setup step to the wrong
+    ///   profile's settings — a reported bug that has not yet been reproduced on
+    ///   demand. The emit is a no-op outside debug builds.
+    private func performSwitch(to id: String, reason: String) {
+        let before = profilesModel.activeProfileID
         profilesModel.select(id)
+        HandoffDiagnostics.emit(
+            "profile SWITCH via=" + reason + " to=" + id + " from=" + before
+                + " landed=" + profilesModel.activeProfileID
+        )
         // `select` NO-OPS for an id this device doesn't have — a peer can delete
         // a profile between the picker rendering and the tap, which is exactly
         // the fall-through case. Releasing the hold and dismissing the forced
@@ -316,7 +327,7 @@ public final class ProfileFlowModel {
         if lock.matchesPlexPIN {
             plexHomeUsers.prefillPlexPIN(pin, forProfile: profile.id)
         }
-        performSwitch(to: profile.id)
+        performSwitch(to: profile.id, reason: "lockPIN")
         return true
     }
 
@@ -470,7 +481,16 @@ public final class ProfileFlowModel {
         // can then render setup directly underneath the editor sheet, so the
         // sheet's fade-out never exposes Home.
         pendingSetupProfile = configured
-        performSwitch(to: configured.id)
+        performSwitch(to: configured.id, reason: "createForSetup")
+        // Records the namespace the setup steps are about to write into, so a
+        // profile whose settings land on somebody else can be told apart from
+        // one that never became active in the first place.
+        HandoffDiagnostics.emit(
+            "profile CREATE new=" + configured.id
+                + " active=" + profilesModel.activeProfileID
+                + " ns=" + (profilesModel.activeNamespace ?? "ROOT")
+                + " owner=" + (profilesModel.rootNamespaceOwnerID ?? "nil")
+        )
         return configured
     }
 
@@ -513,6 +533,10 @@ public final class ProfileFlowModel {
 
     /// Dismisses the one persistent added-profile setup cover.
     public func finishSetupFlow() {
+        HandoffDiagnostics.emit(
+            "profile FINISH_SETUP active=" + profilesModel.activeProfileID
+                + " pending=" + (pendingSetupProfile?.id ?? "nil")
+        )
         pendingSetupProfile = nil
     }
 

@@ -2292,6 +2292,10 @@ public final class AppState {
     /// namespace. Delegates to `profileSettings`; a no-op there when settings
     /// models were injected (tests).
     func rebuildSettingsModels() {
+        HandoffDiagnostics.emit(
+            "profile REBUILD active=" + profilesModel.activeProfileID
+                + " ns=" + (profilesModel.activeNamespace ?? "ROOT")
+        )
         profileSettings.rebuild(namespace: profilesModel.activeNamespace)
     }
 

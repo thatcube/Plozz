@@ -135,6 +135,10 @@ public struct ProfileActionsList: View {
                     title: ProfileLockCopy.unlockToEdit,
                     name: Text(verbatim: profile.name),
                     errorMessage: unlockError,
+                    // The dialog hosting this already shows the avatar and name
+                    // in its header, so the scaffold's own identity row put the
+                    // same name on screen twice.
+                    showsIdentity: false,
                     onSubmit: submitUnlock,
                     onCancel: { unlocking = false; unlockError = nil }
                 ) {

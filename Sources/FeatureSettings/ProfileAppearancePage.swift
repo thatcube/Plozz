@@ -37,6 +37,13 @@ struct ProfileAppearancePage: View {
                 onCancel: { dismiss() }
             )
         }
+        // This page can't delete (it is cosmetics only), but a sync applying a
+        // remote deletion while it is open would leave it rendering nothing at
+        // all. Same rule as the profile page that pushes here: a page about
+        // something that no longer exists should leave, not go blank.
+        else {
+            Color.clear.onAppear { dismiss() }
+        }
     }
 }
 #endif

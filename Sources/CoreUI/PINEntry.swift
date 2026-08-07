@@ -112,6 +112,12 @@ public struct PINEntryScaffold<Badge: View>: View {
     public let isSubmitting: Bool
     /// Optional caveat under the identity block, e.g. the sync warning.
     public var footnote: LocalizedStringResource?
+    /// Whether to draw the badge + name.
+    ///
+    /// False when the HOST already says whose PIN this is. The profile actions
+    /// dialog puts the avatar and name in its own header, so the scaffold's copy
+    /// made the name appear twice on one small card.
+    public var showsIdentity: Bool = true
     /// Position inside a chained PIN gate. Nil for ordinary one-PIN flows.
     public var sequenceStep: PINSequenceStep?
     /// Called with the full PIN as soon as the last digit lands.
@@ -130,6 +136,7 @@ public struct PINEntryScaffold<Badge: View>: View {
         isSubmitting: Bool = false,
         footnote: LocalizedStringResource? = nil,
         sequenceStep: PINSequenceStep? = nil,
+        showsIdentity: Bool = true,
         onSubmit: @escaping (String) -> Void,
         onCancel: @escaping () -> Void,
         @ViewBuilder badge: @escaping () -> Badge
@@ -141,6 +148,7 @@ public struct PINEntryScaffold<Badge: View>: View {
         self.isSubmitting = isSubmitting
         self.footnote = footnote
         self.sequenceStep = sequenceStep
+        self.showsIdentity = showsIdentity
         self.onSubmit = onSubmit
         self.onCancel = onCancel
         self.badge = badge
@@ -166,14 +174,34 @@ public struct PINEntryScaffold<Badge: View>: View {
             // fiction, the pad rendered inside the prose's reserved column, and
             // any change to padding or key size silently shifted it again.
             // Sizing both columns makes the gap a real number.
-            HStack(alignment: .center, spacing: PINMetrics.columnGap) {
-                prose(centered: false)
-                    .frame(width: PINMetrics.proseColumnWidth, alignment: .leading)
-                padColumn
+            // Chosen from the space actually offered. The two-column composition
+            // is 1208pt wide: right full-screen, far too wide inside the profile
+            // actions dialog that renders this list IN PLACE, where the pad ran
+            // off the right edge and the digits were clipped mid-key.
+            //
+            // `ViewThatFits`, NOT a `GeometryReader`. A reader reports the space
+            // it is given but has no size of its own, so inside a card that sizes
+            // to its content it collapses and takes the pad with it — the dialog
+            // came back with a title and no keypad at all. `ViewThatFits` both
+            // measures the candidates and keeps the intrinsic height a
+            // content-sized host needs in order to grow.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: PINMetrics.columnGap) {
+                    prose(centered: false)
+                        .frame(width: PINMetrics.proseColumnWidth, alignment: .leading)
+                    padColumn
+                }
+                .padding(.horizontal, PINMetrics.horizontalPadding)
+
+                VStack(spacing: 28) {
+                    prose(centered: true)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    padColumn
+                }
+                .padding(.horizontal, 32)
+                .padding(.vertical, 28)
             }
-            .frame(maxWidth: PINMetrics.compositionWidth, maxHeight: .infinity)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, PINMetrics.horizontalPadding)
+            .frame(maxWidth: .infinity)
             #else
             GeometryReader { proxy in
                 if usesTwoColumnLayout(proxy.size) {
@@ -239,16 +267,19 @@ public struct PINEntryScaffold<Badge: View>: View {
             }
 
             // Whose PIN this is. Small and secondary — the person already knows
-            // who they picked; this is confirmation, not the headline.
-            HStack(spacing: 14) {
-                badge()
-                    .clipShape(Circle())
-                name
-                    .font(PINMetrics.nameFont)
-                    .foregroundStyle(palette.primaryText)
-                    .lineLimit(1)
+            // who they picked; this is confirmation, not the headline. Skipped
+            // entirely when the host has already said it.
+            if showsIdentity {
+                HStack(spacing: 14) {
+                    badge()
+                        .clipShape(Circle())
+                    name
+                        .font(PINMetrics.nameFont)
+                        .foregroundStyle(palette.primaryText)
+                        .lineLimit(1)
+                }
+                .padding(.top, 4)
             }
-            .padding(.top, 4)
 
             // Reserved either way so nothing shifts between attempts.
             // Reserved either way so nothing shifts between attempts.

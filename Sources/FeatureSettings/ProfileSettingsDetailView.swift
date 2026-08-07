@@ -29,6 +29,8 @@ struct ProfileSettingsDetailView: View {
     /// The single pushed destination for this page — see `Route`.
     @State private var route: Route?
 
+    @Environment(\.dismiss) private var dismiss
+
     /// Read live from the context so the page reflects edits made on it (a lock
     /// added, a rename) without needing its own copy to be invalidated.
     private var profile: Profile? {
@@ -70,6 +72,18 @@ struct ProfileSettingsDetailView: View {
         .navigationDestination(item: $route) { route in
             destination(for: route)
                 .toolbar(.hidden, for: .tabBar)
+        }
+        // Deleting the profile this page is ABOUT leaves it with nothing to draw:
+        // the lookup returns nil, the body renders an empty scroll view, and on
+        // tvOS a screen with nothing focusable strands the viewer — it reads as a
+        // dead black screen the remote can't leave. Deleting from the profile
+        // PICKER never showed this, because that screen deletes from a list it
+        // then stays on.
+        //
+        // Popping is also just the right outcome: a page describing something
+        // that no longer exists has nothing to say.
+        .onChange(of: profile == nil) { _, profileIsGone in
+            if profileIsGone { dismiss() }
         }
     }
 

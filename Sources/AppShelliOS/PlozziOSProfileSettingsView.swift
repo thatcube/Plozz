@@ -26,6 +26,8 @@ struct PlozziOSProfileSettingsView: View {
     /// The single pushed destination for this page — see `Route`.
     @State private var route: Route?
 
+    @Environment(\.dismiss) private var dismiss
+
     /// Read live so the page reflects a lock added or the profile renamed.
     private var profile: Profile? {
         appModel.profiles.profiles.first(where: { $0.id == profileID })
@@ -85,6 +87,14 @@ struct PlozziOSProfileSettingsView: View {
         // sheet, and a modal from a covered view is dropped.
         .navigationDestination(item: $route) { route in
             destination(for: route)
+        }
+        // Deleting the profile this page is ABOUT leaves it describing something
+        // that no longer exists, and rendering nothing at all. See the tvOS twin,
+        // where the same shape reads as a dead black screen the remote can't
+        // leave; here it is a blank page with a back button, which is milder but
+        // just as wrong.
+        .onChange(of: profile == nil) { _, profileIsGone in
+            if profileIsGone { dismiss() }
         }
     }
 

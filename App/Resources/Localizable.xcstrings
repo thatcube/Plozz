@@ -207648,7 +207648,225 @@
       }
     },
     "Plozz will play as this person here, show their watchlist, and save to it." : {
-      "comment" : "Explains that picking a server user makes Plozz act as them: their watchlist is displayed, and watchlist changes are written to it."
+      "comment" : "Explains that picking a server user makes Plozz act as them: their watchlist is displayed, and watchlist changes are written to it.",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "سيشغّل Plozz المحتوى هنا بصفته هذا الشخص، ويعرض قائمة مشاهدته، ويحفظ التغييرات فيها."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz ще възпроизвежда от името на този потребител, ще показва списъка му за гледане и ще записва промените в него."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz reproduirà com aquesta persona, mostrarà la seva llista de pendents i hi desarà."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz bude přehrávat jako tato osoba, zobrazí její seznam ke zhlédnutí a bude do něj ukládat."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz afspiller på vegne af denne person, viser personens liste over ting, der skal ses, og gemmer ændringer i den."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz gibt hier als diese Person Inhalte wieder, zeigt deren Merkliste an und speichert Änderungen darin."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Το Plozz θα αναπαράγει περιεχόμενο εκ μέρους αυτού του ατόμου, θα εμφανίζει τη λίστα παρακολούθησής του και θα αποθηκεύει τις αλλαγές σε αυτήν."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz reproducirá contenido como esta persona, mostrará su lista para ver y guardará los cambios en ella."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz به‌عنوان این شخص پخش می‌کند، فهرست تماشای او را نشان می‌دهد و در آن ذخیره می‌کند."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz toistaa tämän henkilön nimissä, näyttää hänen katselulistansa ja tallentaa muutokset siihen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz effectuera la lecture en tant que cette personne, affichera sa liste de contenus à regarder et y enregistrera les modifications."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz ינגן כאן בתור האדם הזה, יציג את רשימת הצפייה שלו וישמור בה שינויים."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz यहाँ इस व्यक्ति के रूप में मीडिया चलाएगा, उनकी वॉचलिस्ट दिखाएगा और उसमें बदलाव सहेजेगा।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz će ovdje reproducirati sadržaj u ime ove osobe, prikazivati njezin popis za gledanje i spremati promjene u njega."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A Plozz e személy nevében játszik le tartalmakat, megjeleníti a figyelőlistáját, és oda menti a módosításokat."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz akan memutar media sebagai pengguna ini, menampilkan daftar tontonannya, dan menyimpan perubahan ke daftar tersebut."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz riprodurrà i contenuti per conto di questa persona, mostrerà la sua lista di titoli da guardare e vi salverà le modifiche."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz はこのユーザーとして再生し、そのウォッチリストを表示して変更内容をリストに保存します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz는 이 사용자로 콘텐츠를 재생하고, 관심 목록을 표시하며, 변경 사항을 해당 목록에 저장합니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz akan memainkan media sebagai pengguna ini, memaparkan senarai tontonan pengguna ini dan menyimpan perubahan padanya."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz spiller av som denne personen, viser listen deres over ting de vil se, og lagrer endringer i den."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz speelt af als deze persoon, toont diens kijklijst en slaat wijzigingen daarin op."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz będzie odtwarzać jako ta osoba, wyświetlać jej listę do obejrzenia i zapisywać w niej zmiany."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "O Plozz reproduzirá o conteúdo como esta pessoa, mostrará a lista de interesses dela e salvará as alterações nela."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz va reda conținutul în numele acestei persoane, îi va afișa lista de vizionare și va salva modificările în ea."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz будет воспроизводить от имени этого пользователя, показывать его список просмотра и сохранять в нём изменения."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz bude prehrávať ako táto osoba, zobrazí jej zoznam na pozeranie a bude doň ukladať zmeny."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz bo vsebino predvajal v imenu te osebe, prikazoval njen seznam za ogled in vanj shranjeval spremembe."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz će sadržaj reprodukovati u ime ove osobe, prikazivati njenu listu za gledanje i čuvati izmene u njoj."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz spelar upp som den här personen, visar deras bevakningslista och sparar ändringar i den."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz จะเล่นสื่อในฐานะผู้ใช้รายนี้ แสดงรายการที่ต้องการรับชม และบันทึกการเปลี่ยนแปลงลงในรายการนั้น"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz burada bu kişi olarak içerik oynatacak, izleme listesini gösterecek ve değişiklikleri bu listeye kaydedecek."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz відтворюватиме вміст від імені цієї особи, показуватиме її список перегляду та зберігатиме в ньому зміни."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz sẽ phát nội dung dưới danh nghĩa người này, hiển thị danh sách xem của họ và lưu các thay đổi vào đó."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz 将以此用户的身份播放，显示其待看列表，并将更改保存到该列表。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Plozz 將以此使用者的身分播放，顯示其待看清單，並將變更儲存至該清單。"
+          }
+        }
+      }
     },
     "Point your camera at the code on your other device — pinch to zoom" : {
       "localizations" : {
@@ -222452,9 +222670,6 @@
           }
         }
       }
-    },
-    "Reload" : {
-
     },
     "Remember audio per series" : {
       "localizations" : {
@@ -371669,6 +371884,222 @@
             "state" : "new",
             "value" : "Every library is hidden from Home. Turn one back on in Settings › Libraries."
           }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "جميع المكتبات مخفية من الشاشة الرئيسية. فعّل إحداها مجددًا في الإعدادات › المكتبات."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Всички медиатеки са скрити от Начало. Включете отново някоя в Настройки › Медиатеки."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Totes les biblioteques estan ocultes d'Inici. Torna'n a activar una a Configuració › Biblioteques."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Všechny knihovny jsou na Ploše skryté. Některou znovu zapněte v Nastavení › Knihovny."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle biblioteker er skjult fra Hjem. Slå et til igen i Indstillinger › Biblioteker."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle Medienbibliotheken sind auf der Startseite ausgeblendet. Aktivieren Sie eine erneut unter Einstellungen › Medienbibliotheken."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Όλες οι βιβλιοθήκες είναι κρυμμένες από την Αρχική. Ενεργοποιήστε ξανά κάποια στις Ρυθμίσεις › Βιβλιοθήκες."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Todas las bibliotecas multimedia están ocultas en Inicio. Vuelve a activar una en Ajustes › Bibliotecas multimedia."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "همه کتابخانه‌ها از صفحه اصلی پنهان هستند. یکی را دوباره در تنظیمات › کتابخانه‌ها روشن کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kaikki kirjastot on piilotettu Kotinäkymästä. Ota jokin takaisin käyttöön kohdassa Asetukset › Kirjastot."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toutes les bibliothèques sont masquées de l'Accueil. Réactivez-en une dans Réglages › Bibliothèques."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "כל הספריות מוסתרות ממסך הבית. הפעילו מחדש אחת מהן בהגדרות › ספריות."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "सभी लाइब्रेरी होम से छिपी हुई हैं। सेटिंग्स › लाइब्रेरी में जाकर कोई एक वापस चालू करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sve su knjižnice skrivene s početnog zaslona. Ponovno uključite jednu u izborniku Postavke › Knjižnice."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Minden könyvtár el van rejtve a Kezdőlapról. Kapcsoljon be újra egyet a Beállítások › Könyvtárak menüben."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Semua pustaka disembunyikan dari Beranda. Aktifkan kembali salah satu di Pengaturan › Pustaka."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tutte le librerie sono nascoste dalla Home. Riattivane una in Impostazioni › Librerie."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "すべてのライブラリがホームで非表示になっています。設定 › ライブラリでいずれかを再度オンにしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "모든 미디어 보관함이 홈에서 숨겨져 있습니다. 설정 › 미디어 보관함에서 하나를 다시 켜세요."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Semua pustaka disembunyikan daripada Laman Utama. Hidupkan semula satu dalam Tetapan › Pustaka."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle biblioteker er skjult fra Hjem. Slå ett på igjen i Innstillinger › Biblioteker."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle bibliotheken zijn verborgen op het beginscherm. Schakel er een weer in via Instellingen › Bibliotheken."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wszystkie biblioteki są ukryte na ekranie głównym. Włącz ponownie jedną w menu Ustawienia › Biblioteki."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Todas as bibliotecas estão ocultas do Início. Reative uma em Ajustes › Bibliotecas."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toate bibliotecile sunt ascunse din Acasă. Reactivați una în Setări › Biblioteci."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Все медиатеки скрыты с главного экрана. Снова включите одну из них в разделе Настройки › Медиатеки."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Všetky knižnice sú na ploche skryté. Zapnite niektorú znova v časti Nastavenia › Knižnice."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vse knjižnice so skrite z začetnega zaslona. Ponovno vključite eno v razdelku Nastavitve › Knjižnice."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sve biblioteke su sakrivene sa početnog ekrana. Ponovo uključite jednu u odeljku Podešavanja › Biblioteke."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alla bibliotek är dolda från Hem. Slå på ett igen i Inställningar › Bibliotek."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ไลบรารีทั้งหมดถูกซ่อนจากหน้าหลัก เปิดไลบรารีหนึ่งอีกครั้งที่ การตั้งค่า › ไลบรารี"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tüm kitaplıklar Ana Sayfa'dan gizlendi. Ayarlar › Kitaplıklar bölümünden birini tekrar açın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Усі медіатеки приховані з головного екрана. Увімкніть одну знову в розділі Налаштування › Медіатеки."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tất cả thư viện đang bị ẩn khỏi Trang chủ. Bật lại một thư viện trong Cài đặt › Thư viện."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "所有媒体库已从主页隐藏。请在设置 › 媒体库中重新开启一个。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "所有媒體庫已從主畫面隱藏。請在設定 › 媒體庫中重新開啟一個。"
+          }
         }
       }
     },
@@ -371681,6 +372112,450 @@
             "state" : "new",
             "value" : "Add a media server in Settings to see your libraries here."
           }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "أضف خادم وسائط في الإعدادات لعرض مكتباتك هنا."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Добавете медиен сървър в Настройки, за да видите библиотеките си тук."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Afegeix un servidor multimèdia a Configuració per veure les teves biblioteques aquí."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Přidejte mediální server v Nastavení, abyste zde viděli své knihovny."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tilføj en medieserver i Indstillinger for at se dine biblioteker her."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fügen Sie einen Medienserver in den Einstellungen hinzu, um Ihre Medienbibliotheken hier zu sehen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Προσθέστε έναν διακομιστή πολυμέσων στις Ρυθμίσεις για να δείτε τις βιβλιοθήκες σας εδώ."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Añade un servidor de medios en Ajustes para ver tus bibliotecas multimedia aquí."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "یک سرور رسانه در تنظیمات اضافه کنید تا کتابخانه‌هایتان را اینجا ببینید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lisää mediapalvelin Asetuksissa nähdäksesi kirjastosi täällä."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ajoutez un serveur multimédia dans Réglages pour voir vos bibliothèques ici."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הוסיפו שרת מדיה בהגדרות כדי לראות את הספריות שלכם כאן."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "अपनी लाइब्रेरी यहाँ देखने के लिए सेटिंग्स में एक मीडिया सर्वर जोड़ें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodajte medijski poslužitelj u Postavkama da biste ovdje vidjeli svoje knjižnice."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adjon hozzá egy médiaszervert a Beállításokban, hogy itt lássa könyvtárait."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tambahkan server media di Pengaturan untuk melihat pustaka Anda di sini."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aggiungi un server multimediale in Impostazioni per vedere le tue librerie qui."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "設定でメディアサーバーを追加すると、ライブラリがここに表示されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "설정에서 미디어 서버를 추가하면 미디어 보관함이 여기에 표시됩니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tambah pelayan media dalam Tetapan untuk melihat pustaka anda di sini."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Legg til en medieserver i Innstillinger for å se bibliotekene dine her."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Voeg in Instellingen een mediaserver toe om je bibliotheken hier te zien."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodaj serwer multimediów w Ustawieniach, aby zobaczyć tutaj swoje biblioteki."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adicione um servidor de mídia nos Ajustes para ver suas bibliotecas aqui."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adăugați un server media în Setări pentru a vă vedea bibliotecile aici."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Добавьте медиасервер в Настройках, чтобы увидеть свои медиатеки здесь."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pridajte mediálny server v Nastaveniach, aby ste tu videli svoje knižnice."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodajte medijski strežnik v Nastavitvah, da boste tukaj videli svoje knjižnice."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodajte medijski server u Podešavanjima da biste ovde videli svoje biblioteke."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lägg till en medieserver i Inställningar för att se dina bibliotek här."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เพิ่มเซิร์ฟเวอร์สื่อในการตั้งค่าเพื่อดูคลังของคุณที่นี่"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kitaplıklarınızı burada görmek için Ayarlar'dan bir medya sunucusu ekleyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Додайте медіасервер у Налаштуваннях, щоб бачити свої медіатеки тут."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Thêm máy chủ phương tiện trong Cài đặt để xem thư viện của bạn tại đây."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在设置中添加媒体服务器，即可在此查看你的媒体库。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在設定中加入媒體伺服器，即可在此查看你的媒體庫。"
+          }
+        }
+      }
+    },
+    "home.notice.reload" : {
+      "comment" : "Button on the Home empty state that re-fetches content. Also the only focusable control there, so it is what keeps the screen navigable.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Reload"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إعادة تحميل"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Презареди"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recarrega"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Načíst znovu"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Genindlæs"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Neu laden"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ανανέωση"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recargar"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "بارگذاری مجدد"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lataa uudelleen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recharger"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "טען מחדש"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "रीलोड"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Učitaj ponovo"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Újratöltés"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muat ulang"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ricarica"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "再読み込み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "새로고침"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muat semula"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Last inn på nytt"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Herlaad"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odśwież"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recarregar"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reîncarcă"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Обновить"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Načítať znova"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponovno naloži"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Učitaj ponovo"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ladda om"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "โหลดใหม่"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Yenile"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Оновити"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tải lại"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "重新加载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "重新載入"
+          }
         }
       }
     },
@@ -371692,6 +372567,222 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "This profile has every server switched off, so its libraries aren't shown. Turn one back on in Settings › Libraries."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "جميع الخوادم معطّلة لهذا الملف الشخصي، لذا لا تظهر مكتباتها. فعّل أحدها مجددًا في الإعدادات › المكتبات."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Този профил е изключил всички сървъри, затова медиатеките не се показват. Включете отново някой в Настройки › Медиатеки."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aquest perfil té tots els servidors desactivats, així que les biblioteques no es mostren. Torna'n a activar un a Configuració › Biblioteques."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tento profil má vypnuté všechny servery, takže se knihovny nezobrazují. Některý znovu zapněte v Nastavení › Knihovny."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denne profil har slået alle servere fra, så bibliotekerne vises ikke. Slå en til igen i Indstillinger › Biblioteker."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dieses Profil hat alle Server deaktiviert, daher werden keine Medienbibliotheken angezeigt. Aktivieren Sie einen erneut unter Einstellungen › Medienbibliotheken."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αυτό το προφίλ έχει απενεργοποιήσει όλους τους διακομιστές, επομένως οι βιβλιοθήκες δεν εμφανίζονται. Ενεργοποιήστε ξανά κάποιον στις Ρυθμίσεις › Βιβλιοθήκες."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Este perfil tiene todos los servidores desactivados, así que sus bibliotecas multimedia no se muestran. Vuelve a activar uno en Ajustes › Bibliotecas multimedia."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "این نمایه همه سرورها را خاموش کرده است، بنابراین کتابخانه‌ها نمایش داده نمی‌شوند. یکی از سرورها را دوباره در تنظیمات › کتابخانه‌ها روشن کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tässä profiilissa kaikki palvelimet on poistettu käytöstä, joten kirjastoja ei näytetä. Ota jokin palvelin takaisin käyttöön kohdassa Asetukset › Kirjastot."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ce profil a désactivé tous les serveurs, les bibliothèques ne sont donc pas affichées. Réactivez-en un dans Réglages › Bibliothèques."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "בפרופיל הזה כל השרתים כבויים, ולכן הספריות שלהם אינן מוצגות. הפעילו מחדש אחד מהם בהגדרות › ספריות."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "इस प्रोफ़ाइल के सभी सर्वर बंद हैं, इसलिए लाइब्रेरी नहीं दिख रहीं। सेटिंग्स › लाइब्रेरी में जाकर कोई एक सर्वर वापस चालू करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovaj profil ima isključene sve poslužitelje pa se knjižnice ne prikazuju. Ponovno uključite jedan u izborniku Postavke › Knjižnice."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ez a profil minden szervert kikapcsolt, ezért a könyvtárak nem jelennek meg. Kapcsoljon be újra egy szervert a Beállítások › Könyvtárak menüben."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Profil ini menonaktifkan semua server, sehingga pustaka tidak ditampilkan. Aktifkan kembali salah satu server di Pengaturan › Pustaka."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Questo profilo ha tutti i server disattivati, quindi le librerie non vengono mostrate. Riattivane uno in Impostazioni › Librerie."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "このプロフィールではすべてのサーバーがオフになっているため、ライブラリが表示されていません。設定 › ライブラリでいずれかのサーバーを再度オンにしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "이 프로필의 모든 서버가 꺼져 있어 미디어 보관함이 표시되지 않습니다. 설정 › 미디어 보관함에서 서버 하나를 다시 켜세요."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Profil ini telah mematikan semua pelayan, jadi pustaka tidak ditunjukkan. Hidupkan semula satu pelayan dalam Tetapan › Pustaka."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denne profilen har slått av alle servere, så bibliotekene vises ikke. Slå en på igjen i Innstillinger › Biblioteker."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dit profiel heeft alle servers uitgeschakeld, dus de bibliotheken worden niet weergegeven. Schakel een server weer in via Instellingen › Bibliotheken."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ten profil ma wyłączone wszystkie serwery, więc biblioteki nie są wyświetlane. Włącz ponownie jeden w menu Ustawienia › Biblioteki."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Este perfil desativou todos os servidores, então as bibliotecas não são exibidas. Reative um em Ajustes › Bibliotecas."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Acest profil are toate serverele dezactivate, așa că bibliotecile nu sunt afișate. Reactivați unul în Setări › Biblioteci."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "В этом профиле отключены все серверы, поэтому медиатеки не отображаются. Снова включите один из них в разделе Настройки › Медиатеки."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tento profil má vypnuté všetky servery, takže knižnice sa nezobrazujú. Zapnite niektorý znova v časti Nastavenia › Knižnice."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ta profil ima izklopljene vse strežnike, zato knjižnice niso prikazane. Ponovno vključite enega v razdelku Nastavitve › Knjižnice."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovaj profil je isključio sve servere, pa se biblioteke ne prikazuju. Ponovo uključite jedan u odeljku Podešavanja › Biblioteke."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Den här profilen har stängt av alla servrar, så biblioteken visas inte. Slå på en igen i Inställningar › Bibliotek."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "โปรไฟล์นี้ปิดเซิร์ฟเวอร์ทั้งหมดไว้ จึงไม่แสดงไลบรารี เปิดเซิร์ฟเวอร์หนึ่งอีกครั้งที่ การตั้งค่า › ไลบรารี"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bu profildeki tüm sunucular kapalı olduğundan kitaplıklar gösterilmiyor. Ayarlar › Kitaplıklar bölümünden sunuculardan birini tekrar açın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Цей профіль вимкнув усі сервери, тому медіатеки не відображаються. Увімкніть один знову в розділі Налаштування › Медіатеки."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hồ sơ này đã tắt tất cả máy chủ nên thư viện không được hiển thị. Bật lại một máy chủ trong Cài đặt › Thư viện."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "此个人资料已关闭所有服务器，因此不会显示其媒体库。请在设置 › 媒体库中重新开启其中一个服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "此個人檔案已關閉所有伺服器，因此不會顯示其媒體庫。請在設定 › 媒體庫中重新開啟其中一個伺服器。"
           }
         }
       }

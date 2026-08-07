@@ -58,7 +58,14 @@ struct HomeContentNoticeView: View {
             // The same sad-Plozz empty state search and empty libraries use, so
             // every legitimate dead end in the app looks like the same app.
             PlozzEmptyStateView(notice.message)
-            Button("Reload", action: onReload)
+            Button(
+                LocalizedStringResource(
+                    "home.notice.reload",
+                    defaultValue: "Reload",
+                    comment: "Button on the Home empty state that re-fetches content. Also the only focusable control there, so it is what keeps the screen navigable."
+                ),
+                action: onReload
+            )
                 .buttonStyle(SettingsFocusButtonStyle())
         }
         .frame(maxWidth: 900)

@@ -34,8 +34,8 @@ struct PlozziOSProfileSettingsView: View {
     }
 
     private var canDelete: Bool {
-        guard let profile else { return false }
-        return !appModel.profiles.isDefault(profile)
+        guard profile != nil else { return false }
+        return appModel.profiles.profiles.count > 1
     }
 
 

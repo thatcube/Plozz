@@ -47,6 +47,23 @@ public protocol ProfilePersisting: Sendable {
     // launch picker appears at all. They live in the same shared/secure store
     // as the profile list so every Apple TV system user sees the same value.
 
+    /// Which profile owns the UN-NAMESPACED settings keys, or `nil` when nobody
+    /// does.
+    ///
+    /// Settings are stored per profile as `base.<profileID>`, except for one
+    /// profile whose keys are the bare `base` (see ``SettingsKey/scoped(_:namespace:)``).
+    /// Which profile that is used to be DERIVED — the sentinel default, else
+    /// whichever profile happened to sort first — so deleting the first profile
+    /// would have silently handed its stored settings to whoever became first
+    /// next. That is why deletion was refused outright.
+    ///
+    /// Recording the owner makes it stable: the answer no longer moves when the
+    /// list does, so any profile can be deleted without another inheriting its
+    /// settings.
+    func rootNamespaceOwnerID() -> String?
+    /// Persists (or clears with `nil`) the owner of the un-namespaced keys.
+    func setRootNamespaceOwnerID(_ id: String?)
+
     /// `true`/`false` if the household explicitly set the "Ask which profile
     /// on startup" preference; `nil` when never set (caller picks a default,
     /// typically `profiles.count > 1`).
@@ -87,6 +104,8 @@ extension ProfilePersisting {
     public func setParentalPIN(_ value: ParentalPIN?) {}
     public func resetForDebugging() {}
     public func clearActiveAccountIDs(forProfile profileID: String) {}
+    public func rootNamespaceOwnerID() -> String? { nil }
+    public func setRootNamespaceOwnerID(_ id: String?) {}
 }
 
 public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
@@ -119,6 +138,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private let legacyProfilesEnabledKey = "com.plozz.profiles.enabled"
     private let firstRunSetupKey = "com.plozz.profiles.firstRunSetupComplete"
     private let parentalPINKey = "com.plozz.profiles.parentalPIN"
+    private let rootNamespaceOwnerKey = "com.plozz.profiles.rootNamespaceOwner"
     /// Stable id assigned to the migrated default profile so its identity is the
     /// same across launches and its `isDefault` status is unambiguous.
     public static let defaultProfileID = "com.plozz.profile.default"
@@ -200,6 +220,20 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
 
     // MARK: Household preferences
 
+    public func rootNamespaceOwnerID() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return defaults.string(forKey: rootNamespaceOwnerKey)
+    }
+
+    public func setRootNamespaceOwnerID(_ id: String?) {
+        lock.lock(); defer { lock.unlock() }
+        if let id, !id.isEmpty {
+            defaults.set(id, forKey: rootNamespaceOwnerKey)
+        } else {
+            defaults.removeObject(forKey: rootNamespaceOwnerKey)
+        }
+    }
+
     public func askProfileOnStartupOverride() -> Bool? {
         lock.lock(); defer { lock.unlock() }
         return readSharedBool(forKey: askOnStartupKey)
@@ -246,6 +280,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         removeShared(forKey: profilesKey)
         defaults.removeObject(forKey: activeProfileIDKey)
         defaults.removeObject(forKey: lastUsedKey)
+        defaults.removeObject(forKey: rootNamespaceOwnerKey)
         writeSharedBool(nil, forKey: askOnStartupKey)
         writeSharedBool(nil, forKey: legacyProfilesEnabledKey)
         writeSharedBool(nil, forKey: firstRunSetupKey)
@@ -402,6 +437,12 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
 @Observable
 public final class ProfilesModel {
     public private(set) var profiles: [Profile]
+
+    /// Which profile owns the un-namespaced settings keys, or `nil` when that
+    /// profile has been deleted and nobody does.
+    /// See ``ProfilePersisting/rootNamespaceOwnerID()``.
+    @ObservationIgnored
+    public private(set) var rootNamespaceOwnerID: String?
     public private(set) var activeProfileID: String
     /// Whether the current Apple TV system user already has a *stored* profile
     /// pick (vs. the in-memory default). Drives the launch picker: with system
@@ -454,6 +495,27 @@ public final class ProfilesModel {
         // Resolve the household preferences. Profiles are always on; the launch
         // picker defaults to "ask" once the household has more than one profile,
         // until the user explicitly toggles it.
+        // Capture who owns the un-namespaced keys, ONCE, and keep it.
+        //
+        // Seeded with the answer the old derived rule would have given — the
+        // sentinel default if the household has it, else whichever profile sorts
+        // first — so every existing profile keeps reading exactly the settings it
+        // was already reading. No keys move; only the question "who owns them"
+        // stops being recomputed from list position.
+        if let stored = store.rootNamespaceOwnerID(),
+           migrated.contains(where: { $0.id == stored }) {
+            self.rootNamespaceOwnerID = stored
+        } else if store.rootNamespaceOwnerID() == nil {
+            let inherited = migrated.first(where: { $0.id == ProfileStore.defaultProfileID })
+                ?? migrated.first
+            self.rootNamespaceOwnerID = inherited?.id
+            if let id = inherited?.id { store.setRootNamespaceOwnerID(id) }
+        } else {
+            // A stored owner that is no longer in the household: it was deleted.
+            // Nobody inherits it — the bare keys stay abandoned rather than
+            // becoming some other profile's settings.
+            self.rootNamespaceOwnerID = nil
+        }
         let multi = migrated.count > 1
         self.askProfileOnStartup = store.askProfileOnStartupOverride() ?? multi
         self.legacyLocalParentalPIN = store.parentalPIN()
@@ -581,8 +643,14 @@ public final class ProfilesModel {
 
     /// Whether `profile` is the default/primary one (drives `nil`-namespaced
     /// settings so the original keys are reused).
+    /// Whether this profile owns the un-namespaced settings keys.
+    ///
+    /// A stored answer, not a derived one. It used to be "the sentinel default,
+    /// or else whoever sorts first", which made the owner move when the list
+    /// did: deleting the first profile would have handed its settings to the
+    /// next one. See ``ProfilePersisting/rootNamespaceOwnerID()``.
     public func isDefault(_ profile: Profile) -> Bool {
-        profile.id == ProfileStore.defaultProfileID || profile.id == profiles.first?.id
+        profile.id == rootNamespaceOwnerID
     }
 
     /// The settings namespace for the active profile.
@@ -883,10 +951,22 @@ public final class ProfilesModel {
     /// Removes a profile. The default profile can't be removed; removing the
     /// active profile falls selection back to the first remaining profile.
     public func remove(_ id: String) {
-        guard id != ProfileStore.defaultProfileID, id != profiles.first?.id else { return }
+        // The only thing that must never happen is a household with no profiles.
+        // This used to also refuse the sentinel default and whatever profile
+        // sorted first, because the un-namespaced settings keys followed list
+        // position — deleting the first profile handed its stored settings to
+        // the next one. Ownership is recorded now, so that cannot happen, and an
+        // ordinary profile is no longer undeletable for being first in a list.
+        guard profiles.count > 1, profiles.contains(where: { $0.id == id }) else { return }
         let outgoing = profiles.first { $0.id == id }
         profiles.removeAll { $0.id == id }
         store.saveProfiles(profiles)
+        // Deleting the owner abandons the bare keys rather than bequeathing
+        // them: every surviving profile keeps reading its own `base.<id>`.
+        if rootNamespaceOwnerID == id {
+            rootNamespaceOwnerID = nil
+            store.setRootNamespaceOwnerID(nil)
+        }
         if activeProfileID == id {
             activeProfileID = fallbackProfile(leaving: outgoing)?.id ?? ProfileStore.defaultProfileID
             store.setActiveProfileID(activeProfileID)

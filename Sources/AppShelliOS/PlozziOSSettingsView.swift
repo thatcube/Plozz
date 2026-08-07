@@ -1301,7 +1301,7 @@ private struct PlozziOSProfilesView: View {
                 PlozziOSProfileEditorHost(
                     appModel: appModel,
                     editingProfile: profile,
-                    canDelete: !appModel.profiles.isDefault(profile),
+                    canDelete: appModel.profiles.profiles.count > 1,
                     onFinished: { editingProfile = nil }
                 )
             }

@@ -37,9 +37,11 @@ struct ProfileSettingsDetailView: View {
         context.profiles.first(where: { $0.id == profileID })
     }
 
-    /// The first profile is the household's default and can't be deleted.
+    /// Any profile can go, as long as the household keeps one. Position in the
+    /// list no longer decides: it used to, because the un-namespaced settings
+    /// keys followed whoever sorted first.
     private var canDelete: Bool {
-        profileID != context.profiles.first?.id
+        context.profiles.count > 1
     }
 
     var body: some View {

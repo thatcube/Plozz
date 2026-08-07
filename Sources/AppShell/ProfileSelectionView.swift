@@ -156,7 +156,7 @@ struct ProfileSelectionView: View {
                                 forProfile: profile.id
                             )
                         },
-                        onDelete: profile.id == appState.profilesModel.profiles.first?.id ? nil : {
+                        onDelete: appState.profilesModel.profiles.count < 2 ? nil : {
                             appState.profileFlow.removeProfile(id: profile.id)
                             route = nil
                         },
@@ -169,7 +169,7 @@ struct ProfileSelectionView: View {
                 if let profile = appState.profilesModel.profiles.first(where: { $0.id == profileID }) {
                     ProfileEditorView(
                         editingProfile: profile,
-                        canDelete: profile.id != appState.profilesModel.profiles.first?.id,
+                        canDelete: appState.profilesModel.profiles.count > 1,
                         photoSourceAccounts: appState.accountsProviders.accounts,
                         plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                         onSave: { appState.profileFlow.saveProfile($0); route = nil },

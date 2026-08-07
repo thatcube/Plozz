@@ -64,6 +64,17 @@ public final class DisplayVeilModel {
         /// arrives. Some TVs don't emit a clean mode-switch-end on HDR/DV → SDR, so
         /// this blind fallback must still cover a typical physical switch.
         public var noSettleHold: TimeInterval = 2.5
+        /// The no-settle fallback for a **frame-rate-only** exit. Trimmed against
+        /// `noSettleHold` because a refresh-rate re-sync is the quicker of the two
+        /// blanks — but still comfortably longer than that blank, which is the
+        /// whole point: the fade has to start *after* the panel is back.
+        public var frameRateNoSettleHold: TimeInterval = 2.0
+        /// Ceiling on the post-settle hold for a **frame-rate-only** exit, so a
+        /// slow-reporting TV can't stretch an SDR exit as far as a Dolby Vision
+        /// one. Note the FLOOR (`minPostSettle`) is deliberately *not* specialised:
+        /// it's what keeps the fade behind the panel blank on a TV that reports
+        /// settle early, and cutting it is exactly what made the picture snap in.
+        public var frameRateMaxPostSettle: TimeInterval = 1.6
         /// How long the veil takes to fade back out after a dynamic-range exit.
         /// The panel is still visibly settling underneath, which carries a lot of
         /// the transition, so a fairly quick fade already feels smooth.
@@ -72,7 +83,7 @@ public final class DisplayVeilModel {
         /// exit. Slower on purpose: nothing is visibly settling underneath here,
         /// so the fade *is* the whole transition. At the dynamic-range duration
         /// the picture reads as snapping in rather than resolving out of black.
-        public var frameRateFadeOut: TimeInterval = 0.9
+        public var frameRateFadeOut: TimeInterval = 0.7
         /// Floor on the post-settle hold, so even a near-instant settle keeps black
         /// up long enough to hide a small physical lag (and avoids a flash on Home).
         public var minPostSettle: TimeInterval = 0.8
@@ -87,14 +98,18 @@ public final class DisplayVeilModel {
         public var safetyCap: TimeInterval = 6.0
         public init(
             noSettleHold: TimeInterval = 2.5,
+            frameRateNoSettleHold: TimeInterval = 2.0,
+            frameRateMaxPostSettle: TimeInterval = 1.6,
             fadeOut: TimeInterval = 0.4,
-            frameRateFadeOut: TimeInterval = 0.9,
+            frameRateFadeOut: TimeInterval = 0.7,
             minPostSettle: TimeInterval = 0.8,
             maxPostSettle: TimeInterval = 2.2,
             settleLagMultiplier: Double = 1.0,
             safetyCap: TimeInterval = 6.0
         ) {
             self.noSettleHold = noSettleHold
+            self.frameRateNoSettleHold = frameRateNoSettleHold
+            self.frameRateMaxPostSettle = frameRateMaxPostSettle
             self.fadeOut = fadeOut
             self.frameRateFadeOut = frameRateFadeOut
             self.minPostSettle = minPostSettle
@@ -148,9 +163,10 @@ public final class DisplayVeilModel {
     /// layer is already in place beneath the player's `fullScreenCover` and keeps
     /// covering the screen once the player tears down into Home.
     ///
-    /// `kind` picks how fast the veil fades back out at the end. Both kinds get the
-    /// same *hold*: a frame-rate handshake blanks the panel just like a
-    /// dynamic-range one, so the black has to outlast it either way.
+    /// `kind` trims the tail of a frame-rate-only exit — a shorter blind fallback,
+    /// a lower post-settle ceiling and a quicker fade. The post-settle *floor* is
+    /// shared: it's what keeps the fade behind the panel blank, and specialising
+    /// it is what previously made the picture snap in.
     ///
     /// Idempotent within a single exit: re-engaging while already engaged restarts
     /// the timers from now (e.g. a second leave gesture) rather than stacking them.
@@ -164,7 +180,9 @@ public final class DisplayVeilModel {
         let sleep = self.sleep
         // No-settle fallback: if the display never reports a mode-switch-end, clear
         // after a hold that still covers a typical physical switch.
-        let fallback = configuration.noSettleHold
+        let fallback = kind == .frameRate
+            ? configuration.frameRateNoSettleHold
+            : configuration.noSettleHold
         holdTask = Task { @MainActor [weak self] in
             try? await sleep(fallback)
             guard !Task.isCancelled else { return }
@@ -187,7 +205,7 @@ public final class DisplayVeilModel {
     public func displayDidSettle() {
         guard isEngaged else { return }
         let gap = max(0, now() - engagedAt)
-        let buffer = postSettleHold(forGap: gap)
+        let buffer = postSettleHold(forGap: gap, kind: engagedKind)
 
         // Replace whatever lower-timer is pending (the no-settle fallback, or an
         // earlier settle's hold) with one keyed off this — the latest — settle, so
@@ -203,10 +221,18 @@ public final class DisplayVeilModel {
 
     /// The adaptive post-settle hold for a given engage→settle gap: proportional to
     /// the TV's observed sluggishness, clamped so fast TVs stay snappy and slow TVs
-    /// can't hang the exit. Pure and `static`-like for direct unit testing.
-    public func postSettleHold(forGap gap: TimeInterval) -> TimeInterval {
+    /// can't hang the exit. A frame-rate-only exit lowers the *ceiling* only — the
+    /// floor is shared, since that's what keeps the fade behind the panel blank.
+    /// Pure and `static`-like for direct unit testing.
+    public func postSettleHold(
+        forGap gap: TimeInterval,
+        kind: DisplayTransitionKind = .dynamicRange
+    ) -> TimeInterval {
         let scaled = gap * configuration.settleLagMultiplier
-        return min(configuration.maxPostSettle, max(configuration.minPostSettle, scaled))
+        let ceiling = kind == .frameRate
+            ? configuration.frameRateMaxPostSettle
+            : configuration.maxPostSettle
+        return min(ceiling, max(configuration.minPostSettle, scaled))
     }
 
     /// Drop the veil now and cancel all pending timers. Safe to call repeatedly.

@@ -289,17 +289,41 @@ final class DisplayVeilModelTests: XCTestCase {
         XCTAssertEqual(model.fadeOutDuration, 0.9, accuracy: 1e-9)
     }
 
-    func testBothKindsHoldForTheSameBudget() async {
-        // A frame-rate handshake blanks the panel just like a dynamic-range one,
-        // so the black has to outlast it either way — an under-short hold is what
-        // makes the picture appear to snap in rather than fade.
+    func testFrameRateTrimsTheTailButNotThePostSettleFloor() {
+        // The frame-rate exit is trimmed at the top end only. Its FLOOR must stay
+        // equal to the dynamic-range one: that floor is what holds black past the
+        // panel blank, and cutting it is what made the picture snap in.
+        let model = DisplayVeilModel(
+            configuration: .init(
+                frameRateMaxPostSettle: 1.6,
+                minPostSettle: 0.8,
+                maxPostSettle: 2.2,
+                settleLagMultiplier: 1.0
+            )
+        )
+        // Floor: identical for both kinds.
+        XCTAssertEqual(model.postSettleHold(forGap: 0.1, kind: .frameRate), 0.8, accuracy: 1e-9)
+        XCTAssertEqual(model.postSettleHold(forGap: 0.1, kind: .dynamicRange), 0.8, accuracy: 1e-9)
+        // Proportional band: identical while under the lower ceiling.
+        XCTAssertEqual(model.postSettleHold(forGap: 1.2, kind: .frameRate), 1.2, accuracy: 1e-9)
+        // Ceiling: frame rate caps sooner, so a slow-reporting TV can't stretch an
+        // SDR exit as far as a Dolby Vision one.
+        XCTAssertEqual(model.postSettleHold(forGap: 5.0, kind: .frameRate), 1.6, accuracy: 1e-9)
+        XCTAssertEqual(model.postSettleHold(forGap: 5.0, kind: .dynamicRange), 2.2, accuracy: 1e-9)
+    }
+
+    func testFrameRateUsesTheTrimmedBlindFallback() async {
         let sleeper = TaggedSleeper()
         let clock = MutableClock()
-        let model = makeModel(sleeper, clock: clock)
+        let model = makeModel(
+            sleeper,
+            clock: clock,
+            config: .init(noSettleHold: 2.5, frameRateNoSettleHold: 2.0, safetyCap: 6.0)
+        )
 
         model.engage(kind: .frameRate)
-        await assertEventually { sleeper.hasPending(2.5) } // the shared no-settle hold
-        XCTAssertEqual(model.postSettleHold(forGap: 1.5), 1.5, accuracy: 1e-9)
+        await assertEventually { sleeper.hasPending(2.0) }
+        XCTAssertFalse(sleeper.hasPending(2.5), "the dynamic-range fallback must not be armed")
     }
 
     func testLowerClearsImmediately() {

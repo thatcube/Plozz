@@ -594,7 +594,7 @@ struct PlaybackDetailView: View {
             SettingsSplitRow(
                 id: "display-fades",
                 title: "Fade on display changes",
-                description: "Your TV blanks while it switches picture mode or frame rate, so Plozz holds black through it. If your Apple TV doesn't use Match Content, turn these off for instant transitions.",
+                description: "If you don't match dynamic range or frame rate on your Apple TV, turn these off for faster transitions.",
             ) {
                 VStack(alignment: .leading, spacing: 24) {
                     Toggle("HDR & Dolby Vision", isOn: $playback.settings.fadeOnDynamicRangeChange)

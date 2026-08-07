@@ -323,10 +323,10 @@ final class HDRTransitionModelTests: XCTestCase {
 
     // MARK: Exit (HDR/DV → SDR on leaving playback)
 
-    func testSDRExitRaisesNoVeil() {
-        // Leaving SDR content has no panel mode switch to hide — no needless black.
+    func testNilKindExitRaisesNoVeil() {
+        // Both fades off in Settings — nothing to hide, so no needless black.
         let model = HDRTransitionModel()
-        XCTAssertFalse(model.beginExit(isHDR: false))
+        XCTAssertFalse(model.beginExit(kind: nil))
         XCTAssertEqual(model.veilOpacity, 0)
         XCTAssertFalse(model.isVeiled)
         XCTAssertFalse(model.isExiting)
@@ -336,7 +336,7 @@ final class HDRTransitionModelTests: XCTestCase {
         let sleeper = TaggedSleeper()
         let model = makeModel(sleeper)
 
-        XCTAssertTrue(model.beginExit(isHDR: true))
+        XCTAssertTrue(model.beginExit(kind: .dynamicRange))
         XCTAssertEqual(model.veilOpacity, 1)
         XCTAssertTrue(model.isExiting)
         // The exit safety timeout (5.0) is armed up front so a missing settle
@@ -348,7 +348,7 @@ final class HDRTransitionModelTests: XCTestCase {
         let sleeper = TaggedSleeper()
         let model = makeModel(sleeper)
 
-        XCTAssertTrue(model.beginExit(isHDR: true))
+        XCTAssertTrue(model.beginExit(kind: .dynamicRange))
         await assertEventually { sleeper.pendingCount == 1 } // exit safety timeout
 
         var exited = false
@@ -382,7 +382,7 @@ final class HDRTransitionModelTests: XCTestCase {
         let sleeper = TaggedSleeper()
         let model = makeModel(sleeper)
 
-        XCTAssertTrue(model.beginExit(isHDR: true))
+        XCTAssertTrue(model.beginExit(kind: .dynamicRange))
         await assertEventually { sleeper.pendingCount == 1 }
 
         var exited = false
@@ -406,7 +406,7 @@ final class HDRTransitionModelTests: XCTestCase {
         let sleeper = TaggedSleeper()
         let model = makeModel(sleeper)
 
-        XCTAssertTrue(model.beginExit(isHDR: true))
+        XCTAssertTrue(model.beginExit(kind: .dynamicRange))
         await assertEventually { sleeper.pendingCount == 1 }
 
         // Settle arrives and the hold elapses before anyone awaits the exit.
@@ -430,7 +430,7 @@ final class HDRTransitionModelTests: XCTestCase {
         let sleeper = TaggedSleeper()
         let model = makeModel(sleeper)
 
-        XCTAssertTrue(model.beginExit(isHDR: true))
+        XCTAssertTrue(model.beginExit(kind: .dynamicRange))
 
         var faded = false
         let waiter = Task { @MainActor in
@@ -461,6 +461,63 @@ final class HDRTransitionModelTests: XCTestCase {
         sleeper.release(matching: 0.35)
         await assertEventually { model.veilOpacity == 0 }
         XCTAssertFalse(model.isVeiled)
+    }
+    // MARK: Dynamic-range fade toggle (Settings)
+
+    func testDisabledDynamicRangeFadeRaisesNoEnterVeil() {
+        // A viewer with Match Dynamic Range off turns the fade off; entering HDR
+        // content must then never park them behind black.
+        let model = HDRTransitionModel()
+        model.isDynamicRangeFadeEnabled = false
+
+        XCTAssertTrue(model.beginTransition(from: .sdr, to: .dolbyVision))
+        XCTAssertEqual(model.veilOpacity, 0)
+        XCTAssertFalse(model.isVeiled)
+
+        model.raiseVeil()
+        XCTAssertEqual(model.veilOpacity, 0)
+
+        model.beginProbeTransition(replacing: .sdr)
+        XCTAssertEqual(model.veilOpacity, 0)
+    }
+
+    func testDisablingDynamicRangeFadeDropsAVeilAlreadyUp() {
+        // Flipping the toggle off mid-flight must not leave black on screen.
+        let model = HDRTransitionModel()
+        model.raiseVeil()
+        XCTAssertEqual(model.veilOpacity, 1)
+
+        model.isDynamicRangeFadeEnabled = false
+        XCTAssertEqual(model.veilOpacity, 0)
+    }
+
+    func testDisablingDynamicRangeFadeLeavesAnExitVeilAlone() {
+        // The exit veil is gated by the caller (it also covers the frame-rate
+        // case), so the enter-path switch must never yank it away mid-dismiss.
+        let model = HDRTransitionModel()
+        XCTAssertTrue(model.beginExit(kind: .frameRate))
+        model.isDynamicRangeFadeEnabled = false
+        XCTAssertEqual(model.veilOpacity, 1)
+        XCTAssertTrue(model.isExiting)
+    }
+
+    func testFrameRateExitUsesTighterSafetyTimeout() async {
+        // Leaving an SDR title must not risk the generous dynamic-range budget.
+        let sleeper = TaggedSleeper()
+        let model = HDRTransitionModel(
+            configuration: HDRTransitionModel.Configuration(
+                exitSettleTimeout: 5.0,
+                frameRateExitSettleTimeout: 2.0
+            ),
+            sleep: { try await sleeper.sleep($0) }
+        )
+
+        XCTAssertTrue(model.beginExit(kind: .frameRate))
+        XCTAssertEqual(model.veilOpacity, 1)
+        await assertEventually { sleeper.pendingCount == 1 }
+        // The 2.0s frame-rate cap is what's armed, not the 5.0s one.
+        sleeper.release(matching: 2.0)
+        await model.waitForExit()
     }
 }
 #endif

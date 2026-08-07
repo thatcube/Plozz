@@ -254,7 +254,7 @@ final class PlayerViewModelEOFTests: XCTestCase {
                 viewModel.effectiveDynamicRange,
                 .awaitingEngineProbe(hint: nil)
             )
-            XCTAssertTrue(viewModel.requiresHDRExitVeil)
+            XCTAssertEqual(viewModel.exitVeilKind, .dynamicRange)
 
             plozzigen.onProbedSourceFactsChanged?(
                 EngineProbedSourceFacts(range: range)
@@ -264,7 +264,7 @@ final class PlayerViewModelEOFTests: XCTestCase {
                 viewModel.effectiveDynamicRange,
                 .resolved(range, authority: .engineProbe)
             )
-            XCTAssertTrue(viewModel.requiresHDRExitVeil)
+            XCTAssertEqual(viewModel.exitVeilKind, .dynamicRange)
             XCTAssertTrue(viewModel.controls.subtitlesRenderHDR)
             let playbackInfoCalls = await provider.playbackInfoCallCount
             let itemCalls = await provider.itemCallCount
@@ -303,9 +303,48 @@ final class PlayerViewModelEOFTests: XCTestCase {
             viewModel.effectiveDynamicRange,
             .resolved(.sdr, authority: .engineProbe)
         )
-        XCTAssertFalse(viewModel.requiresHDRExitVeil)
+        // SDR now takes the frame-rate exit veil (Match Frame Rate hands the
+        // display back on the way out); it is no longer a bare dismiss.
+        XCTAssertEqual(viewModel.exitVeilKind, .frameRate)
         XCTAssertFalse(viewModel.controls.subtitlesRenderHDR)
         await viewModel.stop()
+    }
+
+    func testExitVeilKindFollowsTheProfilesFadeToggles() async throws {
+        // Both fades off: leaving any title dismisses immediately, no black.
+        let request = try makeNetworkFileRequest(
+            metadata: MediaSourceMetadata(video: .init(videoRangeType: "HDR10"))
+        )
+        func makeViewModel(_ settings: PlaybackSettings) -> PlayerViewModel {
+            PlayerViewModel(
+                provider: RecordingPlaybackProvider(request: request),
+                itemID: request.item.id,
+                playbackSettings: settings,
+                engineFactory: EngineFactory(
+                    makeNative: { _ in SpyVideoEngine() },
+                    makePlozzigen: { SpyVideoEngine() }
+                )
+            )
+        }
+
+        let bothOff = makeViewModel(PlaybackSettings(
+            fadeOnDynamicRangeChange: false,
+            fadeOnFrameRateChange: false
+        ))
+        await bothOff.load()
+        XCTAssertNil(bothOff.exitVeilKind)
+        await bothOff.stop()
+
+        // Dynamic-range fade off but frame-rate fade on: HDR content still gets a
+        // veil, just the cheaper frame-rate one.
+        let frameRateOnly = makeViewModel(PlaybackSettings(
+            fadeOnDynamicRangeChange: false,
+            fadeOnFrameRateChange: true
+        ))
+        await frameRateOnly.load()
+        XCTAssertEqual(frameRateOnly.exitVeilKind, .frameRate)
+        XCTAssertFalse(frameRateOnly.fadesOnDynamicRangeChange)
+        await frameRateOnly.stop()
     }
 
     func testUnavailablePlozzigenFallsBackToNativeRangeTruth() async throws {

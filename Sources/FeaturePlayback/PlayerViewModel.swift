@@ -147,12 +147,25 @@ public final class PlayerViewModel {
     /// pending-range value, allowing the view to restart its pre-probe veil.
     public private(set) var dynamicRangeTransitionToken = UUID()
 
-    /// A pending Plozzigen probe is conservatively veiled on exit because the
-    /// engine may already have begun a display switch before publishing facts.
-    var requiresHDRExitVeil: Bool {
-        effectiveDynamicRange.isAwaitingEngineProbe
+    /// Which display handshake leaving this playback has to hide, or `nil` for
+    /// none (dismiss immediately, raising no needless black).
+    ///
+    /// A pending Plozzigen probe counts as a dynamic-range exit because the engine
+    /// may already have begun a display switch before publishing facts. Everything
+    /// else falls through to the frame-rate case: tvOS exposes no way to ask
+    /// whether *Match Frame Rate* is on, so when the viewer leaves that fade
+    /// enabled we cover the exit unconditionally — with the tighter frame-rate
+    /// hold, so an SDR title still returns to Home promptly.
+    var exitVeilKind: DisplayTransitionKind? {
+        let isDynamicRangeExit = effectiveDynamicRange.isAwaitingEngineProbe
             || (effectiveDynamicRange.bestAvailable?.isHDR ?? false)
+        if isDynamicRangeExit, playbackSettings.fadeOnDynamicRangeChange { return .dynamicRange }
+        if playbackSettings.fadeOnFrameRateChange { return .frameRate }
+        return nil
     }
+
+    /// Whether the enter-path dynamic-range veil is allowed for this profile.
+    var fadesOnDynamicRangeChange: Bool { playbackSettings.fadeOnDynamicRangeChange }
 
     /// Shared, observable transport state for the custom player overlay. The
     /// view model writes live playback facts here; the input controller writes

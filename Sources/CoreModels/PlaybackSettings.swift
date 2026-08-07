@@ -78,6 +78,22 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// counterpart to `rememberAudioTrackPerSeries`. ON by default.
     public var rememberSubtitleTrackPerSeries: Bool
 
+    /// Fade to black around the HDMI handshake the TV performs when the **dynamic
+    /// range** changes (SDR ⇄ HDR10 / HLG / Dolby Vision) — i.e. what tvOS calls
+    /// *Match Dynamic Range*. ON by default: entering and leaving an HDR/DV title
+    /// hides the panel's mode switch behind black instead of flashing. Turn OFF
+    /// if you don't use Match Dynamic Range and prefer the snappiest transitions.
+    public var fadeOnDynamicRangeChange: Bool
+
+    /// Fade to black when leaving playback of content whose dynamic range *isn't*
+    /// changing, to absorb the handshake blip the TV produces when tvOS's *Match
+    /// Frame Rate* drops the display back from the movie's rate (23.976/24/25 Hz)
+    /// to the UI's. There's no API that reports whether Match Frame Rate is on,
+    /// so this is ON by default (it's the setup that flashes) and OFF is the
+    /// escape hatch for anyone who has frame-rate matching disabled and would
+    /// rather return to Home instantly.
+    public var fadeOnFrameRateChange: Bool
+
     public init(
         skipIntros: SkipIntrosMode = .off,
         skipBackwardInterval: SkipInterval = .ten,
@@ -89,7 +105,9 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         upNextLeadSeconds: Int = 30,
         audioLanguagePreference: AudioLanguagePreference = .original,
         rememberAudioTrackPerSeries: Bool = true,
-        rememberSubtitleTrackPerSeries: Bool = true
+        rememberSubtitleTrackPerSeries: Bool = true,
+        fadeOnDynamicRangeChange: Bool = true,
+        fadeOnFrameRateChange: Bool = true
     ) {
         self.skipIntros = skipIntros
         self.skipBackwardInterval = skipBackwardInterval
@@ -102,6 +120,8 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         self.audioLanguagePreference = audioLanguagePreference
         self.rememberAudioTrackPerSeries = rememberAudioTrackPerSeries
         self.rememberSubtitleTrackPerSeries = rememberSubtitleTrackPerSeries
+        self.fadeOnDynamicRangeChange = fadeOnDynamicRangeChange
+        self.fadeOnFrameRateChange = fadeOnFrameRateChange
     }
 
     public static let `default` = PlaybackSettings()
@@ -130,6 +150,8 @@ public extension PlaybackSettings {
         case preferOriginalLanguageAudio
         case rememberAudioTrackPerSeries
         case rememberSubtitleTrackPerSeries
+        case fadeOnDynamicRangeChange
+        case fadeOnFrameRateChange
     }
 
     /// Decodes leniently so a payload written before a field existed (or in the
@@ -193,6 +215,14 @@ public extension PlaybackSettings {
         self.rememberSubtitleTrackPerSeries =
             (try? container.decodeIfPresent(Bool.self, forKey: .rememberSubtitleTrackPerSeries))
             .flatMap { $0 } ?? defaults.rememberSubtitleTrackPerSeries
+        // Both fades default to `true` when absent so installs that predate the
+        // toggles keep (dynamic range) / gain (frame rate) the smooth transition.
+        self.fadeOnDynamicRangeChange =
+            (try? container.decodeIfPresent(Bool.self, forKey: .fadeOnDynamicRangeChange))
+            .flatMap { $0 } ?? defaults.fadeOnDynamicRangeChange
+        self.fadeOnFrameRateChange =
+            (try? container.decodeIfPresent(Bool.self, forKey: .fadeOnFrameRateChange))
+            .flatMap { $0 } ?? defaults.fadeOnFrameRateChange
     }
 
     /// Explicit encoder so the legacy-only `preferOriginalLanguageAudio` coding
@@ -212,5 +242,7 @@ public extension PlaybackSettings {
         try container.encode(audioLanguagePreference, forKey: .audioLanguagePreference)
         try container.encode(rememberAudioTrackPerSeries, forKey: .rememberAudioTrackPerSeries)
         try container.encode(rememberSubtitleTrackPerSeries, forKey: .rememberSubtitleTrackPerSeries)
+        try container.encode(fadeOnDynamicRangeChange, forKey: .fadeOnDynamicRangeChange)
+        try container.encode(fadeOnFrameRateChange, forKey: .fadeOnFrameRateChange)
     }
 }

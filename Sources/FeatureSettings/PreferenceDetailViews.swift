@@ -382,6 +382,7 @@ struct PlaybackDetailView: View {
             skipIntervalsSection,
             resumeSection,
             scrubbingSection,
+            displayTransitionsSection,
             upNextSection
         ]
     }
@@ -597,8 +598,26 @@ struct PlaybackDetailView: View {
         ])
     }
 
-    private var upNextSection: SettingsSplitSection {
-        SettingsSplitSection(id: "up-next", header: "Up Next", rows: [
+    private var displayTransitionsSection: SettingsSplitSection {
+        SettingsSplitSection(id: "display-transitions", header: "Display Transitions", rows: [
+            SettingsSplitRow(
+                id: "fade-dynamic-range",
+                title: "Fade for HDR & Dolby Vision",
+                description: "Your TV renegotiates the HDMI signal when a title switches between SDR, HDR and Dolby Vision, and that handshake flashes. Plozz fades to black around it. Turn this off only if Match Dynamic Range is off on your Apple TV.",
+            ) {
+                Toggle("Fade for HDR & Dolby Vision", isOn: $playback.settings.fadeOnDynamicRangeChange)
+            },
+            SettingsSplitRow(
+                id: "fade-frame-rate",
+                title: "Fade for frame rate changes",
+                description: "With Match Frame Rate on, leaving a 24fps title makes your TV hand back to the Home Screen's refresh rate — another flash, on every video, not just HDR ones. Plozz fades through it. Turn this off if Match Frame Rate is off on your Apple TV and you'd rather return to Home instantly.",
+            ) {
+                Toggle("Fade for frame rate changes", isOn: $playback.settings.fadeOnFrameRateChange)
+            }
+        ])
+    }
+
+    private var upNextSection: SettingsSplitSection {        SettingsSplitSection(id: "up-next", header: "Up Next", rows: [
             SettingsSplitRow(
                 id: "show-up-next-card",
                 title: "Show Up Next card",

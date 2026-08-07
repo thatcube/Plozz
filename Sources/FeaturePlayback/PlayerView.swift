@@ -111,6 +111,7 @@ public struct PlayerView: View {
     private var configuredPlayerStack: some View {
         playerStack
         .onAppear {
+            hdrTransition.isDynamicRangeFadeEnabled = viewModel.fadesOnDynamicRangeChange
             hdrTransition.synchronize(
                 with: viewModel.effectiveDynamicRange,
                 inheritedPreservedRange: viewModel.inheritedPreservedDynamicRange
@@ -316,18 +317,21 @@ public struct PlayerView: View {
         .ignoresSafeArea()
     }
 
-    /// Dismiss with an HDR-aware fade that keeps the screen fully black from the
-    /// moment exit begins until **after** the display has physically switched back
-    /// to SDR, so there is no flash on the player-dismiss → Home handoff — even on
-    /// TVs whose panel switches a beat *after* tvOS reports `displayDidSettle`.
+    /// Dismiss with a display-aware fade that keeps the screen fully black from the
+    /// moment exit begins until **after** the display has physically switched back,
+    /// so there is no flash on the player-dismiss → Home handoff — even on TVs whose
+    /// panel switches a beat *after* tvOS reports `displayDidSettle`.
     ///
-    /// SDR playback dismisses immediately (no mode switch to hide). For HDR/DV we:
+    /// `viewModel.exitVeilKind` decides what (if anything) is being hidden: an
+    /// HDR/Dolby-Vision → SDR switch, the Match Frame Rate drop back to the UI's
+    /// refresh rate, or nothing at all (both fades turned off in Settings → dismiss
+    /// immediately). When there is something to hide we:
     ///   1. raise the **player** veil and let it reach solid black (pre-empt) — this
     ///      hides the switch while the player's `fullScreenCover` is still up;
     ///   2. engage the **window** veil (`DisplayVeilModel`) at the app root, which
     ///      sits *beneath* the cover and survives the dismiss into Home;
-    ///   3. stop playback — this resets `preferredDisplayCriteria`, so the TV starts
-    ///      switching HDR/DV → SDR behind the black veil;
+    ///   3. stop playback — this resets `preferredDisplayCriteria` and drops the
+    ///      video signal, so the TV starts switching back behind the black veil;
     ///   4. dismiss promptly: the cover tears down onto the already-black window
     ///      veil, which holds through the slow physical switch and fades out after
     ///      an adaptive post-settle buffer (capped so it can never stick).
@@ -335,21 +339,21 @@ public struct PlayerView: View {
     /// If no window veil is available (previews/tests), fall back to the player-only
     /// behavior: wait for the in-player settle/timeout before dismissing.
     private func dismissSmoothly() {
-        guard viewModel.requiresHDRExitVeil else {
+        guard let exitKind = viewModel.exitVeilKind else {
             dismiss()
             return
         }
         guard !hdrTransition.isExiting else { return }
-        hdrTransition.beginExit(isHDR: true)
+        hdrTransition.beginExit(kind: exitKind)
         let windowVeil = displayVeil
-        windowVeil?.engage()
+        windowVeil?.engage(kind: exitKind)
         Task { @MainActor in
-            // 1. Let the player veil reach solid black before tearing the HDR
+            // 1. Let the player veil reach solid black before tearing the video
             //    surface down, so the switch never shows through a half-faded frame.
             await hdrTransition.awaitVeilOpaque()
-            // 2. Stop playback: resets `preferredDisplayCriteria`, so the TV starts
-            //    switching HDR/DV → SDR behind black. Run concurrently so the final
-            //    server progress report never prolongs the black.
+            // 2. Stop playback: resets `preferredDisplayCriteria` and ends the
+            //    signal, so the TV starts switching back behind black. Run
+            //    concurrently so the final server progress report never prolongs it.
             Task { await viewModel.stop() }
             if windowVeil != nil {
                 // 3. The window veil now owns coverage through the physical switch —

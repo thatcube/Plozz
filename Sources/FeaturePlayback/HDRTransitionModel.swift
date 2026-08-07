@@ -42,21 +42,41 @@ final class HDRTransitionModel {
         /// deliberately generous; it only fires as a last resort if the
         /// mode-switch-end callback never arrives, so the user is never stranded.
         var exitSettleTimeout: TimeInterval = 5.0
+        /// The same cap for a **frame-rate-only** exit (Match Frame Rate dropping
+        /// the display back to the UI's rate). A refresh-rate change is a much
+        /// cheaper handshake than a dynamic-range one, and it may not report a
+        /// mode-switch-end at all, so this is deliberately tighter — leaving an
+        /// SDR title must still feel instant.
+        var frameRateExitSettleTimeout: TimeInterval = 2.0
         init(
             maxBlackout: TimeInterval = 4.5,
             minVeil: TimeInterval = 0.35,
             veilFade: TimeInterval = 0.35,
-            exitSettleTimeout: TimeInterval = 5.0
+            exitSettleTimeout: TimeInterval = 5.0,
+            frameRateExitSettleTimeout: TimeInterval = 2.0
         ) {
             self.maxBlackout = maxBlackout
             self.minVeil = minVeil
             self.veilFade = veilFade
             self.exitSettleTimeout = exitSettleTimeout
+            self.frameRateExitSettleTimeout = frameRateExitSettleTimeout
         }
     }
 
     let configuration: Configuration
     private let sleep: @Sendable (TimeInterval) async throws -> Void
+
+    /// Whether the dynamic-range veil is allowed to be raised at all. Mirrors the
+    /// profile's `PlaybackSettings.fadeOnDynamicRangeChange`. When `false` every
+    /// enter-path entry point is a no-op (and any veil already up is dropped), so
+    /// a viewer who doesn't use Match Dynamic Range never waits behind black.
+    /// The exit path is gated by the caller, which also owns the frame-rate case.
+    var isDynamicRangeFadeEnabled = true {
+        didSet {
+            guard !isDynamicRangeFadeEnabled, oldValue, !isExiting else { return }
+            lowerVeil()
+        }
+    }
 
     private var safetyTask: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
@@ -212,6 +232,9 @@ final class HDRTransitionModel {
     }
 
     private func armVeil() {
+        // Single choke point for the enter path: with the dynamic-range fade off,
+        // no veil is ever raised (the bookkeeping above stays inert without one).
+        guard isDynamicRangeFadeEnabled else { return }
         veilOpacity = 1
         let sleep = self.sleep
         let timeout = configuration.maxBlackout
@@ -260,15 +283,16 @@ final class HDRTransitionModel {
 
     // MARK: - Exit (HDR/DV → SDR on leaving playback)
 
-    /// Begin the exit transition when leaving HDR/Dolby-Vision playback. If the
-    /// display will switch back to SDR (`isHDR == true`), raise the veil to full
-    /// black and arm the exit safety timeout, then return `true`; the caller must
-    /// `awaitVeilOpaque()`, trigger the SDR restore, `await waitForExit()`, and
-    /// only then dismiss. Returns `false` for SDR content (no switch to hide — the
-    /// caller dismisses immediately, raising no needless black).
+    /// Begin the exit transition when leaving playback. `kind` says which display
+    /// handshake the black is hiding: `.dynamicRange` for HDR/Dolby-Vision → SDR,
+    /// `.frameRate` for the Match Frame Rate drop back to the UI's refresh rate.
+    /// Raises the veil to full black and arms the exit safety timeout, then returns
+    /// `true`; the caller must `awaitVeilOpaque()`, trigger the restore, `await
+    /// waitForExit()`, and only then dismiss. Returns `false` for `nil` (nothing to
+    /// hide — the caller dismisses immediately, raising no needless black).
     @discardableResult
-    func beginExit(isHDR: Bool) -> Bool {
-        guard isHDR else { return false }
+    func beginExit(kind: DisplayTransitionKind?) -> Bool {
+        guard let kind else { return false }
         cancelTasks()
         isAwaitingProbeResolution = false
         didSettleWhileAwaitingProbe = false
@@ -276,7 +300,9 @@ final class HDRTransitionModel {
         exitFinished = false
         veilOpacity = 1
         let sleep = self.sleep
-        let timeout = configuration.exitSettleTimeout
+        let timeout = kind == .frameRate
+            ? configuration.frameRateExitSettleTimeout
+            : configuration.exitSettleTimeout
         safetyTask = Task { @MainActor [weak self] in
             try? await sleep(timeout)
             guard !Task.isCancelled else { return }

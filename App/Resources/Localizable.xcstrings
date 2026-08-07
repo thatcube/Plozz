@@ -116396,6 +116396,226 @@
         }
       }
     },
+    "Fade on display changes" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "التلاشي عند تغيّر العرض"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Затъмняване при смяна на дисплея"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Enfosquiment en canviar la pantalla"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prolnutí při změně zobrazení"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nedtoning ved skærmskift"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Überblenden bei Anzeigewechsel"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Σβήσιμο κατά την αλλαγή οθόνης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fundido al cambiar la pantalla"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "محو هنگام تغییر نمایش"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Häivytys näytön vaihtuessa"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fondu lors des changements d'affichage"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "עמעום בעת שינוי תצוגה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "डिस्प्ले बदलने पर फ़ेड"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zatamnjenje pri promjeni prikaza"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Áttűnés kijelzőváltáskor"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pudar saat tampilan berubah"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dissolvenza al cambio di visualizzazione"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ディスプレイ切り替え時にフェード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "디스플레이 전환 시 페이드"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pudar semasa paparan berubah"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toning ved skjermbytte"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vervagen bij beeldwissel"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wygaszanie przy zmianie obrazu"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Esmaecer ao mudar a tela"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Estompare la schimbarea afișajului"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Затемнение при смене режима экрана"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prelínanie pri zmene zobrazenia"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zatemnitev ob spremembi zaslona"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zatamnjenje pri promeni prikaza"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toning vid skärmbyte"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เฟดเมื่อจอเปลี่ยนโหมด"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ekran değişiminde kararma"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Затемнення під час зміни екрана"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Làm mờ khi màn hình chuyển chế độ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "显示切换时淡入淡出"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "顯示切換時淡入淡出"
+          }
+        }
+      }
+    },
     "Failed" : {
       "comment" : "Generic failure status used in playback diagnostics, download status rows, and season request states when the action did not succeed.",
       "localizations" : {
@@ -123469,6 +123689,226 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "前進"
+          }
+        }
+      }
+    },
+    "Frame rate" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "معدّل الإطارات"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Кадрова честота"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Velocitat de fotogrames"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Snímková frekvence"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Billedhastighed"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bildrate"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ρυθμός καρέ"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Frecuencia de fotogramas"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "نرخ فریم"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kuvataajuus"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fréquence d'images"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "קצב פריימים"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "फ़्रेम दर"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Broj sličica u sekundi"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Képkockasebesség"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Laju bingkai"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Frequenza dei fotogrammi"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "フレームレート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "프레임 속도"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kadar bingkai"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bildefrekvens"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Framerate"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Liczba klatek na sekundę"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Taxa de quadros"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rată de cadre"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Частота кадров"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Snímková frekvencia"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hitrost sličic"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Broj slika u sekundi"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bildfrekvens"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "อัตราเฟรม"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kare hızı"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Частота кадрів"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tốc độ khung hình"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "帧率"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "影格速率"
           }
         }
       }
@@ -134954,6 +135394,226 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "若此共享需要不同的帳號，請輸入使用者名稱與密碼再試一次。"
+          }
+        }
+      }
+    },
+    "If you don't match dynamic range or frame rate on your Apple TV, turn these off for faster transitions." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إذا كنت لا تُطابق النطاق الديناميكي أو معدّل الإطارات على Apple TV، فأوقف هذه الخيارات للحصول على انتقالات أسرع."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ако не съгласувате динамичния обхват или кадровата честота на вашия Apple TV, изключете тези опции за по-бързи преходи."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Si no ajustes el rang dinàmic ni la velocitat de fotogrames a l'Apple TV, desactiva-ho per fer transicions més ràpides."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pokud na Apple TV nepřizpůsobujete dynamický rozsah ani snímkovou frekvenci, vypněte tyto volby pro rychlejší přechody."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hvis du ikke tilpasser dynamisk område eller billedhastighed på dit Apple TV, kan du slå disse fra for hurtigere overgange."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wenn du auf deinem Apple TV Dynamikbereich und Bildrate nicht anpasst, deaktiviere diese Optionen für schnellere Übergänge."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αν δεν αντιστοιχίζετε το δυναμικό εύρος ή τον ρυθμό καρέ στο Apple TV, απενεργοποιήστε τα για ταχύτερες μεταβάσεις."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Si no ajustas el rango dinámico ni la frecuencia de fotogramas en tu Apple TV, desactívalos para lograr transiciones más rápidas."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "اگر در Apple TV خود دامنه دینامیکی یا نرخ فریم را تطبیق نمی‌دهید، این گزینه‌ها را برای انتقال سریع‌تر خاموش کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jos et sovita dynamiikka-aluetta tai kuvataajuutta Apple TV:ssä, poista nämä käytöstä nopeampia siirtymiä varten."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Si vous n'adaptez ni la plage dynamique ni la fréquence d'images sur votre Apple TV, désactivez ces options pour des transitions plus rapides."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "אם אינך מתאים טווח דינמי או קצב פריימים ב‑Apple TV שלך, כבה אפשרויות אלה למעברים מהירים יותר."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "अगर आप अपने Apple TV पर डायनामिक रेंज या फ़्रेम दर मैच नहीं करते, तो तेज़ ट्रांज़िशन के लिए इन्हें बंद कर दें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ako na Apple TV-u ne usklađujete dinamički raspon ni broj sličica, isključite ovo za brže prijelaze."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ha nem igazítod a dinamikatartományt vagy a képkockasebességet az Apple TV-n, kapcsold ki ezeket a gyorsabb átmenetekért."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jika Anda tidak menyesuaikan rentang dinamis atau laju bingkai di Apple TV, matikan ini untuk transisi lebih cepat."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Se non adatti la gamma dinamica o la frequenza dei fotogrammi sulla tua Apple TV, disattivale per transizioni più rapide."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apple TV でダイナミックレンジやフレームレートを一致させていない場合は、オフにすると切り替えが速くなります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apple TV에서 다이내믹 레인지나 프레임 속도를 일치시키지 않는다면, 이 옵션을 꺼서 더 빠르게 전환하세요."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jika anda tidak memadankan julat dinamik atau kadar bingkai pada Apple TV anda, matikan ini untuk peralihan lebih pantas."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hvis du ikke tilpasser dynamisk område eller bildefrekvens på Apple TV, kan du slå dette av for raskere overganger."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Als je op je Apple TV het dynamisch bereik of de framerate niet aanpast, schakel deze dan uit voor snellere overgangen."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jeśli nie dopasowujesz zakresu dynamiki ani liczby klatek na Apple TV, wyłącz te opcje, aby przyspieszyć przejścia."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Se você não ajusta o alcance dinâmico nem a taxa de quadros na sua Apple TV, desative isso para transições mais rápidas."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dacă nu potriviți gama dinamică sau rata de cadre pe Apple TV, dezactivați aceste opțiuni pentru tranziții mai rapide."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Если вы не согласуете динамический диапазон и частоту кадров на Apple TV, отключите это для более быстрых переходов."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ak na Apple TV neprispôsobujete dynamický rozsah ani snímkovú frekvenciu, vypnite tieto voľby pre rýchlejšie prechody."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Če na Apple TV ne prilagajate dinamičnega razpona ali hitrosti sličic, to izklopite za hitrejše prehode."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ako na Apple TV-u ne usklađujete dinamički opseg ni broj slika u sekundi, isključite ovo za brže prelaze."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Om du inte anpassar dynamiskt omfång eller bildfrekvens på din Apple TV kan du stänga av detta för snabbare övergångar."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "หากคุณไม่ได้จับคู่ไดนามิกเรนจ์หรืออัตราเฟรมบน Apple TV ให้ปิดตัวเลือกเหล่านี้เพื่อการเปลี่ยนภาพที่เร็วขึ้น"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apple TV'nizde dinamik aralığı veya kare hızını eşleştirmiyorsanız, daha hızlı geçişler için bunları kapatın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Якщо ви не узгоджуєте динамічний діапазон або частоту кадрів на Apple TV, вимкніть це для швидших переходів."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nếu bạn không khớp dải động hoặc tốc độ khung hình trên Apple TV, hãy tắt các tùy chọn này để chuyển cảnh nhanh hơn."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "如果你的 Apple TV 未匹配动态范围或帧率，可关闭这些选项以加快切换速度。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "如果你的 Apple TV 未比對動態範圍或影格速率，可關閉這些選項以加快切換速度。"
           }
         }
       }
@@ -251885,6 +252545,7 @@
     },
     "Scrubbing" : {
       "comment" : "Section header in Playback settings for seek and scrub behavior options.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -283780,6 +284441,7 @@
       }
     },
     "Skip Intros & Credits" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -348426,6 +349088,7 @@
     },
     "Watch Status" : {
       "comment" : "Section header in Settings > Integrations on tvOS. Groups watch-status sync options across servers.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -371879,12 +372542,6 @@
       "comment" : "Shown on Home when the profile has hidden every library from the Home screen.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Every library is hidden from Home. Turn one back on in Settings › Libraries."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -371925,6 +372582,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όλες οι βιβλιοθήκες είναι κρυμμένες από την Αρχική. Ενεργοποιήστε ξανά κάποια στις Ρυθμίσεις › Βιβλιοθήκες."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Every library is hidden from Home. Turn one back on in Settings › Libraries."
           }
         },
         "es" : {
@@ -372107,12 +372770,6 @@
       "comment" : "Shown on Home when no media server has been added to the device.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Add a media server in Settings to see your libraries here."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -372153,6 +372810,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Προσθέστε έναν διακομιστή πολυμέσων στις Ρυθμίσεις για να δείτε τις βιβλιοθήκες σας εδώ."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add a media server in Settings to see your libraries here."
           }
         },
         "es" : {
@@ -372335,12 +372998,6 @@
       "comment" : "Button on the Home empty state that re-fetches content. Also the only focusable control there, so it is what keeps the screen navigable.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Reload"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -372381,6 +373038,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ανανέωση"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Reload"
           }
         },
         "es" : {
@@ -372563,12 +373226,6 @@
       "comment" : "Shown on Home when the profile has disabled every server it could watch from.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "This profile has every server switched off, so its libraries aren't shown. Turn one back on in Settings › Libraries."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -372609,6 +373266,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αυτό το προφίλ έχει απενεργοποιήσει όλους τους διακομιστές, επομένως οι βιβλιοθήκες δεν εμφανίζονται. Ενεργοποιήστε ξανά κάποιον στις Ρυθμίσεις › Βιβλιοθήκες."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This profile has every server switched off, so its libraries aren't shown. Turn one back on in Settings › Libraries."
           }
         },
         "es" : {
@@ -406377,7 +407040,7 @@
     },
     "settings.section.remoteControl" : {
       "comment" : "Settings section for how the Apple TV remote behaves, e.g. skip intervals. The physical remote control, not a remote server.",
-      "extractionState" : "extracted_with_value",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -406605,7 +407268,7 @@
     },
     "settings.section.resume" : {
       "comment" : "Settings section heading for resume behaviour, e.g. how far to rewind when resuming. A noun naming the topic, not the Resume button that starts playback.",
-      "extractionState" : "extracted_with_value",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {

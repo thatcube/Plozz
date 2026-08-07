@@ -597,7 +597,12 @@ struct PlaybackDetailView: View {
                 description: "If you don't match dynamic range or frame rate on your Apple TV, turn these off for faster transitions.",
             ) {
                 VStack(alignment: .leading, spacing: 24) {
-                    Toggle("HDR & Dolby Vision", isOn: $playback.settings.fadeOnDynamicRangeChange)
+                    // "HDR" and "Dolby Vision" are both `neverTranslate` brands, so
+                    // this label must reach the UI verbatim rather than entering the
+                    // catalog where a translator would have no way to know that.
+                    Toggle(isOn: $playback.settings.fadeOnDynamicRangeChange) {
+                        Text(verbatim: "HDR & Dolby Vision")
+                    }
                     Toggle("Frame rate", isOn: $playback.settings.fadeOnFrameRateChange)
                 }
             }

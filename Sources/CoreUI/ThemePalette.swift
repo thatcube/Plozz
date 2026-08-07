@@ -85,6 +85,11 @@ public struct ThemePalette: Equatable, Sendable {
     public let cardBorder: Color
     /// Primary text colour for the theme — titles and key values.
     public let primaryText: Color
+
+    /// One step below ``primaryText`` and clearly above ``secondaryText``. For
+    /// body copy that must stay comfortably readable over artwork - a hero
+    /// description - without pulling focus from the title above it.
+    public var primarySoftText: Color { primaryText.opacity(0.82) }
     /// Secondary / de-emphasised text colour — subtitles, supporting copy, and
     /// standard row icons. One tier below ``primaryText``. Held at 60% (the Apple
     /// HIG + Material 3 standard), which clears WCAG AA for body text (≈5.7–7.3:1)

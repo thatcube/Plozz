@@ -17,6 +17,9 @@ public struct SpoilerSafeOverviewText: View {
     /// cards must align in a grid (episode columns). The detail hero sets this
     /// `false` so a short synopsis doesn't leave a tall empty gap.
     private let reservesSpace: Bool
+    /// Emphasis for the copy itself. A hero passes `.primarySoft`, which keeps
+    /// a paragraph readable over artwork; list contexts keep the calmer default.
+    private let tier: PlozzTextTier
 
     public init(
         overview: String?,
@@ -25,8 +28,10 @@ public struct SpoilerSafeOverviewText: View {
         lineCount: Int = 3,
         fontSize: CGFloat = 22,
         maxWidth: CGFloat? = nil,
-        reservesSpace: Bool = true
+        reservesSpace: Bool = true,
+        tier: PlozzTextTier = .secondary
     ) {
+        self.tier = tier
         self.overview = overview
         self.hidesSpoilers = hidesSpoilers
         self.mode = mode
@@ -51,7 +56,7 @@ public struct SpoilerSafeOverviewText: View {
             }
         }
         .font(.system(size: fontSize))
-        .plozzForeground(.secondary)
+        .plozzForeground(tier)
         .lineSpacing(2)
         .lineLimit(lineCount)
         .frame(maxWidth: maxWidth, alignment: .topLeading)

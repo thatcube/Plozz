@@ -14,6 +14,16 @@ enum HeroForegroundGlass {
         }
     }
 
+    /// Body-copy ink: one step below primary, matching `PlozzTextTier.primarySoft`
+    /// on the detail page so a hero description reads the same on both screens.
+    static func softPrimaryInk() -> UIColor {
+        UIColor { traits in
+            traits.userInterfaceStyle == .light
+                ? UIColor(white: 0, alpha: 0.82)
+                : UIColor(white: 1, alpha: 0.82)
+        }
+    }
+
     /// Fully opaque secondary ink: softer than primary without transparency.
     static func secondaryInk() -> UIColor {
         UIColor { traits in

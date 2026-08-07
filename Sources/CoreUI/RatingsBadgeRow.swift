@@ -90,7 +90,10 @@ public struct RatingBadge: View {
             Text(rating.displayValue)
                 .font(valueFont)
                 .monospacedDigit()
-                .plozzForeground(.secondary)
+                // Full strength, like the tile variant below and like the
+                // certificate and capability chips this sits beside. At
+                // `.secondary` the score read as disabled next to them.
+                .plozzForeground(.primary)
         }
         // Preserve each icon + score as one indivisible badge. Without this,
         // SwiftUI compresses the numeric text first when several ratings share a

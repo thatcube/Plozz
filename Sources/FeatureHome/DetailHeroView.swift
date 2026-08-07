@@ -828,7 +828,8 @@ struct DetailHeroView: View, Equatable {
                 mode: spoilerSettings.mode,
                 lineCount: 3,
                 maxWidth: 800,
-                reservesSpace: false
+                reservesSpace: false,
+                tier: .primarySoft
             )
             // Refuse to be squeezed below the line limit.
             //
@@ -1830,9 +1831,12 @@ private struct DetailHeroFactsRow: View {
             lineSpacing: 8
         ) {
             if !facts.isEmpty {
+                // Year and runtime sit with the ratings and capability badges,
+                // which are all full-strength, so holding these at `.secondary`
+                // made the one text item in the row look faded next to them.
                 Text(facts.joined(separator: "  ·  "))
                     .font(.system(size: 23, weight: .medium))
-                    .plozzForeground(.secondary)
+                    .plozzForeground(.primary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                     .contentTransition(.opacity)

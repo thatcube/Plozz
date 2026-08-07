@@ -209,8 +209,12 @@ final class HeroForegroundUIView: UIView {
         let secondary = HeroForegroundGlass.secondaryInk()
         titleLabel.textColor = primary
         ratingLabel.textColor = primary
-        metadataLabel.textColor = secondary
-        overviewLabel.textColor = secondary
+        // Year / runtime sit alongside the certificate chip and the ratings,
+        // which are full strength, so a dimmer tier made them look faded next to
+        // their own row. The description is the one thing here that should stay
+        // quieter than the title above it.
+        metadataLabel.textColor = primary
+        overviewLabel.textColor = HeroForegroundGlass.softPrimaryInk()
 
         scheduleLabel.textColor = primary
         scheduleLabel.backgroundColor = HeroForegroundGlass.flatFill()

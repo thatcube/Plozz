@@ -2043,7 +2043,8 @@ private struct PlozziOSHeroMetadata: View {
                     accent: palette.accent
                 ))
                     .font(.subheadline)
-                    .foregroundStyle(palette.primaryText.opacity(0.82))
+                    // Same step below primary as tvOS's `.primarySoft`.
+                    .plozzForeground(.primarySoft)
                     .lineLimit(3)
                     .frame(
                         maxWidth: PlozziOSPageLayout.heroTextMaxWidth(
@@ -2078,9 +2079,12 @@ private struct PlozziOSHeroMetadata: View {
                     lineSpacing: 8
                 ) {
                     if !factComponents.isEmpty {
+                        // Full strength, matching tvOS: these sit in a row with
+                        // the ratings and capability chips, so a dimmer tier read
+                        // as faded beside them.
                         Text(factComponents.joined(separator: "  ·  "))
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(palette.secondaryText)
+                            .foregroundStyle(palette.primaryText)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                     }

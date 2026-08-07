@@ -135,6 +135,9 @@ public struct ProfileActionsList: View {
                     title: ProfileLockCopy.unlockToEdit,
                     name: Text(verbatim: profile.name),
                     errorMessage: unlockError,
+                    // Rendered inline in a settings card / actions dialog, never
+                    // full screen — see the note on `isCompact`.
+                    isCompact: true,
                     // The dialog hosting this already shows the avatar and name
                     // in its header, so the scaffold's own identity row put the
                     // same name on screen twice.

@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import CoreModels
+import CoreNetworking
 import CoreUI
 import FeatureProfiles
 import SwiftUI
@@ -26,9 +27,6 @@ struct ProfileSettingsDetailView: View {
     /// set here can say when it's device-only.
     let syncEnabled: Bool
 
-    /// The single pushed destination for this page — see `Route`.
-    @State private var route: Route?
-
     @Environment(\.dismiss) private var dismiss
 
     /// Read live from the context so the page reflects edits made on it (a lock
@@ -45,6 +43,14 @@ struct ProfileSettingsDetailView: View {
     }
 
     var body: some View {
+        let _ = PlozzBodyRate.tick("ProfileSettingsDetailView")
+        return pageBody
+            .onChange(of: profile == nil) { _, profileIsGone in
+                if profileIsGone { dismiss() }
+            }
+    }
+
+    private var pageBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if let profile {
@@ -71,73 +77,6 @@ struct ProfileSettingsDetailView: View {
         // the same class of bug at the navigation layer: Apple's rule is one
         // destination per level, and with several attached the last one can win
         // and the rest quietly become no-ops.
-        .navigationDestination(item: $route) { route in
-            destination(for: route)
-                .toolbar(.hidden, for: .tabBar)
-        }
-        // Deleting the profile this page is ABOUT leaves it with nothing to draw:
-        // the lookup returns nil, the body renders an empty scroll view, and on
-        // tvOS a screen with nothing focusable strands the viewer — it reads as a
-        // dead black screen the remote can't leave. Deleting from the profile
-        // PICKER never showed this, because that screen deletes from a list it
-        // then stays on.
-        //
-        // Popping is also just the right outcome: a page describing something
-        // that no longer exists has nothing to say.
-        .onChange(of: profile == nil) { _, profileIsGone in
-            if profileIsGone { dismiss() }
-        }
-    }
-
-    /// What this page can push. One case per destination, so they can't compete.
-    enum Route: Hashable, Identifiable {
-        case lockSetup
-        case parentalSetup
-        case appearance
-        var id: Self { self }
-    }
-
-    @ViewBuilder
-    private func destination(for route: Route) -> some View {
-        switch route {
-        case .lockSetup:
-            if let profile {
-                ProfileLockSetupView(
-                    profile: profile,
-                    offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
-                    syncEnabled: syncEnabled,
-                    validatePlexPIN: { await context.validatePlexPIN($0, profileID) },
-                    onComplete: { lock in
-                        context.onSetProfileLock(profileID, lock)
-                        self.route = nil
-                    },
-                    onCancel: { self.route = nil }
-                )
-            }
-        case .parentalSetup:
-            ParentalPINSetupView(
-                onComplete: { pin in
-                    context.onSetParentalPIN(pin)
-                    self.route = nil
-                },
-                onCancel: { self.route = nil }
-            )
-        case .appearance:
-            if let profile {
-                ProfileEditorView(
-                    editingProfile: profile,
-                    canDelete: false,
-                    photoSourceAccounts: context.accounts,
-                    plexHomeUsersFetcher: context.plexHomeUsersFetcher,
-                    onSave: { draft in
-                        context.onSaveProfile(draft)
-                        self.route = nil
-                    },
-                    onLiveChange: { context.onUpdateProfileCosmetics($0) },
-                    onCancel: { self.route = nil }
-                )
-            }
-        }
     }
 
     // MARK: Actions
@@ -163,9 +102,12 @@ struct ProfileSettingsDetailView: View {
                     && context.activeProfile.id == profileID
                     && context.hasParentalPIN
                     && !context.isParentalUnlocked,
-                onEditAppearance: { route = .appearance },
-                onEditLock: { route = .lockSetup },
-                onCreateParentalPIN: { route = .parentalSetup },
+                // Pushed on the OUTER Settings stack. Declaring a second
+                // `navigationDestination` from a page that stack already pushed
+                // is what froze this screen — see `SettingsContext.pushRoute`.
+                onEditAppearance: { context.pushRoute(.profileAppearance(profileID: profileID)) },
+                onEditLock: { context.pushRoute(.profileLockSetup(profileID: profileID)) },
+                onCreateParentalPIN: { context.pushRoute(.parentalPINSetup) },
                 onSetLock: { context.onSetProfileLock(profileID, $0) },
                 onSetKids: { context.onSetKidsProfile(profileID, $0) },
                 onSetParentalPIN: context.onSetParentalPIN,

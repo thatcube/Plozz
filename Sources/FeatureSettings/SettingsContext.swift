@@ -36,6 +36,14 @@ struct SettingsContext {
     /// Live cosmetics-only persistence for editing an existing profile.
     let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     let onDeleteProfile: (String) -> Void
+    /// Pushes a route onto the Settings NavigationStack that owns this page.
+    ///
+    /// A pushed page must NOT declare its own `navigationDestination` for the
+    /// same stack: SwiftUI allows one per level, and a second one attached from
+    /// inside an already-pushed view invalidates without settling — the page
+    /// re-runs its body ~180 times a second and the screen stops responding.
+    /// Sub-pages therefore push through the stack's own route type.
+    let pushRoute: (SettingsRoute) -> Void
     let onAddAccount: () -> Void
     /// Whether the household has a Parental PIN, which is what decides if a Kids
     /// Profile is enforced or merely simplified. See ``ParentalPIN``.
@@ -98,6 +106,10 @@ enum SettingsRoute: Hashable {
     /// Controls: it can't escalate anything, and a Kids Profile should still be
     /// able to choose how it looks.
     case profileAppearance(profileID: String)
+    /// Choosing or changing one profile's own lock PIN.
+    case profileLockSetup(profileID: String)
+    /// Creating the household's Parental PIN.
+    case parentalPINSetup
     /// The household's Parental PIN settings (Everyone › Parental PIN).
     case parentalPIN
     case servers

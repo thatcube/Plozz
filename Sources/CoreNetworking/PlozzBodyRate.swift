@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 /// Counts how often specific view bodies run, and reports the RATE once a second.
@@ -27,6 +28,9 @@ public enum PlozzBodyRate {
     /// Emitted once when a rate appears that no legitimate interaction produces,
     /// so the onset is timestamped even if the rate-limited line is delayed.
     private static var warned = false
+    /// Throttles the persistent-trace copy: the log is a bounded 64 KB ring, so
+    /// an unthrottled storm would evict the very history that explains it.
+    private static var lastRunawayEmit = ContinuousClock.now - .seconds(10)
 
     /// Records one body evaluation for `label`. Safe to call from a view body.
     public static func tick(_ label: String) {  // l10n:content — developer-facing diagnostic
@@ -50,9 +54,21 @@ public enum PlozzBodyRate {
         let busiest = counts.max { $0.value < $1.value }
         counts.removeAll(keepingCapacity: true)
 
-        if let busiest, Double(busiest.value) / seconds > 100, !warned {
-            warned = true
-            PlozzLog.boot("BodyRate RUNAWAY driver=\(busiest.key) \(perSecond)")
+        if let busiest, Double(busiest.value) / seconds > 100 {
+            if !warned {
+                warned = true
+                PlozzLog.boot("BodyRate RUNAWAY driver=\(busiest.key) \(perSecond)")
+            }
+            // Also to the persistent trace, and REPEATEDLY rather than once.
+            // `PlozzLog` reaches os_log, which cannot be read off the device on
+            // this toolchain, and a runaway is precisely the report that arrives
+            // second-hand ("it froze") — so the evidence has to survive on disk.
+            // Repeating distinguishes a spin that is still going from one that
+            // happened once and settled, which a single line cannot.
+            if lastRunawayEmit.duration(to: now) >= .seconds(3) {
+                lastRunawayEmit = now
+                HandoffDiagnostics.emit("BodyRate RUNAWAY driver=" + busiest.key + " " + perSecond)
+            }
         }
         PlozzLog.boot("BodyRate \(perSecond)")
     }

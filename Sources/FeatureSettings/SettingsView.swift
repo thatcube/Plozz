@@ -370,6 +370,7 @@ public struct SettingsView: View {
             onCreateProfile: onCreateProfile,
             onUpdateProfileCosmetics: onUpdateProfileCosmetics,
             onDeleteProfile: onDeleteProfile,
+            pushRoute: { path.append($0) },
             onAddAccount: onAddAccount,
             hasParentalPIN: hasParentalPIN,
             isParentalUnlocked: isParentalUnlocked,
@@ -991,6 +992,10 @@ public struct SettingsView: View {
             GrownUpsUnlockView(context: context)
         case let .profileAppearance(profileID):
             ProfileAppearancePage(context: context, profileID: profileID)
+        case let .profileLockSetup(profileID):
+            ProfileLockSetupPage(context: context, profileID: profileID, syncEnabled: syncEnabled)
+        case .parentalPINSetup:
+            ParentalPINSetupPage(context: context)
         case .parentalPIN:
             ParentalPINDetailView(context: context)
         case let .profileSettings(profileID):

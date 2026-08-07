@@ -101,6 +101,19 @@ public struct ProfileEditorView: View {
     /// cosmetics-only persistence path. `nil` keeps the classic explicit-Save
     /// flow (used for brand-new profiles and first-run setup).
     private let onLiveChange: ((ProfileDraft) -> Void)?
+    /// Whether this editor owns the whole screen.
+    ///
+    /// True for the full-screen cover the profile picker presents. FALSE when it
+    /// is pushed inside Settings, where the surrounding navigation stack hides
+    /// the tab bar as the page appears — which changes the area on offer while
+    /// the editor is demanding a hard 1720x960 minimum. The two cannot both be
+    /// satisfied, and SwiftUI re-ran the enclosing page ~180 times a second
+    /// trying: a completely frozen screen with no crash and no spinner.
+    ///
+    /// Declared by the host rather than measured, for the same reason the PIN
+    /// scaffold's layout is: the caller knows, and the layout engine can only
+    /// keep asking.
+    private let ownsFullScreen: Bool
 
     // Snapshot of the values this editor opened with — drives Revert (and, in
     // the explicit-Save flow, the discard warning).
@@ -142,6 +155,7 @@ public struct ProfileEditorView: View {
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser] = { _ in [] },
         onSave: @escaping (ProfileDraft) -> Void,
         onLiveChange: ((ProfileDraft) -> Void)? = nil,
+        ownsFullScreen: Bool = true,
         onDelete: (() -> Void)? = nil,
         onCancel: @escaping () -> Void
     ) {
@@ -151,6 +165,7 @@ public struct ProfileEditorView: View {
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSave = onSave
         self.onLiveChange = onLiveChange
+        self.ownsFullScreen = ownsFullScreen
         self.onDelete = onDelete
         self.onCancel = onCancel
 
@@ -332,7 +347,13 @@ public struct ProfileEditorView: View {
             .padding(.horizontal, 72)
             .padding(.vertical, 24)
         }
-        .frame(minWidth: 1720, minHeight: 960)
+        // Only when this editor owns the screen. Imposed inside Settings, where
+        // the stack is concurrently hiding the tab bar, it makes the layout
+        // unsatisfiable and the page spins — see `ownsFullScreen`.
+        .frame(
+            minWidth: ownsFullScreen ? 1720 : nil,
+            minHeight: ownsFullScreen ? 960 : nil
+        )
         // A sheet doesn't inherit the colour scheme the app pushes down at the
         // root, so semantic colours (.primary/.secondary, materials, the default
         // TextField text) would render for the *system* scheme — invisible when

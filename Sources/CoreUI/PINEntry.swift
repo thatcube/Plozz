@@ -112,6 +112,17 @@ public struct PINEntryScaffold<Badge: View>: View {
     public let isSubmitting: Bool
     /// Optional caveat under the identity block, e.g. the sync warning.
     public var footnote: LocalizedStringResource?
+    /// Whether this scaffold is rendered INLINE in a constrained container
+    /// (a settings card, the profile actions dialog) rather than filling the
+    /// screen.
+    ///
+    /// Declared by the host instead of measured. Measuring it with
+    /// `ViewThatFits` deadlocked the layout: the two-column composition is
+    /// 1208pt and the settings content column is 1200pt, so the candidates sat
+    /// exactly on the fit boundary and SwiftUI re-evaluated the enclosing view
+    /// ~180 times a second, which presents as a completely frozen screen. The
+    /// host always knows which case it is; the layout engine had to keep asking.
+    public var isCompact: Bool = false
     /// Whether to draw the badge + name.
     ///
     /// False when the HOST already says whose PIN this is. The profile actions
@@ -127,6 +138,9 @@ public struct PINEntryScaffold<Badge: View>: View {
 
     @Environment(\.themePalette) private var palette
     @State private var pin: String = ""
+    /// The last digit has landed and the pad is holding still long enough for
+    /// the fourth dot to actually appear on screen. See ``appendDigit(_:)``.
+    @State private var isCommitting = false
 
     public init(
         title: LocalizedStringResource,
@@ -136,6 +150,7 @@ public struct PINEntryScaffold<Badge: View>: View {
         isSubmitting: Bool = false,
         footnote: LocalizedStringResource? = nil,
         sequenceStep: PINSequenceStep? = nil,
+        isCompact: Bool = false,
         showsIdentity: Bool = true,
         onSubmit: @escaping (String) -> Void,
         onCancel: @escaping () -> Void,
@@ -148,6 +163,7 @@ public struct PINEntryScaffold<Badge: View>: View {
         self.isSubmitting = isSubmitting
         self.footnote = footnote
         self.sequenceStep = sequenceStep
+        self.isCompact = isCompact
         self.showsIdentity = showsIdentity
         self.onSubmit = onSubmit
         self.onCancel = onCancel
@@ -164,44 +180,36 @@ public struct PINEntryScaffold<Badge: View>: View {
 
             #if os(tvOS)
             // Prose on the left, pad on the right, and the PAIR centered on
-            // screen as one composition — the same scheme the wide iOS layout
-            // below uses.
+            // screen as one composition. The prose column is sized explicitly
+            // rather than absorbing the slack: when it was greedy the pad landed
+            // near 75% of the screen and had to be dragged back with a hand-tuned
+            // `.offset`, which moved pixels without moving layout.
             //
-            // The prose column is sized explicitly instead of absorbing all the
-            // slack. When it was greedy, the pad landed near 75% of the screen
-            // and had to be dragged back with a hand-tuned `.offset`, which
-            // moved pixels without moving layout: the declared spacing became
-            // fiction, the pad rendered inside the prose's reserved column, and
-            // any change to padding or key size silently shifted it again.
-            // Sizing both columns makes the gap a real number.
-            // Chosen from the space actually offered. The two-column composition
-            // is 1208pt wide: right full-screen, far too wide inside the profile
-            // actions dialog that renders this list IN PLACE, where the pad ran
-            // off the right edge and the digits were clipped mid-key.
-            //
-            // `ViewThatFits`, NOT a `GeometryReader`. A reader reports the space
-            // it is given but has no size of its own, so inside a card that sizes
-            // to its content it collapses and takes the pad with it — the dialog
-            // came back with a title and no keypad at all. `ViewThatFits` both
-            // measures the candidates and keeps the intrinsic height a
-            // content-sized host needs in order to grow.
-            ViewThatFits(in: .horizontal) {
+            // Which arrangement to use is a fact the HOST supplies, not something
+            // to measure. `ViewThatFits` here froze the app outright: the wide
+            // composition is 1208pt and the settings content column is 1200pt, so
+            // the candidates sat on the fit boundary and the enclosing view
+            // re-evaluated ~180 times a second. Before that a `GeometryReader`
+            // collapsed the pad to nothing inside a content-sized card. A flag
+            // is duller than both and cannot oscillate.
+            if isCompact {
+                VStack(spacing: 28) {
+                    prose(centered: true)
+                    padColumn
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 28)
+            } else {
                 HStack(alignment: .center, spacing: PINMetrics.columnGap) {
                     prose(centered: false)
                         .frame(width: PINMetrics.proseColumnWidth, alignment: .leading)
                     padColumn
                 }
+                .frame(maxWidth: PINMetrics.compositionWidth, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, PINMetrics.horizontalPadding)
-
-                VStack(spacing: 28) {
-                    prose(centered: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    padColumn
-                }
-                .padding(.horizontal, 32)
-                .padding(.vertical, 28)
             }
-            .frame(maxWidth: .infinity)
             #else
             GeometryReader { proxy in
                 if usesTwoColumnLayout(proxy.size) {
@@ -325,7 +333,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                 }
             }
             PINDialPad(onDigit: appendDigit, onDelete: deleteDigit)
-                .disabled(isSubmitting)
+                .disabled(isSubmitting || isCommitting)
                 .opacity(isSubmitting ? 0.5 : 1.0)
         }
         #if os(tvOS)
@@ -338,25 +346,40 @@ public struct PINEntryScaffold<Badge: View>: View {
     // MARK: Entry
 
     private func appendDigit(_ d: String) {
-        guard !isSubmitting else { return }
+        guard !isSubmitting, !isCommitting else { return }
         guard d.count == 1, d.first?.isNumber == true else { return }
         guard pin.count < ProfileLock.pinLength else { return }
         pin.append(d)
         if pin.count == ProfileLock.pinLength {
-            // Auto-submit the moment the last digit lands. Snappy is the goal.
-            //
-            // Clear immediately rather than waiting for an error to come back: a
-            // caller that reports the same message twice in a row (two wrong
-            // PINs, same string) produces no change for `onChange` to see, which
-            // would leave four filled dots and a pad that ignores every press.
             let entered = pin
-            pin = ""
-            onSubmit(entered)
+            // Hold the completed PIN on screen for a beat before submitting.
+            //
+            // Appending the fourth digit and clearing the field used to happen in
+            // the SAME update, so SwiftUI only ever rendered the result: the
+            // fourth dot never appeared. A local profile PIN then verifies
+            // synchronously and the screen is torn down in that same frame, so
+            // the last press looked like it had been ignored — the entry read as
+            // incomplete right at the moment it succeeded. A Plex PIN hid this
+            // only because its caller raises a spinner while the network answers.
+            //
+            // The pad is inert during the hold, so the pause cannot swallow a
+            // fifth press or a delete.
+            isCommitting = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(140))
+                // Cleared BEFORE submitting, deliberately. A caller that reports
+                // the same error twice running (two wrong PINs, same message)
+                // produces no change for `onChange` to see, which would strand
+                // four filled dots above a pad that ignores every press.
+                pin = ""
+                isCommitting = false
+                onSubmit(entered)
+            }
         }
     }
 
     private func deleteDigit() {
-        guard !isSubmitting else { return }
+        guard !isSubmitting, !isCommitting else { return }
         if !pin.isEmpty { pin.removeLast() }
     }
 

@@ -22,6 +22,14 @@ struct ProfileAppearancePage: View {
     }
 
     var body: some View {
+        content
+            .onChange(of: profile == nil) { _, gone in
+                if gone { dismiss() }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let profile {
             ProfileEditorView(
                 editingProfile: profile,
@@ -34,15 +42,28 @@ struct ProfileAppearancePage: View {
                     dismiss()
                 },
                 onLiveChange: { context.onUpdateProfileCosmetics($0) },
+                ownsFullScreen: false,
                 onCancel: { dismiss() }
             )
+            // Identity is the PROFILE, not this view's position in the tree.
+            //
+            // `context.profiles` is recency-ordered and recomputed, so every
+            // live cosmetic edit can hand this page a reordered array. Without a
+            // stable id the editor could be treated as a new view, reset its
+            // `@State` from the freshly-saved profile, and see that as another
+            // edit — which writes again. That loop saturates the main thread and
+            // presents as a frozen screen, not a crash.
+            .id(profileID)
         }
         // This page can't delete (it is cosmetics only), but a sync applying a
         // remote deletion while it is open would leave it rendering nothing at
-        // all. Same rule as the profile page that pushes here: a page about
-        // something that no longer exists should leave, not go blank.
+        // all — a page about something that no longer exists should leave.
+        //
+        // On a CHANGE, never on first appearance. `onAppear { dismiss() }` fires
+        // during the push itself if the lookup is momentarily empty, and
+        // dismissing a screen mid-push wedges the navigation stack.
         else {
-            Color.clear.onAppear { dismiss() }
+            Color.clear
         }
     }
 }

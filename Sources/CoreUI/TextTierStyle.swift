@@ -13,13 +13,6 @@ import SwiftUI
 /// - ``tertiary`` — captions, hints, faint metadata (WCAG AA large; never body).
 public enum PlozzTextTier: Sendable {
     case primary
-    /// Between ``primary`` and ``secondary``: readable at a glance but calmer
-    /// than the title it sits under.
-    ///
-    /// Exists for hero descriptions. At ``secondary`` (60%) a paragraph over
-    /// artwork reads as greyed-out rather than quiet, while ``primary`` makes it
-    /// compete with the logo and the facts line for attention.
-    case primarySoft
     case secondary
     case tertiary
 }
@@ -35,7 +28,6 @@ private struct PlozzForegroundModifier: ViewModifier {
     private var color: Color {
         switch tier {
         case .primary: return palette.primaryText
-        case .primarySoft: return palette.primarySoftText
         case .secondary: return palette.secondaryText
         case .tertiary: return palette.tertiaryText
         }

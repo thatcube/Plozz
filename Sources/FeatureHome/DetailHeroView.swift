@@ -828,8 +828,7 @@ struct DetailHeroView: View, Equatable {
                 mode: spoilerSettings.mode,
                 lineCount: 3,
                 maxWidth: 800,
-                reservesSpace: false,
-                tier: .primarySoft
+                reservesSpace: false
             )
             // Refuse to be squeezed below the line limit.
             //

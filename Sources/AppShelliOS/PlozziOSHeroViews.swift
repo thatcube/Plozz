@@ -2043,8 +2043,8 @@ private struct PlozziOSHeroMetadata: View {
                     accent: palette.accent
                 ))
                     .font(.subheadline)
-                    // Same step below primary as tvOS's `.primarySoft`.
-                    .plozzForeground(.primarySoft)
+                    // Same 60% tier as tvOS.
+                    .plozzForeground(.secondary)
                     .lineLimit(3)
                     .frame(
                         maxWidth: PlozziOSPageLayout.heroTextMaxWidth(

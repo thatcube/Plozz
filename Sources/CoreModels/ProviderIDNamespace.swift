@@ -112,7 +112,16 @@ public extension Dictionary where Key == String, Value == String {
     /// then its ordinary ids. Used when an episode is replaced by a freshly fetched
     /// provider record: the new episode carries episode-level TMDb/TVDB ids, while
     /// schedule/scrobble lookups still need the parent show's ids.
-    mutating func mergeSeriesProviderIDs(from source: [String: String]) {
+    /// - Parameter promotingBaseIDs: whether the source's BASE ids (`tmdb`,
+    ///   `imdb`, …) may be adopted as series ids. True only when the source
+    ///   really is the series. A season or episode carries base ids that
+    ///   identify ITSELF — promoting a season's `tmdb` to `seriesTmdb` points
+    ///   every series-scoped lookup at a season entity, which resolves to no
+    ///   external ids and silently loses the show's air schedule.
+    mutating func mergeSeriesProviderIDs(
+        from source: [String: String],
+        promotingBaseIDs: Bool = true
+    ) {
         let mappings: [
             (series: ProviderIDNamespace, base: ProviderIDNamespace)
         ] = [
@@ -125,9 +134,9 @@ public extension Dictionary where Key == String, Value == String {
             (.seriesAniDB, .aniDB),
         ]
         for mapping in mappings where providerID(mapping.series) == nil {
-            guard let value =
-                source.providerID(mapping.series)
-                    ?? source.providerID(mapping.base) else {
+            guard let value = source.providerID(mapping.series)
+                ?? (promotingBaseIDs ? source.providerID(mapping.base) : nil)
+            else {
                 continue
             }
             self[mapping.series.canonicalKey] = value

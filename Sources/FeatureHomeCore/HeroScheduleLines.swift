@@ -88,19 +88,8 @@ public final class HeroScheduleLines {
             // the existing multi-provider TV schedule.
             if line != nil || !Self.carriesSchedule(item) { return }
         }
-        guard Self.carriesSchedule(item) else {
-            HandoffDiagnostics.emit(
-                "hero SCHEDULE skip=kind item=" + item.id
-                    + " kind=" + String(describing: item.kind)
-            )
-            return
-        }
+        guard Self.carriesSchedule(item) else { return }
         guard !fetched.contains(fetchKey), fetching.insert(fetchKey).inserted else {
-            let cachedState: String = lines[item.id] == nil ? "nil" : "set"
-            HandoffDiagnostics.emit(
-                "hero SCHEDULE skip=alreadyFetched title=" + item.title + " item=" + item.id
-                    + " key=" + fetchKey + " line=" + cachedState
-            )
             return
         }
         defer { fetching.remove(fetchKey) }
@@ -108,26 +97,6 @@ public final class HeroScheduleLines {
         // The viewer is looking at this slide right now, so it goes ahead of the
         // passive backlog — the same tier a detail page uses.
         let record = await SeriesScheduleResolver.shared.refresh(query, tier: .foregroundFill)
-        let resolvedLine: LocalizedStringResource? = SeriesUpcoming.heroLine(
-            nextEpisode: record.upcomingEpisode,
-            cadence: record.cadence,
-            schedule: record.upcomingEpisodes
-        )
-        let hasRecord: String = "yes"
-        let hasUpcoming: String = record.upcomingEpisode == nil ? "nil" : "yes"
-        let hasLine: String = resolvedLine == nil ? "nil" : "set"
-        let upcomingCount: String = String(record.upcomingEpisodes.count)
-        let itemKind: String = String(describing: item.kind)
-        HandoffDiagnostics.emit(
-            "hero SCHEDULE title=" + item.title
-                + " parent=" + (item.parentTitle ?? "nil")
-                + " item=" + item.id + " kind=" + itemKind
-                + " key=" + fetchKey
-                + " record=" + hasRecord
-                + " upcoming=" + hasUpcoming
-                + " count=" + upcomingCount
-                + " line=" + hasLine
-        )
         guard !Task.isCancelled else { return }
         fetched.insert(fetchKey)
         apply(record, to: item)

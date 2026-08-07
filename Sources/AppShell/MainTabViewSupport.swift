@@ -430,6 +430,13 @@ func makeHeroMetadataEnricher(
         var enriched = items
         for (index, detail) in details {
             let originalProviderIDs = enriched[index].providerIDs
+            // Only a SERIES card's base ids are series ids. A season card (which
+            // is what Recently Added hands the hero for a show) carries its own
+            // season-scoped tmdb, and adopting that as the series id sent every
+            // series-scoped lookup to a season entity — which is why the hero
+            // showed no air schedule while the detail page, starting from the
+            // series itself, showed it correctly.
+            let originalCarriesSeriesIDs = enriched[index].kind == .series
             if var playTarget = detail.playTarget {
                 if playTarget.sourceAccountID == nil,
                    let sourceAccountID = detail.root.sourceAccountID {
@@ -439,11 +446,15 @@ func makeHeroMetadataEnricher(
             }
             let root = detail.root
             if enriched[index].kind == .episode {
-                enriched[index].providerIDs.mergeSeriesProviderIDs(
-                    from: originalProviderIDs
-                )
+                // Root first: it IS the series, so its ids are authoritative.
+                // The original card only fills what remains, and only donates
+                // base ids when it was itself a series.
                 enriched[index].providerIDs.mergeSeriesProviderIDs(
                     from: root.providerIDs
+                )
+                enriched[index].providerIDs.mergeSeriesProviderIDs(
+                    from: originalProviderIDs,
+                    promotingBaseIDs: originalCarriesSeriesIDs
                 )
                 enriched[index].parentTitle = root.title
                 enriched[index].seriesID = root.id

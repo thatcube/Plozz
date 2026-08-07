@@ -51,11 +51,6 @@ public final class HomeHeroRuntimeState {
     /// so a long session can't inflate every reconcile fold. Last-write-wins per
     /// target, which is exactly what folding the full history would resolve to.
     func registerWatchMutation(_ mutation: MediaItemMutation) {
-        HandoffDiagnostics.emit(
-            "hero WATCH_MUTATION ids=\(mutation.itemIDs.joined(separator: "|")) "
-                + "played=\(mutation.played.map(String.init(describing:)) ?? "nil") "
-                + "pending=\(watchMutations.count)"
-        )
         let key = Self.targetKey(for: mutation)
         watchMutations.removeAll { Self.targetKey(for: $0) == key }
         watchMutations.append(mutation)

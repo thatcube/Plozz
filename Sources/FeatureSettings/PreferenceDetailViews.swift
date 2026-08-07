@@ -584,30 +584,21 @@ struct PlaybackDetailView: View {
         ]
     }
 
-    /// Both display fades live in ONE row. They're the same idea — hide the
-    /// blank/flash your TV produces while it renegotiates the HDMI signal — and
-    /// splitting them made the page imply a "Display Transitions" grouping that
-    /// the flat master list never renders. One row, both switches in its detail.
+    /// Both display fades live in ONE row. They're the same idea — hide the blank
+    /// your TV shows while it renegotiates the picture — and splitting them made
+    /// the page imply a "Display Transitions" grouping the flat master list never
+    /// renders. The toggles are labelled by what they cover, so they need no
+    /// headers or per-toggle paragraphs above them.
     private var displayFadeRows: [SettingsSplitRow] {
         [
             SettingsSplitRow(
                 id: "display-fades",
                 title: "Fade on display changes",
-                description: "When your Apple TV has Match Content turned on, it renegotiates the picture with your TV as playback starts and ends — and the panel blanks or flashes while it does. Plozz fades to black over that handshake so you don't see it.",
+                description: "Your TV blanks for a moment when it switches picture mode or frame rate. Plozz fades to black so you don't see it.",
             ) {
-                VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
-                    SettingsDetailGroup(
-                        title: "HDR & Dolby Vision",
-                        description: "Covers the switch between SDR, HDR and Dolby Vision. Turn off only if Match Dynamic Range is off on your Apple TV."
-                    ) {
-                        Toggle("Fade for HDR & Dolby Vision", isOn: $playback.settings.fadeOnDynamicRangeChange)
-                    }
-                    SettingsDetailGroup(
-                        title: "Frame Rate",
-                        description: "Covers the handoff back to the Home Screen's refresh rate when you leave a 24fps title — which happens on every video, not just HDR ones. Turn off if Match Frame Rate is off on your Apple TV and you'd rather return to Home instantly."
-                    ) {
-                        Toggle("Fade for frame rate changes", isOn: $playback.settings.fadeOnFrameRateChange)
-                    }
+                VStack(alignment: .leading, spacing: 24) {
+                    Toggle("HDR & Dolby Vision", isOn: $playback.settings.fadeOnDynamicRangeChange)
+                    Toggle("Frame rate", isOn: $playback.settings.fadeOnFrameRateChange)
                 }
             }
         ]

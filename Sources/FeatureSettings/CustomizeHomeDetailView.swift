@@ -34,7 +34,7 @@ struct CustomizeHomeDetailView: View {
     @Environment(HeroBackgroundSettingsModel.self) private var heroBackground
 
     var body: some View {
-        SettingsSplitLayout(title: "Customize Home", sections: sections)
+        SettingsSplitLayout(title: "Customize Home", rows: rows)
             // If the user unmerged BEFORE library discovery finished, the initial
             // seed (in the toggle setter) was a no-op on an empty seed list. Retry
             // once libraries are known — on appear and when discovery loads — so the
@@ -53,8 +53,8 @@ struct CustomizeHomeDetailView: View {
         homeVisibility.seedLibraryRowsIfNeeded(defaultLibraryRowSeeds)
     }
 
-    private var sections: [SettingsSplitSection] {
-        [homeRowsSection, heroSection]
+    private var rows: [SettingsSplitRow] {
+        homeRowsRows + heroRows
     }
 
     // MARK: - Rows on Home (one entry, grouped detail — leads with the Combine switch)
@@ -65,15 +65,15 @@ struct CustomizeHomeDetailView: View {
     /// off — one card per Home-visible library, each headed by its name + provider
     /// logo. Combine lives here (not a separate section) because it only changes
     /// what these row groups show.
-    private var homeRowsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "home-rows", header: "Rows", rows: [
+    private var homeRowsRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "home-rows-all",
                 title: "Rows on Home",
             ) {
                 homeRowsDetail
             }
-        ])
+        ]
     }
 
     /// The grouped detail: the always-available **Shared** rows card first, then
@@ -206,8 +206,8 @@ struct CustomizeHomeDetailView: View {
     /// Libraries and Auto-Advance as headed groups. Previously these were five
     /// separate (mostly indented) master rows, which buried the feature; now Hero
     /// reads as one dedicated space.
-    private var heroSection: SettingsSplitSection {
-        SettingsSplitSection(id: "hero", header: nil, rows: [
+    private var heroRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "hero",
                 title: "Hero",
@@ -215,7 +215,7 @@ struct CustomizeHomeDetailView: View {
             ) {
                 heroForm
             }
-        ])
+        ]
     }
 
     @ViewBuilder private var heroForm: some View {

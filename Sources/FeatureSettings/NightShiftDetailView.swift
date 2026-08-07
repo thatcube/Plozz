@@ -19,7 +19,7 @@ struct NightShiftDetailView: View {
     @Bindable var model: NightShiftSettingsModel
 
     var body: some View {
-        SettingsSplitLayout(title: "Circadian Mode", sections: CircadianSectionsBuilder(model: model).sections)
+        SettingsSplitLayout(title: "Circadian Mode", rows: CircadianRowsBuilder(model: model).rows)
             .onChange(of: model.settings.isEnabled) { _, enabled in
                 if !enabled { model.isPreviewing = false }
             }
@@ -27,26 +27,21 @@ struct NightShiftDetailView: View {
     }
 }
 
-/// Builds the Circadian Mode settings sections. Extracted from
+/// Builds the Circadian Mode settings rows. Extracted from
 /// ``NightShiftDetailView`` so the same controls can appear both as their own
-/// page and folded into Appearance as a group of sections (the top-level
-/// "Circadian Mode" row was retired in favour of living under Appearance).
-///
-/// - Parameter primaryHeader: header for the first (toggle + schedule) section.
-///   `nil` on the standalone page (the page title already says "Circadian Mode");
-///   set to a label like "Circadian Mode" when embedded among other sections.
+/// page and folded into Appearance (the top-level "Circadian Mode" row was
+/// retired in favour of living under Appearance).
 @MainActor
-struct CircadianSectionsBuilder {
+struct CircadianRowsBuilder {
     let model: NightShiftSettingsModel
-    var primaryHeader: LocalizedStringResource? = nil
 
     /// Everything Circadian now lives in ONE row's detail pane (schedule + Fade +
     /// Darkness + Warmth + Preview) instead of being scattered across five master
     /// rows and a "Look" sub-section — so enabling the tint no longer sprays a
     /// handful of new rows down the list. The pane reveals the extras reactively
     /// when the tint is on (``CircadianDetail`` observes the model).
-    var sections: [SettingsSplitSection] {
-        [SettingsSplitSection(id: "night-shift", header: primaryHeader, rows: [
+    var rows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "night-shift",
                 title: "Circadian Mode",
@@ -54,7 +49,7 @@ struct CircadianSectionsBuilder {
             ) {
                 CircadianDetail(model: model)
             }
-        ])]
+        ]
     }
 }
 

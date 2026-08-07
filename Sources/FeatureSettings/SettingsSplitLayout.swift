@@ -79,25 +79,11 @@ struct SettingsSplitRow: Identifiable {
     }
 }
 
-/// A titled group of rows in the master list. `header` uses the shared compact
-/// uppercase Settings section-header treatment.
-struct SettingsSplitSection: Identifiable {
-    let id: String
-    let header: LocalizedStringResource?
-    let rows: [SettingsSplitRow]
-
-    init(id: String, header: LocalizedStringResource? = nil, rows: [SettingsSplitRow]) {
-        self.id = id
-        self.header = header
-        self.rows = rows
-    }
-}
-
 /// A native tvOS master/detail layout for Level-2 settings pages.
 ///
-/// LEFT (master): a focusable vertical list of setting *names* grouped under
-/// section headers. The list owns focus; moving focus up/down **live-updates**
-/// the detail pane via `selectedRowID`.
+/// LEFT (master): a focusable **flat** vertical list of setting *names* under a
+/// single page header. The list owns focus; moving focus up/down
+/// **live-updates** the detail pane via `selectedRowID`.
 ///
 /// RIGHT (detail): a `.focusSection()` pane showing the focused row's
 /// description and its existing control (a `SettingsOptionPicker`, `Toggle`,
@@ -105,14 +91,23 @@ struct SettingsSplitSection: Identifiable {
 /// control; **left / Menu** returns to the list. This mirrors Apple's own
 /// Settings/Music master-detail choreography on tvOS.
 ///
-/// `sections` is expected to be a *computed* value in the host page, so
-/// flipping a toggle in the detail pane recomputes the list (revealing or
-/// hiding indented sub-rows) on the next render.
+/// ## There are no visible groups on this page
+/// The master list is deliberately FLAT: one row per setting, under the one page
+/// header. There is no rendered sub-grouping, so this layout takes plain rows
+/// and offers no section/header type to pass one. Grouping copy that isn't shown
+/// is worse than none — it makes call sites (and the people reading them) believe
+/// in categories the viewer can't see. To group *controls*, put them inside a
+/// single row's detail pane with `SettingsDetailGroup`, which really does render
+/// a heading. Related rows can still be assembled by a computed `[SettingsSplitRow]`
+/// in the host page — that reads as code organisation, which is all it is.
+///
+/// `rows` is expected to be a *computed* value in the host page, so flipping a
+/// toggle in the detail pane recomputes the list on the next render.
 struct SettingsSplitLayout: View {
     /// The page's own name (matches the parent nav row that opened it, e.g.
     /// "Appearance") — shown as the single header atop the left list.
     let title: LocalizedStringResource
-    let sections: [SettingsSplitSection]
+    let rows: [SettingsSplitRow]
 
     @State private var selectedRowID: String?
     @FocusState private var focusedRow: String?
@@ -127,7 +122,7 @@ struct SettingsSplitLayout: View {
     /// came in from), with no geometrically-nearer row to steal it.
     @State private var focusInDetail = false
 
-    private var allRows: [SettingsSplitRow] { sections.flatMap(\.rows) }
+    private var allRows: [SettingsSplitRow] { rows }
     private var allRowIDs: [String] { allRows.map(\.id) }
 
     /// The row currently mirrored in the detail pane. Falls back to the first
@@ -170,21 +165,20 @@ struct SettingsSplitLayout: View {
     private var masterList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                // One page header at the top, always in sync with the nav row the
-                // user came from. Per-section subheaders are intentionally omitted.
+                // The page's one and only header, always in sync with the nav row
+                // the user came from. The rows below are a flat list — see the
+                // type's note on why there is no sub-grouping.
                 Text(title)
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
 
-                ForEach(sections) { section in
-                    ForEach(section.rows) { row in
-                        masterRow(row)
-                            .focused($focusedRow, equals: row.id)
-                            .tvOSPrefersDefaultFocus(selectedRowID == row.id, in: masterScope)
-                            .id(row.id)
-                    }
+                ForEach(rows) { row in
+                    masterRow(row)
+                        .focused($focusedRow, equals: row.id)
+                        .tvOSPrefersDefaultFocus(selectedRowID == row.id, in: masterScope)
+                        .id(row.id)
                 }
             }
             .padding(.vertical, 8)

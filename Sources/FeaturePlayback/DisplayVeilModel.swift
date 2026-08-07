@@ -65,14 +65,24 @@ public final class DisplayVeilModel {
         public var noSettleHold: TimeInterval = 2.5
         /// The no-settle fallback for a **frame-rate-only** exit. A refresh-rate
         /// handshake is far quicker than a dynamic-range one and frequently
-        /// reports no mode-switch-end at all, so this is deliberately tighter:
-        /// long enough to absorb the blip, short enough that leaving an SDR title
-        /// still feels immediate.
-        public var frameRateNoSettleHold: TimeInterval = 1.2
+        /// reports no mode-switch-end at all, so this is deliberately short: the
+        /// blip is brief, and holding flat black past it just reads as a dead
+        /// pause before the Home screen pops in.
+        public var frameRateNoSettleHold: TimeInterval = 0.5
         /// Ceiling on the post-settle hold for a **frame-rate-only** exit, for the
         /// same reason: the panel is not re-negotiating a dynamic range, so it
         /// can't need the full dynamic-range budget.
-        public var frameRateMaxPostSettle: TimeInterval = 1.2
+        public var frameRateMaxPostSettle: TimeInterval = 0.5
+        /// How long the veil takes to fade back out after a dynamic-range exit.
+        /// The panel is still visibly settling underneath, which carries a lot of
+        /// the transition, so a fairly quick fade already feels smooth.
+        public var fadeOut: TimeInterval = 0.4
+        /// How long the veil takes to fade back out after a **frame-rate-only**
+        /// exit. Deliberately much slower than the dynamic-range fade: nothing is
+        /// visibly settling underneath here, so the fade *is* the whole
+        /// transition. At the dynamic-range duration the screen appears to snap
+        /// in after a pause rather than resolve out of black.
+        public var frameRateFadeOut: TimeInterval = 0.9
         /// Floor on the post-settle hold, so even a near-instant settle keeps black
         /// up long enough to hide a small physical lag (and avoids a flash on Home).
         public var minPostSettle: TimeInterval = 0.8
@@ -87,8 +97,10 @@ public final class DisplayVeilModel {
         public var safetyCap: TimeInterval = 6.0
         public init(
             noSettleHold: TimeInterval = 2.5,
-            frameRateNoSettleHold: TimeInterval = 1.2,
-            frameRateMaxPostSettle: TimeInterval = 1.2,
+            frameRateNoSettleHold: TimeInterval = 0.5,
+            frameRateMaxPostSettle: TimeInterval = 0.5,
+            fadeOut: TimeInterval = 0.4,
+            frameRateFadeOut: TimeInterval = 0.9,
             minPostSettle: TimeInterval = 0.8,
             maxPostSettle: TimeInterval = 2.2,
             settleLagMultiplier: Double = 1.0,
@@ -97,6 +109,8 @@ public final class DisplayVeilModel {
             self.noSettleHold = noSettleHold
             self.frameRateNoSettleHold = frameRateNoSettleHold
             self.frameRateMaxPostSettle = frameRateMaxPostSettle
+            self.fadeOut = fadeOut
+            self.frameRateFadeOut = frameRateFadeOut
             self.minPostSettle = minPostSettle
             self.maxPostSettle = maxPostSettle
             self.settleLagMultiplier = settleLagMultiplier
@@ -134,6 +148,14 @@ public final class DisplayVeilModel {
 
     /// True while the veil is covering (any non-trivial opacity).
     public var isVeiled: Bool { veilOpacity > 0 }
+
+    /// How long the *fade-out* should take for the exit currently being covered.
+    /// The root view reads this for its animation, so the reveal is paced to the
+    /// handshake being hidden rather than one duration for both. Kept after the
+    /// veil lowers so the falling-edge animation still reads the right value.
+    public var fadeOutDuration: TimeInterval {
+        engagedKind == .frameRate ? configuration.frameRateFadeOut : configuration.fadeOut
+    }
 
     /// Raise the window veil to solid black and start the safety machinery. Call
     /// this at the *start* of an exit, before dismissing the player, so the black

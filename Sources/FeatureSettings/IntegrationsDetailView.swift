@@ -18,7 +18,7 @@ struct IntegrationsDetailView: View {
     let serverCount: Int
 
     var body: some View {
-        SettingsSplitLayout(title: "Trackers", sections: sections)
+        SettingsSplitLayout(title: "Trackers", rows: rows)
             .task {
                 // Load all statuses up front so the left list's value
                 // summaries are correct before any row is focused.
@@ -31,10 +31,10 @@ struct IntegrationsDetailView: View {
             }
     }
 
-    private var sections: [SettingsSplitSection] {
+    private var rows: [SettingsSplitRow] {
         @Bindable var playback = playback
 
-        let trackers = SettingsSplitSection(id: "trackers", header: "Trackers", rows: [
+        let trackers: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "trakt",
                 verbatimTitle: "Trakt",
@@ -139,9 +139,9 @@ struct IntegrationsDetailView: View {
                     )
                 }
             }
-        ])
+        ]
 
-        let watchStatus = SettingsSplitSection(id: "watch-status", header: "Watch Status", rows: [
+        let watchStatus: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "sync-across-servers",
                 title: "Sync across all my servers",
@@ -154,9 +154,9 @@ struct IntegrationsDetailView: View {
                 Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
                     .disabled(!canSyncAcrossServers)
             }
-        ])
+        ]
 
-        return [trackers, watchStatus]
+        return trackers + watchStatus
     }
 
     /// The status + action controls shown in a tracker's detail pane for every

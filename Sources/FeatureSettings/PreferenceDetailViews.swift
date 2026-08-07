@@ -27,7 +27,7 @@ struct AppearanceDetailView: View {
     @Environment(AppLanguageSettingsModel.self) private var appLanguage
 
     var body: some View {
-        SettingsSplitLayout(title: "Appearance", sections: sections)
+        SettingsSplitLayout(title: "Appearance", rows: rows)
             // Circadian's day/night preview animates a model flag; make sure it
             // never keeps running once you leave Appearance or turn Circadian off.
             .onChange(of: nightShift.settings.isEnabled) { _, enabled in
@@ -36,13 +36,12 @@ struct AppearanceDetailView: View {
             .onDisappear { nightShift.isPreviewing = false }
     }
 
-    private var sections: [SettingsSplitSection] {
+    private var rows: [SettingsSplitRow] {
         @Bindable var musicPlayer = musicPlayer
         @Bindable var density = density
         @Bindable var navigation = navigation
 
         return [
-            SettingsSplitSection(id: "display", header: "Display", rows: [
                 SettingsSplitRow(
                     id: "language",
                     title: "Language",
@@ -76,9 +75,7 @@ struct AppearanceDetailView: View {
                     description: "Horizontal tabs across the top, or a collapsible left sidebar.",
                 ) {
                     CompactNavigationPicker(selection: $navigation.style)
-                }
-            ]),
-            SettingsSplitSection(id: "music", header: "Music Player", rows: [
+                },
                 SettingsSplitRow(
                     id: "music-player",
                     title: "Music Player",
@@ -89,9 +86,8 @@ struct AppearanceDetailView: View {
                         showTrackDetails: $musicPlayer.showTrackDetails
                     )
                 }
-            ])
-        ] + CircadianSectionsBuilder(model: nightShift, primaryHeader: "Circadian Mode").sections
-            + SpoilerSectionsBuilder(spoilers: spoilers).sections
+        ] + CircadianRowsBuilder(model: nightShift).rows
+            + SpoilerRowsBuilder(spoilers: spoilers).rows
     }
 
     /// Theme cards plus the transparency (liquid-glass) control folded in beneath
@@ -136,21 +132,21 @@ struct SpoilersDetailView: View {
     @Bindable var spoilers: SpoilerSettingsModel
 
     var body: some View {
-        SettingsSplitLayout(title: "Spoilers", sections: SpoilerSectionsBuilder(spoilers: spoilers).sections)
+        SettingsSplitLayout(title: "Spoilers", rows: SpoilerRowsBuilder(spoilers: spoilers).rows)
     }
 }
 
-/// Builds the Spoiler-protection settings section. Extracted from
+/// Builds the Spoiler-protection settings rows. Extracted from
 /// ``SpoilersDetailView`` so the same controls can appear folded into the
 /// Appearance settings page (spoiler masking is a browsing concern that applies
 /// everywhere, so it lives in Appearance rather than Home or its own row).
 @MainActor
-struct SpoilerSectionsBuilder {
+struct SpoilerRowsBuilder {
     let spoilers: SpoilerSettingsModel
 
-    var sections: [SettingsSplitSection] {
+    var rows: [SettingsSplitRow] {
         @Bindable var spoilers = spoilers
-        return [SettingsSplitSection(id: "spoilers", header: nil, rows: [
+        return [
             SettingsSplitRow(
                 id: "spoilers",
                 title: "Spoilers",
@@ -170,7 +166,7 @@ struct SpoilerSectionsBuilder {
                         .toggleStyle(SettingsSwitchToggleStyle())
                 }
             }
-        ])]
+        ]
     }
 }
 /// Detail-page customization (a sibling to Customize Home): what plays behind the
@@ -182,11 +178,11 @@ struct DetailPageDetailView: View {
     @Bindable var heroBackground: HeroBackgroundSettingsModel
 
     var body: some View {
-        SettingsSplitLayout(title: "Detail Page", sections: [heroSection])
+        SettingsSplitLayout(title: "Detail Page", rows: heroRows)
     }
 
-    private var heroSection: SettingsSplitSection {
-        SettingsSplitSection(id: "detail-page-hero", header: "Behind the hero", rows: [
+    private var heroRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "detail-page-hero-mode",
                 title: "Background",
@@ -214,7 +210,7 @@ struct DetailPageDetailView: View {
                     }
                 }
             }
-        ])
+        ]
     }
 }
 
@@ -369,25 +365,23 @@ struct PlaybackDetailView: View {
     }
 
     var body: some View {
-        SettingsSplitLayout(title: "Playback", sections: sections)
+        SettingsSplitLayout(title: "Playback", rows: rows)
     }
 
     // MARK: - Split sections
 
-    private var sections: [SettingsSplitSection] {
-        [
-            subtitlesSection,
-            audioSection,
-            skipIntrosSection,
-            skipIntervalsSection,
-            resumeSection,
-            scrubbingSection,
-            displayTransitionsSection,
-            upNextSection
-        ]
+    private var rows: [SettingsSplitRow] {
+        subtitleRows
+            + audioRows
+            + skipIntroRows
+            + skipIntervalRows
+            + resumeRows
+            + scrubbingRows
+            + displayFadeRows
+            + upNextRows
     }
 
-    private var subtitlesSection: SettingsSplitSection {
+    private var subtitleRows: [SettingsSplitRow] {
         var rows: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "subtitle-default",
@@ -475,11 +469,11 @@ struct PlaybackDetailView: View {
             Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
         })
 
-        return SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: rows)
+        return rows
     }
 
-    private var audioSection: SettingsSplitSection {
-        SettingsSplitSection(id: "audio", header: "Audio", rows: [
+    private var audioRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "audio-defaults",
                 title: "Audio defaults",
@@ -506,11 +500,11 @@ struct PlaybackDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        ])
+        ]
     }
 
-    private var skipIntrosSection: SettingsSplitSection {
-        SettingsSplitSection(id: "skip-intros", header: "Skip Intros & Credits", rows: [
+    private var skipIntroRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "skip-intros-mode",
                 title: "Skip Intros",
@@ -523,15 +517,11 @@ struct PlaybackDetailView: View {
                     detail: { $0.detail }
                 )
             }
-        ])
+        ]
     }
 
-    private var skipIntervalsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "skip-intervals", header: LocalizedStringResource(
-            "settings.section.remoteControl",
-            defaultValue: "Remote",
-            comment: "Settings section for how the Apple TV remote behaves, e.g. skip intervals. The physical remote control, not a remote server."
-        ), rows: [
+    private var skipIntervalRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "skip-intervals",
                 title: "Skip Intervals",
@@ -554,15 +544,11 @@ struct PlaybackDetailView: View {
                     }
                 }
             }
-        ])
+        ]
     }
 
-    private var resumeSection: SettingsSplitSection {
-        SettingsSplitSection(id: "resume", header: LocalizedStringResource(
-            "settings.section.resume",
-            defaultValue: "Resume",
-            comment: "Settings section heading for resume behaviour, e.g. how far to rewind when resuming. A noun naming the topic, not the Resume button that starts playback."
-        ), rows: [
+    private var resumeRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "resume-rewind",
                 title: "Rewind on resume",
@@ -581,11 +567,11 @@ struct PlaybackDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        ])
+        ]
     }
 
-    private var scrubbingSection: SettingsSplitSection {
-        SettingsSplitSection(id: "scrubbing", header: "Scrubbing", rows: [
+    private var scrubbingRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "seek-without-pausing",
                 title: "Seek without pausing",
@@ -595,29 +581,40 @@ struct PlaybackDetailView: View {
             ) {
                 Toggle("Seek without pausing", isOn: $playback.settings.seekWithoutPausing)
             }
-        ])
+        ]
     }
 
-    private var displayTransitionsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "display-transitions", header: "Display Transitions", rows: [
+    /// Both display fades live in ONE row. They're the same idea — hide the
+    /// blank/flash your TV produces while it renegotiates the HDMI signal — and
+    /// splitting them made the page imply a "Display Transitions" grouping that
+    /// the flat master list never renders. One row, both switches in its detail.
+    private var displayFadeRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
-                id: "fade-dynamic-range",
-                title: "Fade for HDR & Dolby Vision",
-                description: "Your TV renegotiates the HDMI signal when a title switches between SDR, HDR and Dolby Vision, and that handshake flashes. Plozz fades to black around it. Turn this off only if Match Dynamic Range is off on your Apple TV.",
+                id: "display-fades",
+                title: "Fade on display changes",
+                description: "When your Apple TV has Match Content turned on, it renegotiates the picture with your TV as playback starts and ends — and the panel blanks or flashes while it does. Plozz fades to black over that handshake so you don't see it.",
             ) {
-                Toggle("Fade for HDR & Dolby Vision", isOn: $playback.settings.fadeOnDynamicRangeChange)
-            },
-            SettingsSplitRow(
-                id: "fade-frame-rate",
-                title: "Fade for frame rate changes",
-                description: "With Match Frame Rate on, leaving a 24fps title makes your TV hand back to the Home Screen's refresh rate — another flash, on every video, not just HDR ones. Plozz fades through it. Turn this off if Match Frame Rate is off on your Apple TV and you'd rather return to Home instantly.",
-            ) {
-                Toggle("Fade for frame rate changes", isOn: $playback.settings.fadeOnFrameRateChange)
+                VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                    SettingsDetailGroup(
+                        title: "HDR & Dolby Vision",
+                        description: "Covers the switch between SDR, HDR and Dolby Vision. Turn off only if Match Dynamic Range is off on your Apple TV."
+                    ) {
+                        Toggle("Fade for HDR & Dolby Vision", isOn: $playback.settings.fadeOnDynamicRangeChange)
+                    }
+                    SettingsDetailGroup(
+                        title: "Frame Rate",
+                        description: "Covers the handoff back to the Home Screen's refresh rate when you leave a 24fps title — which happens on every video, not just HDR ones. Turn off if Match Frame Rate is off on your Apple TV and you'd rather return to Home instantly."
+                    ) {
+                        Toggle("Fade for frame rate changes", isOn: $playback.settings.fadeOnFrameRateChange)
+                    }
+                }
             }
-        ])
+        ]
     }
 
-    private var upNextSection: SettingsSplitSection {        SettingsSplitSection(id: "up-next", header: "Up Next", rows: [
+    private var upNextRows: [SettingsSplitRow] {
+        [
             SettingsSplitRow(
                 id: "show-up-next-card",
                 title: "Show Up Next card",
@@ -636,7 +633,7 @@ struct PlaybackDetailView: View {
                     }
                 }
             }
-        ])
+        ]
     }
 }
 

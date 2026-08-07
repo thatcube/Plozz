@@ -150,6 +150,12 @@ public final class PlayerViewModel {
     /// Which display handshake leaving this playback has to hide, or `nil` for
     /// none (dismiss immediately, raising no needless black).
     ///
+    /// tvOS only. The veil exists to cover an HDMI mode switch, and only tvOS
+    /// drives one — `makeDisplayCriteria` is `#if os(tvOS)`, and the
+    /// mode-switch-end notification the veil waits on doesn't exist elsewhere. On
+    /// iOS a veil would be black held over nothing, and since nothing would ever
+    /// report a settle it would run to its full timeout on every single exit.
+    ///
     /// A pending Plozzigen probe counts as a dynamic-range exit because the engine
     /// may already have begun a display switch before publishing facts. Everything
     /// else falls through to the frame-rate case: tvOS exposes no way to ask
@@ -157,15 +163,26 @@ public final class PlayerViewModel {
     /// enabled we cover the exit unconditionally — with the tighter frame-rate
     /// hold, so an SDR title still returns to Home promptly.
     var exitVeilKind: DisplayTransitionKind? {
+        #if os(tvOS)
         let isDynamicRangeExit = effectiveDynamicRange.isAwaitingEngineProbe
             || (effectiveDynamicRange.bestAvailable?.isHDR ?? false)
         if isDynamicRangeExit, playbackSettings.fadeOnDynamicRangeChange { return .dynamicRange }
         if playbackSettings.fadeOnFrameRateChange { return .frameRate }
         return nil
+        #else
+        return nil
+        #endif
     }
 
     /// Whether the enter-path dynamic-range veil is allowed for this profile.
-    var fadesOnDynamicRangeChange: Bool { playbackSettings.fadeOnDynamicRangeChange }
+    /// tvOS only, for the same reason as ``exitVeilKind``.
+    var fadesOnDynamicRangeChange: Bool {
+        #if os(tvOS)
+        playbackSettings.fadeOnDynamicRangeChange
+        #else
+        false
+        #endif
+    }
 
     /// Shared, observable transport state for the custom player overlay. The
     /// view model writes live playback facts here; the input controller writes

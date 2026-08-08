@@ -776,6 +776,7 @@ public enum IdentityEnrichment {
 public final class IdentityIndexSnapshotStore: @unchecked Sendable {
     private let lock = NSLock()
     private var snapshot: IdentityIndexSnapshot
+    private var revisionCounter = 0
 
     public init(_ snapshot: IdentityIndexSnapshot = .empty) {
         self.snapshot = snapshot
@@ -787,10 +788,30 @@ public final class IdentityIndexSnapshotStore: @unchecked Sendable {
         return snapshot
     }
 
-    /// Atomically replaces the held snapshot.
+    /// Bumped on every publish. Lets a **stateful** consumer notice that the index
+    /// has grown and reconcile what it already folded.
+    ///
+    /// A one-shot merge doesn't need this: it consults the live snapshot for every
+    /// item, every time. An incremental merge deliberately doesn't (that is what
+    /// makes a long browse linear), so it needs a cheap "has membership changed
+    /// since I last looked" signal — otherwise two cards the index links *after*
+    /// they were folded would stay duplicated for the life of the browse.
+    public var revision: Int {
+        lock.lock(); defer { lock.unlock() }
+        return revisionCounter
+    }
+
+    /// Atomically replaces the held snapshot and bumps ``revision``.
     public func update(_ snapshot: IdentityIndexSnapshot) {
         lock.lock(); defer { lock.unlock() }
         self.snapshot = snapshot
+        revisionCounter &+= 1
+    }
+
+    /// A `@Sendable` reader for ``revision``, to hand to an incremental merge
+    /// alongside ``sourcesProvider()``.
+    public func revisionProvider() -> @Sendable () -> Int {
+        { [weak self] in self?.revision ?? 0 }
     }
 
     /// A `@Sendable` identity-sources lookup over the **live** snapshot, suitable

@@ -411,6 +411,7 @@ public struct RootView: View {
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         metadataSettings: appState.makeMetadataSettingsDependencies(),
                         identitySources: appState.identityIndex.identitySourcesProvider,
+                        identityRevision: appState.identityIndex.identityRevisionProvider,
                         onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() },
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,

@@ -196,6 +196,122 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
         XCTAssertEqual(inPairs, allAtOnce)
     }
 
+    func testUnionKeepsMembersInGlobalArrivalOrderNotClusterOrder() {
+        // Concatenating one cluster's members onto another's would order them
+        // [A, D, B] instead of [A, B, D], which changes both the split-guard's
+        // greedy grouping and which member fronts the card. The merged card's
+        // source list is the observable consequence.
+        let batches = [
+            [
+                item("a", title: "Dune", year: 2021, account: "acct-a", ids: ["tmdb": "438631"]),
+                item("b", title: "Dune", year: 2021, account: "acct-b", ids: ["imdb": "tt1160419"]),
+                item("d", title: "Dune", year: 2021, account: "acct-d", ids: ["tmdb": "438631"])
+            ],
+            [
+                item(
+                    "e",
+                    title: "Dune",
+                    year: 2021,
+                    account: "acct-e",
+                    ids: ["tmdb": "438631", "imdb": "tt1160419"]
+                )
+            ]
+        ]
+        let result = merged(batches)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(
+            result[0].sources.map(\.accountID),
+            ["acct-a", "acct-b", "acct-d", "acct-e"],
+            "sources follow global arrival order, not the order clusters happened to fuse"
+        )
+        assertMatchesBatch(batches)
+    }
+
+    // MARK: Identity-index growth
+
+    func testIndexGrowthRelinksCardsThatWereFoldedBeforeItWarmed() {
+        // The index warms asynchronously. Two rows sharing no external id are two
+        // cards until the index learns they are one title — and both were already
+        // folded by then, so nothing new arrives to bridge them. A one-shot merge
+        // re-reads the index for every item every page and self-heals; the
+        // incremental one has to notice the revision moved.
+        final class Index: @unchecked Sendable {
+            var revision = 0
+            var linked = false
+            func sources(_ item: MediaItem) -> [MediaSourceRef] {
+                guard linked, item.sourceAccountID == "plex" else { return [] }
+                return [MediaSourceRef(accountID: "jelly", itemID: "j1", kind: .movie)]
+            }
+        }
+        let index = Index()
+        var merger = IncrementalMediaItemMerger(
+            identitySources: { index.sources($0) },
+            identityRevision: { index.revision }
+        )
+        merger.append([item("p1", title: "Dune", year: 2021, account: "plex")])
+        merger.append([item("j1", title: "Dune 2021", year: 2021, account: "jelly")])
+        XCTAssertEqual(merger.count, 2, "unlinked to begin with")
+
+        index.linked = true
+        index.revision += 1
+        // A later page (even an empty-ish one) re-folds; the two collapse.
+        merger.append([item("x1", title: "Arrival", year: 2016, account: "plex")])
+
+        let result = merger.mergedItems()
+        XCTAssertEqual(result.count, 2, "Dune collapsed to one card; Arrival is its own")
+        XCTAssertEqual(
+            result.first { $0.title.hasPrefix("Dune") }?.id,
+            "p1",
+            "the earlier row still fronts the merged card"
+        )
+        XCTAssertEqual(result.map(\.id), ["p1", "x1"], "arrival order survives the re-fold")
+    }
+
+    func testIndexGrowthIsFoldedInEvenWhenNoFurtherBatchArrives() {
+        // A drained grid never appends again, so the reconcile has to also fire on
+        // the read path — otherwise the index's late link is never applied.
+        final class Index: @unchecked Sendable {
+            var revision = 0
+            var linked = false
+            func sources(_ item: MediaItem) -> [MediaSourceRef] {
+                guard linked, item.sourceAccountID == "plex" else { return [] }
+                return [MediaSourceRef(accountID: "jelly", itemID: "j1", kind: .movie)]
+            }
+        }
+        let index = Index()
+        var merger = IncrementalMediaItemMerger(
+            identitySources: { index.sources($0) },
+            identityRevision: { index.revision }
+        )
+        merger.append([
+            item("p1", title: "Dune", year: 2021, account: "plex"),
+            item("j1", title: "Dune 2021", year: 2021, account: "jelly")
+        ])
+        XCTAssertEqual(merger.count, 2)
+
+        index.linked = true
+        index.revision += 1
+        // No further append — just a read, as a fully-drained grid would do.
+        XCTAssertEqual(merger.count, 1)
+        XCTAssertEqual(merger.mergedItems().map(\.id), ["p1"])
+    }
+
+    func testUnchangedIndexRevisionDoesNotRefold() {
+        // The re-fold is linear, so it must fire only when the index actually moved.
+        var reads = 0
+        var merger = IncrementalMediaItemMerger(
+            identitySources: { _ in
+                reads += 1
+                return []
+            },
+            identityRevision: { 7 }
+        )
+        merger.append([item("a", title: "A", account: "x")])
+        merger.append([item("b", title: "B", account: "x")])
+        merger.append([item("c", title: "C", account: "x")])
+        XCTAssertEqual(reads, 3, "one identity lookup per inserted item, never a re-fold")
+    }
+
     // MARK: Slicing
 
     func testSliceReturnsTheRequestedWindowAndClamps() {

@@ -11,30 +11,37 @@ import Observation
 /// so a push invalidates the rail and nothing else.
 ///
 /// Absent (`nil` in the environment) under the two native tab styles, which draw
-/// their own chrome and manage its visibility themselves.
+/// their own chrome and manage its visibility themselves — so every reporting call
+/// site is a no-op there.
+///
+/// Lives in `CoreUI` rather than beside the rail in `AppShell` because the stacks
+/// that know their own depth are spread across feature modules (`FeatureMusic`,
+/// `FeatureSettings`), and a Feature cannot import the shell.
 @MainActor
 @Observable
-final class NavigationChromeModel {
+public final class NavigationChromeModel {
     /// Number of pages pushed on top of the current destination's root.
-    private(set) var stackDepth = 0
+    public private(set) var stackDepth = 0
 
     /// Whether the rail should be off screen. A pushed page is a *detail* page —
     /// a title, a person, an episode list — and those are full-bleed by design.
-    var isChromeHidden: Bool { stackDepth > 0 }
+    public var isChromeHidden: Bool { stackDepth > 0 }
 
-    func setStackDepth(_ depth: Int) {
+    public init() {}
+
+    public func setStackDepth(_ depth: Int) {
         guard stackDepth != depth else { return }
         stackDepth = depth
     }
 
     /// Called when the shell swaps destinations: the outgoing stack is torn down
     /// without reporting, so the rail would otherwise stay hidden.
-    func resetForDestinationChange() {
+    public func resetForDestinationChange() {
         setStackDepth(0)
     }
 }
 
-extension View {
+public extension View {
     /// Reports this navigation stack's depth to the shell's chrome model, so the
     /// rail hides while a detail page is on top. A no-op under the native tab
     /// styles, which don't install a chrome model.

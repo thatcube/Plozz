@@ -40,6 +40,8 @@ public struct SettingsView: View {
     /// destination *outside* the stack, so the Menu/Back button quits the app
     /// instead of popping back.
     @State private var path: [SettingsRoute] = []
+    /// The shell's chrome model, present only under the custom navigation rail.
+    @Environment(NavigationChromeModel.self) private var navigationChrome: NavigationChromeModel?
     @State private var confirmSignOutAll = false
     @State private var showResetSyncConfirm = false
     @State private var confirmEraseICloud = false
@@ -480,6 +482,11 @@ public struct SettingsView: View {
         } message: {
             Text("Deletes the whole household — every profile and server — from iCloud (all your devices), wipes this Apple TV to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on this Apple TV, then fresh-install another device). Re-enable Sync when done.")
         }
+        // Under the custom navigation rail, a drilled-in Settings page is a detail
+        // page: report the depth so the rail steps aside rather than overlaying it
+        // and competing for a Left press. A no-op under the two native tab styles,
+        // which install no chrome model.
+        .reportsNavigationDepth(path.count, to: navigationChrome)
     }
 
     // MARK: - Profile container (header + all settings this profile owns)

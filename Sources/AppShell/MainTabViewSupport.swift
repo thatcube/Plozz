@@ -524,7 +524,8 @@ func makeHeroMetadataEnricher(
 func resolveLibraryBrowse(
     for library: MediaLibrary,
     in accounts: [ResolvedAccount],
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    identityRevision: @escaping @Sendable () -> Int = { 0 }
 ) -> (provider: any MediaProvider, sourceAccountID: String?) {
     let accountIDs = library.allSourceAccountIDs
     if accountIDs.count > 1 {
@@ -540,7 +541,8 @@ func resolveLibraryBrowse(
                 AggregatedLibraryProvider(
                     sources: sources,
                     serverInfo: accounts.sourceServerInfo(),
-                    identitySources: identitySources
+                    identitySources: identitySources,
+                    identityRevision: identityRevision
                 ),
                 nil
             )
@@ -570,7 +572,8 @@ func resolveLibraryBrowse(
 func resolveAllLibrariesBrowse(
     libraries: [AggregatedLibrary],
     in accounts: [ResolvedAccount],
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    identityRevision: @escaping @Sendable () -> Int = { 0 }
 ) -> (any MediaProvider)? {
     var sources: [AggregatedLibrarySource] = []
     var seen: Set<String> = []
@@ -599,8 +602,39 @@ func resolveAllLibrariesBrowse(
     return AggregatedLibraryProvider(
         sources: sources,
         serverInfo: accounts.sourceServerInfo(),
-        identitySources: identitySources
+        identitySources: identitySources,
+        identityRevision: identityRevision
     )
+}
+
+/// A stable signature of every (account, container, kind) the combined grid will
+/// page, used as part of the destination's SwiftUI identity.
+///
+/// `LibraryBrowseView` builds its view model once and holds it in `@State`, so a
+/// destination whose identity doesn't move keeps the ORIGINAL provider. Keying on
+/// library keys alone isn't enough: a server coming back adds sources to libraries
+/// whose keys never changed, and the grid would go on paging the smaller set.
+/// Sorted, so a reordered discovery result alone can't reset the grid.
+func allLibrariesSourceSignature(_ libraries: [AggregatedLibrary]) -> String {
+    libraries
+        .filter { !$0.library.isMusic }
+        .flatMap { aggregated in
+            aggregated.library.allSourceAccountIDs.map { accountID in
+                let container = aggregated.library.containerID(forSourceAccountID: accountID) ?? ""
+                return "\(accountID)/\(container)/\(aggregated.library.kind.rawValue)"
+            }
+        }
+        .sorted()
+        .joined(separator: ",")
+}
+
+/// The same signature for ONE library, so a single-library grid also rebuilds when
+/// its cross-server source set changes.
+func librarySourceSignature(_ library: MediaLibrary) -> String {
+    library.allSourceAccountIDs
+        .map { "\($0)/\(library.containerID(forSourceAccountID: $0) ?? "")" }
+        .sorted()
+        .joined(separator: ",")
 }
 
 /// Retargets a cross-server-merged card to the **locality-best** copy before it

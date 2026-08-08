@@ -264,6 +264,9 @@ struct MainTabView: View {
     /// set from the eager identity index. Threaded into Home/Search/Browse merging,
     /// the detail picker and the watch fan-out so all read one consistent set.
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// The identity index's publish counter, threaded to the cross-server browse so
+    /// a long merge re-folds when the index grows. Defaulted for previews/tests.
+    var identityRevision: @Sendable () -> Int = { 0 }
     /// Kicks off (or incrementally refreshes) the identity index for the signed-in
     /// accounts. Invoked when the signed-in UI appears.
     let onWarmIdentityIndex: () -> Void
@@ -351,11 +354,24 @@ struct MainTabView: View {
 
     // MARK: - Custom navigation rail
 
+    /// The rail's binding, reading the **pruned** selection.
+    ///
+    /// The rail must be told what is actually on screen, not what was last stored:
+    /// when the selected library disappears (a server goes unreachable) the content
+    /// falls back to Home, and a raw binding would leave the rail highlighting
+    /// nothing. The setter writes the raw value, and `railShell` persists the
+    /// resolved one when they diverge — otherwise a library returning later would
+    /// silently yank the viewer out of Home and into a destination they never chose.
     private var railSelection: Binding<NavigationRailDestination> {
         Binding(
-            get: { NavigationRailDestination(storageValue: railSelectionRaw) ?? .home },
+            get: { resolvedRailSelection },
             set: { railSelectionRaw = $0.storageValue }
         )
+    }
+
+    /// The stored selection before pruning. Only used to notice divergence.
+    private var storedRailSelection: NavigationRailDestination {
+        NavigationRailDestination(storageValue: railSelectionRaw) ?? .home
     }
 
     /// The libraries the profile can actually browse right now: discovered, not
@@ -378,7 +394,7 @@ struct MainTabView: View {
     /// signed out of falls back to Home rather than leaving a blank screen.
     private var resolvedRailSelection: NavigationRailDestination {
         NavigationRailPlan.resolvedSelection(
-            railSelection.wrappedValue,
+            storedRailSelection,
             entries: railEntries,
             hasMusic: musicAvailability.hasMusic
         )
@@ -544,6 +560,7 @@ struct MainTabView: View {
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
                 identitySources: identitySources,
+                identityRevision: identityRevision,
                 pendingWatchMutations: pendingWatchMutations,
                 appliedWatchRecency: appliedWatchRecency,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
@@ -672,6 +689,14 @@ struct MainTabView: View {
             content: railDestination
         )
         .environment(navigationChrome)
+        .onChange(of: resolvedRailSelection) { _, resolved in
+            // Persist the pruning. Without this the stored value still names the
+            // vanished destination, so the moment its server answers again the
+            // viewer is thrown out of whatever they were looking at and back into
+            // a library they didn't pick.
+            guard resolved.storageValue != railSelectionRaw else { return }
+            railSelectionRaw = resolved.storageValue
+        }
         .task(id: railLibrariesKey) {
             // Paint the rail's real libraries on the first frame from the persisted
             // snapshot — no network — then refresh below. Without this the chrome
@@ -711,16 +736,22 @@ struct MainTabView: View {
         case .allLibraries:
             homeTabContent(
                 root: .allLibraries(browsableRailLibraries),
-                // The library SET is part of the identity: the grid's provider is
-                // built once from it, so a server coming back has to rebuild the
-                // stack rather than silently keep paging the old source list.
-                // Sorted so a reordered discovery result alone can't reset it.
+                // The exact SOURCE SET is part of the identity, not just the library
+                // keys: `LibraryBrowseView` builds its view model once, so a server
+                // coming back — which adds sources to libraries whose keys never
+                // changed — has to rebuild the stack rather than go on paging the
+                // smaller set.
                 id: "\(homeScopeKey)|allLibraries|"
-                    + browsableRailLibraries.map(\.key).sorted().joined(separator: ",")
+                    + allLibrariesSourceSignature(browsableRailLibraries)
             )
         case let .library(key):
             if let entry = railEntries.first(where: { $0.key == key }), let library = entry.library {
-                homeTabContent(root: .library(library.library), id: "\(homeScopeKey)|\(key)")
+                homeTabContent(
+                    root: .library(library.library),
+                    // Same reason as the combined grid: a cross-server library's
+                    // source set can change under a stable key.
+                    id: "\(homeScopeKey)|\(key)|" + librarySourceSignature(library.library)
+                )
             } else {
                 homeTabContent()
             }

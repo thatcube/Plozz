@@ -104,6 +104,10 @@ struct HomeTab: View {
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// The identity index's publish counter, handed to the cross-server browse so a
+    /// running merge re-folds when the index grows. Defaulted so previews/tests can
+    /// omit it.
+    var identityRevision: @Sendable () -> Int = { 0 }
     /// Snapshot of the durable outbox's not-yet-confirmed plays, folded into the
     /// Continue Watching row so a reload reflects in-app plays the servers haven't
     /// recorded yet (r8-cw-outbox-patch).
@@ -303,7 +307,12 @@ struct HomeTab: View {
     /// and — under the rail — by the stack root, so a library looks and behaves the
     /// same however it was opened.
     private func libraryBrowse(for library: MediaLibrary) -> some View {
-        let browse = resolveLibraryBrowse(for: library, in: accounts, identitySources: identitySources)
+        let browse = resolveLibraryBrowse(
+            for: library,
+            in: accounts,
+            identitySources: identitySources,
+            identityRevision: identityRevision
+        )
         return LibraryBrowseView(
             viewModel: LibraryBrowseViewModel(
                 provider: browse.provider,
@@ -330,7 +339,8 @@ struct HomeTab: View {
         if let provider = resolveAllLibrariesBrowse(
             libraries: libraries,
             in: accounts,
-            identitySources: identitySources
+            identitySources: identitySources,
+            identityRevision: identityRevision
         ) {
             LibraryBrowseView(
                 viewModel: LibraryBrowseViewModel(

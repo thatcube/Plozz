@@ -33,16 +33,37 @@ import Foundation
 public struct IncrementalMediaItemMerger {
     private let serverInfo: (String) -> SourceServerInfo?
     private let identitySources: (MediaItem) -> [MediaSourceRef]
+    /// Reads the identity index's publish counter. The index warms asynchronously,
+    /// so membership the merge relied on can GROW after items were folded. A
+    /// one-shot merge re-reads it for every item every time; this one re-folds from
+    /// its retained members when the counter moves. See ``reconcileIfIndexChanged``.
+    private let identityRevision: () -> Int
+    private var lastIdentityRevision: Int
+
+    /// One retained input item plus the position it arrived at.
+    ///
+    /// The ordinal is load-bearing, not bookkeeping: `MediaItemMerger` derives a
+    /// cluster's members by walking the input in order, so its members are in
+    /// global arrival order — and both the split-guard's greedy grouping and
+    /// `mergeGroup`'s "first is primary" depend on that order. Appending one
+    /// cluster's members onto another's during a union would produce cluster order
+    /// instead, so unions merge by ordinal to keep the two identical.
+    private struct Member {
+        let ordinal: Int
+        let item: MediaItem
+    }
 
     /// Union-find parent per cluster slot. A slot is a root when `parent[i] == i`;
     /// unions always keep the LOWER slot (created earlier), which is what makes the
     /// output order match the batch merger's first-appearance order.
     private var parent: [Int] = []
-    /// Raw members per cluster, valid only at a root.
-    private var members: [[MediaItem]] = []
+    /// Raw members per cluster in ordinal order, valid only at a root.
+    private var members: [[Member]] = []
     /// Cached merged cards per root (a cluster can yield more than one card when the
     /// split-guard ejects a false merge). `nil` = dirty, recompute on next read.
     private var cards: [[MediaItem]?] = []
+    /// Arrival counter handed to each incoming item.
+    private var nextOrdinal = 0
 
     /// Kind-scoped identity → some slot in the owning cluster.
     private var identityOwner: [KindScopedIdentity: Int] = [:]
@@ -61,10 +82,13 @@ public struct IncrementalMediaItemMerger {
 
     public init(
         serverInfo: @escaping (String) -> SourceServerInfo? = { _ in nil },
-        identitySources: @escaping (MediaItem) -> [MediaSourceRef] = { _ in [] }
+        identitySources: @escaping (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        identityRevision: @escaping () -> Int = { 0 }
     ) {
         self.serverInfo = serverInfo
         self.identitySources = identitySources
+        self.identityRevision = identityRevision
+        self.lastIdentityRevision = identityRevision()
     }
 
     /// Number of merged cards accumulated so far.
@@ -92,6 +116,7 @@ public struct IncrementalMediaItemMerger {
 
     /// Folds one freshly-fetched batch in.
     public mutating func append(_ items: [MediaItem]) {
+        reconcileIfIndexChanged()
         guard !items.isEmpty else { return }
         var dirtyRoots: Set<Int> = []
 
@@ -105,6 +130,37 @@ public struct IncrementalMediaItemMerger {
         for root in dirtyRoots {
             cards[find(root)] = nil
         }
+        isFlattenedStale = true
+    }
+
+    /// Re-folds everything already accumulated when the identity index has
+    /// published since the last fold.
+    ///
+    /// Deliberately a full re-fold rather than an attempt to patch the affected
+    /// clusters: newly-published membership can link ANY pair of existing clusters,
+    /// so there is no bounded set to patch, and re-folding from the retained members
+    /// reuses the same insertion path — no second, subtly-different merge rule to
+    /// keep in sync. It costs one linear pass, and only when the index actually
+    /// grew (a handful of times per session as accounts warm), not per page.
+    private mutating func reconcileIfIndexChanged() {
+        let revision = identityRevision()
+        guard revision != lastIdentityRevision else { return }
+        lastIdentityRevision = revision
+        let retained = members
+            .flatMap { $0 }
+            .sorted { $0.ordinal < $1.ordinal }
+            .map(\.item)
+        guard !retained.isEmpty else { return }
+
+        parent.removeAll(keepingCapacity: true)
+        members.removeAll(keepingCapacity: true)
+        cards.removeAll(keepingCapacity: true)
+        identityOwner.removeAll(keepingCapacity: true)
+        serverItemOwner.removeAll(keepingCapacity: true)
+        ownerByRef.removeAll(keepingCapacity: true)
+        claimsByRef.removeAll(keepingCapacity: true)
+        nextOrdinal = 0
+        for item in retained { _ = insert(item) }
         isFlattenedStale = true
     }
 
@@ -131,15 +187,18 @@ public struct IncrementalMediaItemMerger {
         for ref in claimedRefs {
             if let slot = ownerByRef[ref] {
                 let root = find(slot)
-                if members[root].contains(where: { $0.kind == kind }) { candidates.append(root) }
+                if members[root].contains(where: { $0.item.kind == kind }) { candidates.append(root) }
             }
         }
         if let ownRefKey, let claimants = claimsByRef[ownRefKey] {
             for slot in claimants {
                 let root = find(slot)
-                if members[root].contains(where: { $0.kind == kind }) { candidates.append(root) }
+                if members[root].contains(where: { $0.item.kind == kind }) { candidates.append(root) }
             }
         }
+
+        let member = Member(ordinal: nextOrdinal, item: item)
+        nextOrdinal += 1
 
         let slot: Int
         if let target = candidates.min() {
@@ -147,11 +206,12 @@ public struct IncrementalMediaItemMerger {
                 union(target, candidate)
             }
             slot = find(target)
-            members[slot].append(item)
+            // Ordinals only ever increase, so the newest member always belongs last.
+            members[slot].append(member)
         } else {
             slot = parent.count
             parent.append(slot)
-            members.append([item])
+            members.append([member])
             cards.append(nil)
         }
 
@@ -192,15 +252,50 @@ public struct IncrementalMediaItemMerger {
         // Keep the earlier-created cluster so first-appearance order is preserved.
         let (keep, drop) = rootA < rootB ? (rootA, rootB) : (rootB, rootA)
         parent[drop] = keep
-        members[keep].append(contentsOf: members[drop])
+        // Interleave by ordinal rather than concatenating. Concatenation would put
+        // every member of `keep` before every member of `drop`, which is CLUSTER
+        // order, not arrival order — and the split-guard's greedy grouping plus
+        // `mergeGroup`'s primary/source ordering both read that order, so the
+        // result would differ from the batch merger purely because of how the input
+        // happened to be paged. Both sides are already ordinal-sorted, so this is a
+        // linear two-pointer merge.
+        members[keep] = Self.mergedByOrdinal(members[keep], members[drop])
         members[drop] = []
         cards[keep] = nil
         cards[drop] = nil
     }
 
+    /// Merges two ordinal-sorted member lists into one.
+    private static func mergedByOrdinal(_ lhs: [Member], _ rhs: [Member]) -> [Member] {
+        guard !lhs.isEmpty else { return rhs }
+        guard !rhs.isEmpty else { return lhs }
+        var result: [Member] = []
+        result.reserveCapacity(lhs.count + rhs.count)
+        var i = 0
+        var j = 0
+        while i < lhs.count, j < rhs.count {
+            if lhs[i].ordinal <= rhs[j].ordinal {
+                result.append(lhs[i])
+                i += 1
+            } else {
+                result.append(rhs[j])
+                j += 1
+            }
+        }
+        result.append(contentsOf: lhs[i...])
+        result.append(contentsOf: rhs[j...])
+        return result
+    }
+
     // MARK: - Output
 
     private mutating func flattenIfNeeded() {
+        // Also checked on the READ path, not just on append. Once every source is
+        // drained no further batch arrives, so an index publish after that point
+        // would otherwise never be folded in — and that is exactly the case the
+        // revision signal exists for. Guarded by a plain integer compare, so a
+        // read with an unchanged index costs one closure call.
+        reconcileIfIndexChanged()
         guard isFlattenedStale else { return }
         var output: [MediaItem] = []
         output.reserveCapacity(flattened.count + 32)
@@ -210,7 +305,7 @@ public struct IncrementalMediaItemMerger {
                 continue
             }
             var produced: [MediaItem] = []
-            for group in MediaItemMerger.refineComponent(members[slot]) {
+            for group in MediaItemMerger.refineComponent(members[slot].map(\.item)) {
                 produced.append(
                     MediaItemMerger.mergeGroup(
                         group,

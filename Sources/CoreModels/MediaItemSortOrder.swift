@@ -17,11 +17,25 @@ import Foundation
 /// For those the caller falls back to interleaving, which is no worse than what a
 /// shuffled/opaque ordering already looks like.
 ///
-/// The comparison is an *approximation* of the server's collation (it strips a
-/// leading article and compares case/diacritic-insensitively with numeric
-/// awareness, which is what Plex and Jellyfin sort names do in practice). That is
-/// safe by construction: the merge only decides which source's head to take next,
-/// so a disagreement can nudge two adjacent cards, never drop or duplicate one.
+/// ### This is an approximation, and that is safe by construction
+/// The comparison cannot be identical to the server's: it works from what a list
+/// payload actually returns, so it strips a leading article and compares
+/// case/diacritic-insensitively with numeric awareness (what Plex and Jellyfin
+/// sort names do in practice) rather than reading a provider `titleSort`, and
+/// release-date ordering has only `productionYear` to work with, not the exact
+/// premiere date the server sorts by.
+///
+/// A textbook k-way merge requires every source to be ordered by the *same*
+/// comparator, so a disagreement here is a real (if small) inaccuracy — two cards
+/// released in the same year can swap, and a custom sort title is ignored. What it
+/// is NOT is a correctness hazard: the merge only ever chooses which source's head
+/// to pop next, and each source's own queue stays in the server's order, so no item
+/// can be dropped, duplicated, or skipped. The failure mode is bounded, local
+/// mis-ordering — strictly better than the round-robin interleave it replaced,
+/// which mis-ordered everything.
+///
+/// If a provider ever starts returning its sort key on list items, carry it on
+/// `MediaItem` and compare that instead; the merge itself needs no change.
 public enum MediaItemSortOrder {
     /// Whether items can be ordered locally for `field` — i.e. whether a combined
     /// browse can merge on it rather than interleave.

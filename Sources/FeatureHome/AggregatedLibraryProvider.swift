@@ -65,10 +65,28 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     private let sources: [AggregatedLibrarySource]
     private let cache: Cache
 
+    /// How many times one fill retries a silent source before emitting past it.
+    ///
+    /// Emitting past a source is a real (if bounded) cost: the ordered frontier has
+    /// moved on, so anything that source contributes later lands at the tail rather
+    /// than in its sorted place. That is the right trade against showing nothing —
+    /// missing titles are worse than a late run — but it should only happen to a
+    /// server that is actually down, never to one that dropped a single request.
+    private static let silentAttemptsBeforeSkipping = 2
+
     private actor Cache {
         var offsets: [String: Int] = [:]
         var totals: [String: Int] = [:]
         var exhausted: Set<String> = []
+        /// Consecutive fills in which a source answered with nothing at all. Used
+        /// to tell a blip apart from a server that is simply down — see
+        /// ``hasSourceWithUnknownTotal(sourceIDs:)``.
+        private var silentFills: [String: Int] = [:]
+
+        /// How many fills a never-yet-answering source is given before the grid
+        /// stops holding a slot open for it. One retry is enough to cover a blip;
+        /// more would leave a placeholder on screen for a server that is down.
+        private static let optimisticRetryLimit = 2
 
         /// The stateful cross-server merge. Folding each batch in (rather than
         /// re-merging everything every page) is what keeps a deep scroll linear:
@@ -84,11 +102,13 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
 
         init(
             serverInfo: [String: SourceServerInfo],
-            identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+            identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+            identityRevision: @escaping @Sendable () -> Int
         ) {
             self.merger = IncrementalMediaItemMerger(
                 serverInfo: { serverInfo[$0] },
-                identitySources: identitySources
+                identitySources: identitySources,
+                identityRevision: identityRevision
             )
         }
 
@@ -101,6 +121,14 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         func setOffset(_ offset: Int, for sourceKey: String) { offsets[sourceKey] = offset }
         func setTotal(_ total: Int, for sourceKey: String) { totals[sourceKey] = total }
         func markExhausted(_ sourceKey: String) { exhausted.insert(sourceKey) }
+        /// Records one fill's per-source outcome: an answering source resets its
+        /// silence, a silent live one accrues it.
+        func recordFillOutcome(answered: Set<String>, silent: Set<String>) {
+            for key in answered { silentFills[key] = 0 }
+            for key in silent where !exhausted.contains(key) {
+                silentFills[key, default: 0] += 1
+            }
+        }
         func isExhausted(_ sourceKey: String) -> Bool { exhausted.contains(sourceKey) }
         func mergedCount() -> Int { merger.count }
         func mergedSlice(from start: Int, limit: Int) -> [MediaItem] {
@@ -136,10 +164,17 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         /// `ordered` is false for sorts `MediaItemSortOrder` can't reproduce
         /// locally (date-added, community rating, random). Those simply drain
         /// everything buffered, round-robin — the pre-existing interleave.
-        /// `stalled` names sources that failed to answer this round. They are NOT
-        /// exhausted (a later call retries them), but they must not block the
+        /// `stalled` names sources that have used up their in-fill retries. They are
+        /// NOT exhausted (a later call retries them), but they must not block the
         /// frontier — otherwise one unreachable server would freeze the whole grid
         /// with items already buffered and nothing on screen.
+        ///
+        /// The cost of stepping over one is that its later arrivals land at the tail
+        /// rather than in sorted position, so the grid can end up with a correctly
+        /// sorted run followed by a shorter second run. That is deliberate: for a
+        /// media browser, being unable to reach a whole server's titles is a worse
+        /// failure than a visibly-appended late run, and the retry budget above
+        /// keeps it to servers that are genuinely down.
         func drainOrdered(
             sourceKeys: [String],
             sort: CoreModels.SortDescriptor,
@@ -198,6 +233,22 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         }
 
         func totalUpperBound() -> Int { totals.values.reduce(0, +) }
+
+        /// Whether any source is still live, has never reported a total, and hasn't
+        /// yet used up its retries — i.e. might still have something to contribute.
+        ///
+        /// Such a source adds nothing to the optimistic upper bound (it has answered
+        /// nothing), so without this the grid would size itself to exactly what is
+        /// loaded and never ask again. The retry limit is what stops the opposite
+        /// failure: a server that is genuinely down must not leave a placeholder
+        /// cell on screen forever.
+        func hasSourceWithUnknownTotal(sourceIDs: [String]) -> Bool {
+            sourceIDs.contains {
+                !exhausted.contains($0)
+                    && totals[$0] == nil
+                    && (silentFills[$0] ?? 0) < Self.optimisticRetryLimit
+            }
+        }
         func allExhausted(sourceIDs: [String]) -> Bool {
             sourceIDs.allSatisfy { exhausted.contains($0) }
         }
@@ -228,11 +279,20 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     public init(
         sources: [AggregatedLibrarySource],
         serverInfo: [String: SourceServerInfo] = [:],
-        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
+        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        /// The identity index's publish counter. The running merge re-folds when it
+        /// moves, so cards that the index links only *after* they were paged still
+        /// collapse — see ``IncrementalMediaItemMerger``. Defaulted for tests and
+        /// callers with no index.
+        identityRevision: @escaping @Sendable () -> Int = { 0 }
     ) {
         precondition(!sources.isEmpty, "AggregatedLibraryProvider requires at least one source")
         self.sources = sources
-        self.cache = Cache(serverInfo: serverInfo, identitySources: identitySources)
+        self.cache = Cache(
+            serverInfo: serverInfo,
+            identitySources: identitySources,
+            identityRevision: identityRevision
+        )
         self.kind = sources[0].provider.kind
         self.session = sources[0].provider.session
     }
@@ -292,10 +352,23 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         // Serialize the fill: hold the single-flight gate across the whole
         // read-fetch-advance loop AND the merged-buffer snapshot so a concurrent
         // prefetch can't skip a page window nor observe a half-advanced buffer.
+        //
+        // Released through `defer` rather than at the exits. Nothing between here
+        // and the end of the fill throws today, but the gate has no timeout and no
+        // cancellation path: if a future `try` — or an early return added to the
+        // loop — ever skipped the release, `fillInProgress` would latch true and
+        // EVERY later page would suspend forever with no error and no recovery.
+        // That failure is severe enough that the gate must not depend on the
+        // control flow staying the way it is today.
         await cache.acquireFill()
-        /// Sources that failed to answer during THIS call. Scoped per call so a
-        /// blip never persists into the next page request.
+        defer { Task { [cache] in await cache.releaseFill() } }
+        /// Sources that have used up their in-fill retries and are being emitted
+        /// past. Scoped per call so a blip never persists into the next request.
         var stalled: Set<String> = []
+        /// Sources that produced at least one item during this call.
+        var answered: Set<String> = []
+        /// Consecutive silent attempts per source WITHIN this fill.
+        var silentAttempts: [String: Int] = [:]
         while await cache.mergedCount() < targetCount {
             let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
             let hasPending = await cache.hasPending(sourceIDs)
@@ -320,8 +393,20 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
                 // A hungry source that answered with nothing is either offline or
                 // erroring. Don't let it hold the ordered frontier hostage this
                 // call; it stays un-exhausted, so the next page retries it.
-                stalled.formUnion(hungry.filter { !produced.contains($0) })
-                stalled.subtract(produced)
+                answered.formUnion(produced)
+                for key in produced { silentAttempts[key] = 0 }
+                for key in hungry where !produced.contains(key) {
+                    silentAttempts[key, default: 0] += 1
+                }
+                // Only give up on a source — and start emitting past it, which is
+                // what puts its late arrivals out of order — once it has actually
+                // been retried. A single dropped request should never cost the
+                // grid its ordering.
+                stalled = Set(
+                    silentAttempts
+                        .filter { $0.value >= Self.silentAttemptsBeforeSkipping }
+                        .keys
+                )
             }
 
             let tm = Date()
@@ -335,22 +420,42 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
                 progressed = true
             }
             mergeMs += Int(Date().timeIntervalSince(tm) * 1000)
-            // Neither a fetch nor a drain moved: nothing more is achievable on this
-            // call, so return what we have instead of spinning on a dead server.
-            if !progressed { break }
+            // Nothing moved — but a source that still has retry budget is worth one
+            // more attempt before we give up and emit past it (or return short).
+            let retryable = hungry.contains {
+                (silentAttempts[$0] ?? 0) < Self.silentAttemptsBeforeSkipping
+            }
+            if !progressed, !retryable { break }
         }
+        // Silence is counted per CALL, not per loop iteration: one fill retries a
+        // hungry source a couple of times, and counting each of those would exhaust
+        // the cross-call optimism budget before the grid ever got a chance to ask
+        // again.
+        await cache.recordFillOutcome(answered: answered, silent: stalled.subtracting(answered))
+
         let mergedCount = await cache.mergedCount()
         // Only the requested window is materialized — a deep scroll never copies the
         // whole accumulated buffer just to hand back 60 cards.
         let pageItems = await cache.mergedSlice(from: page.startIndex, limit: page.limit)
         let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
         let upperBound = await cache.totalUpperBound()
-        await cache.releaseFill()
+        let hasUnknownSource = await cache.hasSourceWithUnknownTotal(sourceIDs: sourceIDs)
 
         // Until every source is drained the true post-merge total is unknown;
         // report an optimistic upper bound (sum of per-server totals) so the grid
         // keeps requesting pages, then settle on the exact merged count.
-        let totalCount = allExhausted ? mergedCount : max(mergedCount, upperBound)
+        //
+        // The `hasUnknownSource` term is what keeps a *stalled* server recoverable.
+        // A source that never answered contributes no total, so the upper bound can
+        // equal what is already merged — the grid would then size itself to exactly
+        // the loaded items and never ask again, stranding that server's titles for
+        // the life of the screen. Claiming one more page keeps the grid pulling, and
+        // costs nothing lasting: if the retry also comes back empty this returns to
+        // the exact merged count on the very next call and the slots go away.
+        var totalCount = allExhausted ? mergedCount : max(mergedCount, upperBound)
+        if !allExhausted, hasUnknownSource, totalCount <= mergedCount {
+            totalCount = mergedCount + 1
+        }
 
         if ProcessInfo.processInfo.environment["PLZXPAGE"] == "1" {
             let totalMs = Int(Date().timeIntervalSince(t0) * 1000)

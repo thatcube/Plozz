@@ -80,6 +80,7 @@ const PLATFORMS = {
       ['plozz-tv-home', 'Your library, the way it should look'],
       ['plozz-tv-oppenheimer', 'Artwork, ratings and cast — from bare files'],
       ['plozz-tv-lotr', 'Every version, every server, one title'],
+      ['plozz-tv-dune', '4K, Dolby Vision, Dolby Atmos — played natively'],
       ['plozz-tv-lastofus', 'Pick up exactly where you left off'],
       ['plozz-tv-cast', 'Follow an actor through your whole library'],
       ['plozz-tv-library', 'Browse everything you own'],
@@ -267,7 +268,12 @@ async function main() {
       continue;
     }
 
+    // Cleared, not merged. Panels are numbered by position, so inserting one
+    // renumbers everything after it and the previous run's files survive under
+    // their old numbers — a directory that looks like a valid upload set and
+    // contains each of those panels twice.
     const dir = path.join(OUT, key);
+    await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
 
     let index = 0;

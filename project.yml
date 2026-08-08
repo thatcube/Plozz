@@ -454,6 +454,11 @@ schemes:
     test:
       config: Debug
       gatherCoverageData: false
+      # Xcode records UI-test runs by default. These runs are long (the library
+      # has to settle), so that recording came back as a 2.5 GB attachment next
+      # to a 4 MB screenshot. The frames we want are attached explicitly.
+      captureScreenshotsAutomatically: false
+      systemAttachmentLifetime: deleteOnSuccess
       targets:
         - PlozzShots
     run:

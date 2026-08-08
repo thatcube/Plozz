@@ -164,17 +164,74 @@ echo "(first run on a fresh container walks ~10.5k items — expect a long wait)
 settle "${PLOZZ_SHOTS_SETTLE:-1800}" 5
 printf '\n'
 
+# ── Capture ──────────────────────────────────────────────────────────────────
+# Home needs no navigation, so it is taken straight from the framebuffer. That
+# path has no XCTest in it at all, which makes it the one capture that cannot be
+# broken by a focus change.
 shoot() {
   local name="$1"
   xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null 2>&1
-  printf '  %-28s %s\n' "$name.png" "$(magick identify -format '%wx%h' "$OUT/$name.png" 2>/dev/null || echo '?')"
+  printf '  %-30s %s\n' "$name.png" "$(magick identify -format '%wx%h' "$OUT/$name.png" 2>/dev/null || echo '?')"
 }
 
 echo "Capturing:"
 shoot "plozz-tv-home"
 
+# Everything past Home needs the remote, which only a UI test can press. The
+# frames come back as test attachments; xcresulttool writes them out under
+# opaque UUID names, so the manifest is used to restore the intended name.
+if [ "${PLOZZ_SHOTS_SKIP_UITESTS:-0}" != "1" ]; then
+  echo
+  echo "Running PlozzShots for the screens that need navigation…"
+  RESULT="$OUT/.xcresult"
+  rm -rf "$RESULT"
+
+  set +e
+  xcodebuild test \
+    -project Plozz.xcodeproj \
+    -scheme PlozzShots \
+    -destination "platform=tvOS Simulator,id=$UDID" \
+    -derivedDataPath "$DERIVED" \
+    -resultBundlePath "$RESULT" \
+    DEVELOPMENT_TEAM="$TEAM" \
+    ONLY_ACTIVE_ARCH=YES \
+    -quiet > "$OUT/.uitest.log" 2>&1
+  UITEST_STATUS=$?
+  set -e
+
+  if [ -d "$RESULT" ]; then
+    rm -rf "$OUT/.attachments"
+    xcrun xcresulttool export attachments \
+      --path "$RESULT" --output-path "$OUT/.attachments" >/dev/null 2>&1 || true
+
+    python3 - "$OUT" <<'PYEOF'
+import json, os, shutil, sys, re
+out = sys.argv[1]
+src = os.path.join(out, ".attachments")
+manifest = os.path.join(src, "manifest.json")
+if os.path.exists(manifest):
+    for entry in json.load(open(manifest)):
+        for a in entry.get("attachments", []):
+            name = a.get("suggestedHumanReadableName") or ""
+            exported = a.get("exportedFileName")
+            if not exported or not name.endswith(".png"):
+                continue
+            # "plozz-tv-home_0_<uuid>.png" -> "plozz-tv-home.png"
+            stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}\.png$", "", name)
+            shutil.copyfile(os.path.join(src, exported),
+                            os.path.join(out, stem + ".png"))
+            print(f"  {stem + '.png':<30} (from UI test)")
+PYEOF
+    rm -rf "$OUT/.attachments" "$RESULT"
+  fi
+
+  if [ "$UITEST_STATUS" != "0" ]; then
+    echo
+    echo "  Some navigated screens did not capture — see $OUT/.uitest.log"
+    echo "  Home is unaffected; it is captured without XCTest."
+  fi
+fi
+
 echo
 echo "Wrote to $OUT"
-echo
-echo "Screens beyond Home need UI navigation — see Tests/PlozzShots (XCUITest),"
-echo "which drives the remote and captures the detail/player/settings screens."
+ls -1 "$OUT"/*.png 2>/dev/null | sed 's|.*/|  |'

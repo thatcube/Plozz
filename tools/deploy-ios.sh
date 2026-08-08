@@ -138,8 +138,12 @@ if [[ "$NO_BUILD" != "1" ]]; then
     echo "▸ Baking a fresh build number (skipping XcodeGen)…"
     generate_args=(--bake-only)
   fi
+  # `"${arr[@]}"` on an EMPTY array is an unbound-variable error under `set -u` in
+  # bash 3.2 (what macOS ships as /bin/bash), so the full-regen path (empty args)
+  # dies while the bake-only path works. `+` expands to nothing when empty. Same
+  # fix as deploy-tv.sh.
   "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project/version generation" -- \
-    tools/generate-project.sh "${generate_args[@]}"
+    tools/generate-project.sh ${generate_args[@]+"${generate_args[@]}"}
 fi
 
 # --- Build destination -------------------------------------------------------

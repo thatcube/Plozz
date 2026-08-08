@@ -142,8 +142,13 @@ else
   generate_args=(--bake-only)
 fi
 if [[ -x tools/generate-project.sh ]]; then
+  # `"${arr[@]}"` on an EMPTY array is an unbound-variable error under `set -u` in
+  # bash 3.2, which is what macOS still ships as /bin/bash — so the full-regen
+  # path (empty args) died with `generate_args[@]: unbound variable` while the
+  # bake-only path worked. The `+` expansion yields nothing when the array is
+  # empty and expands normally otherwise.
   "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project/version generation" -- \
-    tools/generate-project.sh "${generate_args[@]}"
+    tools/generate-project.sh ${generate_args[@]+"${generate_args[@]}"}
 else
   "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "XcodeGen" -- xcodegen generate
 fi

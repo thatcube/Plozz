@@ -82,11 +82,24 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         /// nothing. Survives across calls (unlike the per-call `stalled` set) so a
         /// momentary outage can be told apart from a server that has gone.
         private var consecutiveSilentFills: [String: Int] = [:]
+        /// When the current run of silence began, per source. Cleared when the
+        /// source answers.
+        private var silenceStartedAt: [String: Date] = [:]
 
         /// How many consecutive fills a source must miss before its undelivered
-        /// remainder stops counting toward the grid's size. Three is enough that a
-        /// blip or a single slow response can never shrink a scrolled grid.
+        /// remainder stops counting toward the grid's size.
         private static let silentFillsBeforeDeparted = 3
+
+        /// How long that silence must ALSO have lasted.
+        ///
+        /// A fill count on its own is not a measure of time. One scroll gesture
+        /// fans out into a burst of page requests — the browse view model prefetches
+        /// up to three pages ahead — and when the network is down each of those
+        /// fails instantly, so a purely count-based latch trips in milliseconds on
+        /// the first fast scroll into unloaded territory. Since the total is
+        /// destructive input to the grid, departure has to mean "gone for a while",
+        /// which takes a clock.
+        private let departureGrace: TimeInterval
 
         /// The stateful cross-server merge. Folding each batch in (rather than
         /// re-merging everything every page) is what keeps a deep scroll linear:
@@ -107,8 +120,10 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         init(
             serverInfo: [String: SourceServerInfo],
             identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
-            identityRevision: @escaping @Sendable () -> Int
+            identityRevision: @escaping @Sendable () -> Int,
+            departureGrace: TimeInterval
         ) {
+            self.departureGrace = departureGrace
             let make = {
                 IncrementalMediaItemMerger(
                     serverInfo: { serverInfo[$0] },
@@ -143,6 +158,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             totals.removeAll()
             exhausted.removeAll()
             consecutiveSilentFills.removeAll()
+            silenceStartedAt.removeAll()
             pending.removeAll()
             merger = makeMerger()
         }
@@ -154,10 +170,14 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
 
         /// Records one whole fill's outcome per source: answering clears the
         /// departure latch, staying silent advances it.
-        func recordFillOutcome(answered: Set<String>, silent: Set<String>) {
-            for key in answered { consecutiveSilentFills[key] = 0 }
+        func recordFillOutcome(answered: Set<String>, silent: Set<String>, now: Date = Date()) {
+            for key in answered {
+                consecutiveSilentFills[key] = 0
+                silenceStartedAt[key] = nil
+            }
             for key in silent where !exhausted.contains(key) {
                 consecutiveSilentFills[key, default: 0] += 1
+                if silenceStartedAt[key] == nil { silenceStartedAt[key] = now }
             }
         }
         func isExhausted(_ sourceKey: String) -> Bool { exhausted.contains(sourceKey) }
@@ -287,9 +307,25 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             }
         }
 
-        private func hasDeparted(_ sourceKey: String) -> Bool {
-            !exhausted.contains(sourceKey)
-                && (consecutiveSilentFills[sourceKey] ?? 0) >= Self.silentFillsBeforeDeparted
+        private func hasDeparted(_ sourceKey: String, now: Date = Date()) -> Bool {
+            guard !exhausted.contains(sourceKey),
+                  (consecutiveSilentFills[sourceKey] ?? 0) >= Self.silentFillsBeforeDeparted,
+                  let since = silenceStartedAt[sourceKey]
+            else { return false }
+            return now.timeIntervalSince(since) >= departureGrace
+        }
+
+        /// Whether every source has finished contributing — drained, or judged
+        /// departed. This, not `allExhausted`, is what lets the grid settle on the
+        /// exact merged count.
+        ///
+        /// A departed source's delivered offset is a count of RAW items, and raw
+        /// items collapse: two servers holding the same 100 films merge to 100
+        /// cards, not 200. So while a departed source is still counted optimistically
+        /// the total overshoots, and because it never exhausts the total would never
+        /// settle — leaving permanent placeholder cells at the end of the grid.
+        func allSettled(sourceIDs: [String]) -> Bool {
+            sourceIDs.allSatisfy { exhausted.contains($0) || hasDeparted($0) }
         }
 
         func allExhausted(sourceIDs: [String]) -> Bool {
@@ -319,9 +355,15 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         }
     }
 
+    /// How long a source must be both silent and unproductive before its
+    /// undelivered remainder stops counting toward the grid's size. Injectable so a
+    /// test can exercise the departure path without sleeping.
+    public static let defaultDepartureGrace: TimeInterval = 15
+
     public init(
         sources: [AggregatedLibrarySource],
         serverInfo: [String: SourceServerInfo] = [:],
+        departureGrace: TimeInterval = AggregatedLibraryProvider.defaultDepartureGrace,
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         /// The identity index's publish counter. The running merge re-folds when it
         /// moves, so cards that the index links only *after* they were paged still
@@ -334,7 +376,8 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         self.cache = Cache(
             serverInfo: serverInfo,
             identitySources: identitySources,
-            identityRevision: identityRevision
+            identityRevision: identityRevision,
+            departureGrace: departureGrace
         )
         self.kind = sources[0].provider.kind
         self.session = sources[0].provider.session
@@ -491,7 +534,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         // Only the requested window is materialized — a deep scroll never copies the
         // whole accumulated buffer just to hand back 60 cards.
         let pageItems = await cache.mergedSlice(from: page.startIndex, limit: page.limit)
-        let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
+        let allSettled = await cache.allSettled(sourceIDs: sourceIDs)
         let upperBound = await cache.totalUpperBound()
         // Until every source is drained the true post-merge total is unknown;
         // report an optimistic upper bound (sum of per-server totals) so the grid
@@ -503,7 +546,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         // ask again — a visible defect traded for an invisible one. A server that
         // is down when the grid opens simply contributes nothing until the screen
         // is opened again, which is what the single-library browse has always done.
-        let totalCount = allExhausted ? mergedCount : max(mergedCount, upperBound)
+        let totalCount = allSettled ? mergedCount : max(mergedCount, upperBound)
 
         if ProcessInfo.processInfo.environment["PLZXPAGE"] == "1" {
             let totalMs = Int(Date().timeIntervalSince(t0) * 1000)

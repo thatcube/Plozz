@@ -134,6 +134,65 @@ final class AllLibrariesBrowseTests: XCTestCase {
         XCTAssertEqual(result.items.map(\.title), ["Alien", "Zodiac"])
     }
 
+    func testStalledSourceKeepsTheGridAskingSoItsTitlesCanStillArrive() async throws {
+        // With every healthy source drained, the optimistic upper bound equals what
+        // is already merged — so an honest `totalCount` would size the grid to the
+        // loaded items and it would never call the provider again, stranding the
+        // stalled server's titles for the life of the screen.
+        let healthy = FakeMediaProvider(allItems: [movie("h1", title: "Alien")])
+        let flaky = FakeMediaProvider(allItems: [movie("f1", title: "Zodiac")])
+        // Down for the whole first call, back for the second — the shape a fill
+        // loop can't recover from on its own.
+        flaky.alwaysFail = true
+        let provider = AggregatedLibraryProvider(sources: [
+            source(account: "a", container: "1", kind: .movie, provider: healthy),
+            source(account: "b", container: "1", kind: .movie, provider: flaky)
+        ])
+
+        let first = try await page(provider, start: 0, limit: 20)
+        XCTAssertGreaterThan(
+            first.totalCount, first.items.count,
+            "a live source that has answered nothing must leave the grid room to ask again"
+        )
+        XCTAssertTrue(first.hasMore)
+
+        // The grid asks again; the recovered source's title lands.
+        flaky.alwaysFail = false
+        let second = try await page(provider, start: first.items.count, limit: 20)
+        XCTAssertEqual(second.items.map(\.title), ["Zodiac"])
+    }
+
+    func testAPermanentlyDeadSourceStopsHoldingASlotOpen() async throws {
+        // The mirror image of the test above: optimism has to be capped, or a
+        // server that is simply down would leave a placeholder cell on screen for
+        // as long as the grid is up.
+        let healthy = FakeMediaProvider(allItems: [movie("h1", title: "Alien")])
+        let dead = FakeMediaProvider(allItems: [])
+        dead.alwaysFail = true
+        let provider = AggregatedLibraryProvider(sources: [
+            source(account: "a", container: "1", kind: .movie, provider: healthy),
+            source(account: "b", container: "1", kind: .movie, provider: dead)
+        ])
+
+        _ = try await page(provider, start: 0, limit: 20)
+        let settled = try await page(provider, start: 1, limit: 20)
+        XCTAssertEqual(settled.totalCount, 1, "the grid settles on what actually exists")
+        XCTAssertFalse(settled.hasMore)
+    }
+
+    func testTotalCountSettlesExactlyOnceEverySourceIsDrained() async throws {
+        let a = FakeMediaProvider(allItems: [movie("a1", title: "Alien")])
+        let b = FakeMediaProvider(allItems: [movie("b1", title: "Zodiac")])
+        let provider = AggregatedLibraryProvider(sources: [
+            source(account: "a", container: "1", kind: .movie, provider: a),
+            source(account: "b", container: "1", kind: .movie, provider: b)
+        ])
+
+        let result = try await page(provider, start: 0, limit: 20)
+        XCTAssertEqual(result.totalCount, 2, "no phantom slot once nothing is outstanding")
+        XCTAssertFalse(result.hasMore)
+    }
+
     func testDeepPagingCoversEveryTitleExactlyOnceAndStaysSorted() async throws {
         let providers = (0..<4).map { index in
             FakeMediaProvider(allItems: (0..<25).map { offset in

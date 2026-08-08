@@ -65,8 +65,15 @@ public struct IncrementalMediaItemMerger {
     /// Arrival counter handed to each incoming item.
     private var nextOrdinal = 0
 
-    /// Kind-scoped identity → some slot in the owning cluster.
-    private var identityOwner: [KindScopedIdentity: Int] = [:]
+    /// Kind-scoped identity → every cluster that has claimed it.
+    ///
+    /// A LIST, not a single slot, because the split guard can deliberately separate
+    /// two works that share an (erroneous) identity into different clusters. If the
+    /// identity only ever pointed at the first of them, a third copy of the *second*
+    /// work would find just the incompatible cluster and open yet another tail
+    /// card — one duplicate per server. Before exposure every entry resolves to the
+    /// same root anyway (they are all unioned), so this changes nothing there.
+    private var identityOwner: [KindScopedIdentity: [Int]] = [:]
     /// `"<serverOrAccount>\u{1F}<kind>\u{1F}<itemID>"` → some slot in the owning cluster.
     private var serverItemOwner: [String: Int] = [:]
     /// `"<accountID>:<itemID>"` of a member → some slot in the owning cluster.
@@ -201,7 +208,7 @@ public struct IncrementalMediaItemMerger {
 
         var candidates: [Int] = []
         for identity in identities {
-            if let slot = identityOwner[identity] { candidates.append(find(slot)) }
+            for slot in identityOwner[identity] ?? [] { candidates.append(find(slot)) }
         }
         if let serverKey, let slot = serverItemOwner[serverKey] { candidates.append(find(slot)) }
         // Identity-index membership, both directions — this item naming an already
@@ -223,9 +230,18 @@ public struct IncrementalMediaItemMerger {
         let member = Member(ordinal: nextOrdinal, item: item)
         nextOrdinal += 1
 
+        // Before exposure: the earliest cluster, fusing every other candidate into
+        // it. After exposure: the earliest cluster this item can join WITHOUT
+        // changing how many cards that cluster renders — testing only the earliest
+        // candidate would strand an item whose real home is a later, compatible
+        // cluster (the tail card an earlier split created), producing one duplicate
+        // per server.
+        let target: Int? = hasExposedItems
+            ? candidates.map { find($0) }.sorted().first(where: { canJoinWithoutReshaping(item, slot: $0) })
+            : candidates.min()
+
         let slot: Int
-        if let target = candidates.min(),
-           !hasExposedItems || canJoinWithoutReshaping(item, slot: find(target)) {
+        if let target {
             // Fusing two EXISTING clusters removes a card, which shortens the
             // collection and slides every later index down. Before anything has
             // been handed out that is just the merge doing its job; afterwards the
@@ -255,8 +271,12 @@ public struct IncrementalMediaItemMerger {
         }
 
         // Register this item's keys against the (possibly newly created) cluster.
-        for identity in identities where identityOwner[identity] == nil {
-            identityOwner[identity] = slot
+        for identity in identities {
+            var owners = identityOwner[identity] ?? []
+            if !owners.contains(where: { find($0) == slot }) {
+                owners.append(slot)
+                identityOwner[identity] = owners
+            }
         }
         if let serverKey, serverItemOwner[serverKey] == nil {
             serverItemOwner[serverKey] = slot

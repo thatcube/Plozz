@@ -689,9 +689,15 @@ struct HomeTab: View {
         private static func queries(for title: String) -> [String] {
             let words = title.split(separator: " ").map(String.init)
             guard words.count > 1 else { return [title] }
+            var seen = Set<String>()
             return (1...words.count)
                 .reversed()
                 .map { words.prefix($0).joined(separator: " ") }
+                // Trailing punctuation has to go or the shortening does nothing
+                // useful: "Dune: Part Two" shortens to "Dune:", and the catalog
+                // answers that with nothing while the bare "Dune" finds it.
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " :-,.")) }
+                .filter { !$0.isEmpty && seen.insert($0).inserted }
         }
 
         private func person(named name: String, in item: MediaItem) async -> MediaPerson? {

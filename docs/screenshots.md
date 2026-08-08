@@ -5,9 +5,13 @@ uploaded to App Store Connect are produced by driving a Simulator, not by
 pointing a capture card at an Apple TV.
 
 ```sh
-./tools/capture-shots.sh              # drive Simulators, write build/shots/*.png
-node tools/appstore-shots.mjs         # compose build/appstore/<platform>/*.png
+./tools/capture-shots.sh                    # Apple TV  -> build/shots/
+./tools/capture-shots.sh --platform ios     # iPhone + iPad -> build/shots-ios/
+node tools/appstore-shots.mjs               # -> build/appstore/<platform>/
 ```
+
+tvOS and iOS write to separate directories because they are separate simulator
+sessions and shared one directory would have them overwrite each other.
 
 And to push the results at the marketing site:
 
@@ -58,8 +62,11 @@ play?title=The%20Office&at=600
 probe?title=Dune          # answers with the titles the library actually has
 ```
 
-See `Sources/AppShell/ScreenshotDirector.swift`. It is DEBUG-only and inert
-unless the capture environment asked for it.
+See `Sources/AppShell/ScreenshotDirector.swift` for tvOS and
+`Sources/AppShelliOS/PlozziOSScreenshotSeed.swift` for iPhone/iPad — the two
+shells share no code (`AppState` vs `PlozziOSAppModel`), so the mechanism exists
+twice. Both are DEBUG-only and inert unless the capture environment asked for
+them.
 
 A file rather than the `plozz://shots/…` URL it also accepts, because tvOS puts
 an "Open in Plozz?" confirmation in front of `simctl openurl` and there is no way
@@ -89,6 +96,12 @@ silently photographing whatever was still on screen.
   open for a capture run; the subtitle shot deliberately waits for that hold to
   lapse so the subtitle is photographed against the picture instead of under the
   bar.
+- **The iPad Simulator captures portrait and cannot be rotated by `simctl`.**
+  The marketing site's iPad shots are landscape, so those two masters are still
+  hand-captured. The site's sync tool refuses a capture whose aspect differs
+  from the master it would replace, so this cannot silently break a layout.
+  App Store Connect accepts either orientation, so the App Store panels are
+  unaffected.
 
 ## App Store panels
 

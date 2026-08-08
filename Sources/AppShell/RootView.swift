@@ -627,6 +627,7 @@ public struct RootView: View {
         }
         .onAppear {
             if case .launching = appState.state { appState.bootstrap() }
+            ScreenshotSeed.applyIfRequested(to: appState)
             appState.drainWatchOutbox()
             reconcileCrashReporting()
         }

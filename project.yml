@@ -393,6 +393,27 @@ targets:
       - package: Plozz
         product: AppShelliOS
 
+  # UI-test bundle used only to capture marketing/website screenshots. It never
+  # ships: it is a test bundle, so it is not part of the app, and nothing in the
+  # app depends on it. It drives the Siri Remote to reach screens that seeding
+  # alone cannot (a title's detail page, the player, subtitle styling) and saves
+  # each frame as a test attachment for `tools/capture-shots.sh` to extract.
+  PlozzShots:
+    type: bundle.ui-testing
+    platform: tvOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Tests/PlozzShots
+    dependencies:
+      - target: Plozz
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.PlozzShots
+        TEST_TARGET_NAME: Plozz
+        SWIFT_VERSION: "6.0"
+        CODE_SIGNING_ALLOWED: YES
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   Plozz:
     build:
@@ -422,5 +443,18 @@ schemes:
     build:
       targets:
         PlozziOS: all
+    run:
+      config: Debug
+
+  PlozzShots:
+    build:
+      targets:
+        PlozzShots: [test]
+        Plozz: [run]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - PlozzShots
     run:
       config: Debug

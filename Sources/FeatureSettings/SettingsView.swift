@@ -1003,7 +1003,12 @@ public struct SettingsView: View {
         case .myLibraries:
             MyLibrariesDetailView(scope: context.librariesScope)
         case .appearance:
-            AppearanceDetailView(theme: theme, nightShift: nightShift, spoilers: spoilers)
+            AppearanceDetailView(
+                librariesScope: context.librariesScope,
+                theme: theme,
+                nightShift: nightShift,
+                spoilers: spoilers
+            )
         case .customizeHome:
             CustomizeHomeDetailView(
                 discoveredLibraries: librariesStore.state,

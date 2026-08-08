@@ -104,12 +104,21 @@ public final class LibraryBrowseViewModel {
     /// otherwise an older response could paint stale-sorted items over the grid.
     @ObservationIgnored private var loadGeneration = 0
 
+    /// Distinguishes this grid's remembered sort from other grids of the same kind.
+    ///
+    /// Sort is remembered per *kind* so every movie library opens the way the
+    /// viewer last left one. The combined "All Libraries" grid isn't a kind, so it
+    /// passes a suffix and gets its own remembered sort instead of silently
+    /// sharing (and overwriting) the `.unknown` bucket.
+    private let sortKeySuffix: String?
+
     public init(
         provider: any MediaProvider,
         containerID: String,
         containerKind: MediaItemKind,
         pageSize: Int = PageRequest.defaultLimit,
         defaults: UserDefaults = .standard,
+        sortKeySuffix: String? = nil,
         sourceAccountID: String? = nil
     ) {
         self.provider = provider
@@ -119,8 +128,9 @@ public final class LibraryBrowseViewModel {
         self.firstPageSize = tuned.first
         self.subsequentPageSize = tuned.subsequent
         self.defaults = defaults
+        self.sortKeySuffix = sortKeySuffix
         self.sourceAccountID = sourceAccountID
-        self.sort = Self.loadSort(for: containerKind, from: defaults)
+        self.sort = Self.loadSort(for: containerKind, suffix: sortKeySuffix, from: defaults)
     }
 
     /// The item at `index`, or `nil` if it hasn't been loaded yet (placeholder).
@@ -415,25 +425,35 @@ public final class LibraryBrowseViewModel {
     public func setSort(_ newSort: CoreModels.SortDescriptor) async {
         guard newSort != sort else { return }
         sort = newSort
-        Self.saveSort(newSort, for: containerKind, to: defaults)
+        Self.saveSort(newSort, for: containerKind, suffix: sortKeySuffix, to: defaults)
         await loadFirstPage()
     }
 
-    private static func defaultsKey(for kind: MediaItemKind) -> String {
-        "LibraryBrowse.sort.\(kind.rawValue)"
+    private static func defaultsKey(for kind: MediaItemKind, suffix: String?) -> String {
+        guard let suffix else { return "LibraryBrowse.sort.\(kind.rawValue)" }
+        return "LibraryBrowse.sort.\(suffix)"
     }
 
-    private static func loadSort(for kind: MediaItemKind, from defaults: UserDefaults) -> CoreModels.SortDescriptor {
+    private static func loadSort(
+        for kind: MediaItemKind,
+        suffix: String?,
+        from defaults: UserDefaults
+    ) -> CoreModels.SortDescriptor {
         guard
-            let data = defaults.data(forKey: defaultsKey(for: kind)),
+            let data = defaults.data(forKey: defaultsKey(for: kind, suffix: suffix)),
             let descriptor = try? JSONDecoder().decode(CoreModels.SortDescriptor.self, from: data)
         else { return .default }
         return descriptor
     }
 
-    private static func saveSort(_ sort: CoreModels.SortDescriptor, for kind: MediaItemKind, to defaults: UserDefaults) {
+    private static func saveSort(
+        _ sort: CoreModels.SortDescriptor,
+        for kind: MediaItemKind,
+        suffix: String?,
+        to defaults: UserDefaults
+    ) {
         guard let data = try? JSONEncoder().encode(sort) else { return }
-        defaults.set(data, forKey: defaultsKey(for: kind))
+        defaults.set(data, forKey: defaultsKey(for: kind, suffix: suffix))
     }
 
     /// Tuned paging plan for library browse. The default provider limit (60) is

@@ -8,20 +8,50 @@ public struct AggregatedLibrarySource: Sendable {
     public let accountID: String
     public let containerID: String
     public let provider: any MediaProvider
+    /// The item kind to page this container with, when it differs from the kind
+    /// the caller asks the aggregate for.
+    ///
+    /// A cross-server browse of ONE library leaves this `nil`: every server's copy
+    /// holds the same kind, so the caller's kind is right for all of them. The
+    /// combined "All Libraries" browse is the case that needs it — it pages a movie
+    /// library and a TV library side by side, and asking a movie section for series
+    /// returns nothing on both backends.
+    public let kind: MediaItemKind?
 
-    public init(accountID: String, containerID: String, provider: any MediaProvider) {
+    public init(
+        accountID: String,
+        containerID: String,
+        provider: any MediaProvider,
+        kind: MediaItemKind? = nil
+    ) {
         self.accountID = accountID
         self.containerID = containerID
         self.provider = provider
+        self.kind = kind
     }
+
+    /// A key unique to this (account, container) pair. Two libraries on the SAME
+    /// account are distinct sources, so the account id alone can't identify one in
+    /// the combined browse.
+    var sourceKey: String { "\(accountID)\u{1F}\(containerID)" }
 }
 
-/// A lightweight `MediaProvider` wrapper that pages a single logical library
-/// across several servers and collapses the same title (a movie that lives on
-/// both a Plex and a Jellyfin server) into one card — the Library-browse
-/// counterpart to the Home-row de-duplication, sharing the exact same
-/// ``MediaItemMerger`` identity/merge core so a title appears **once** wherever
-/// it is browsed (criterion 1).
+/// A lightweight `MediaProvider` wrapper that pages several containers as one
+/// grid and collapses the same title (a movie that lives on both a Plex and a
+/// Jellyfin server) into one card — the Library-browse counterpart to the
+/// Home-row de-duplication, sharing the exact same identity/merge core so a title
+/// appears **once** wherever it is browsed (criterion 1).
+///
+/// Two shapes use it:
+/// - **one library across several servers** — every source is the same library on
+///   a different account, so they all page with the caller's kind; and
+/// - **the combined "All Libraries" browse** — sources are different libraries
+///   (possibly several on one account, of different kinds), so each declares its
+///   own ``AggregatedLibrarySource/kind``.
+///
+/// Because a source is a (account, container) pair rather than an account, all
+/// per-source bookkeeping is keyed by ``AggregatedLibrarySource/sourceKey``: two
+/// libraries on one account must page independently.
 ///
 /// It never walks a whole library: it pulls bounded, index-addressed pages from
 /// each source concurrently (`withTaskGroup`), interleaves them, merges, and only
@@ -36,12 +66,17 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     private let cache: Cache
 
     private actor Cache {
-        var merged: [MediaItem] = []
         var offsets: [String: Int] = [:]
         var totals: [String: Int] = [:]
         var exhausted: Set<String> = []
-        let serverInfo: [String: SourceServerInfo]
-        let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+
+        /// The stateful cross-server merge. Folding each batch in (rather than
+        /// re-merging everything every page) is what keeps a deep scroll linear:
+        /// only clusters an incoming batch actually touches are re-merged, so a
+        /// title already on screen never pays `mergeGroup` again. Identity rules and
+        /// output order are byte-for-byte the batch merger's — see
+        /// ``IncrementalMediaItemMerger``.
+        private var merger: IncrementalMediaItemMerger
 
         /// Single-flight gate for page-fills. `false` when no fill is running.
         private var fillInProgress = false
@@ -51,8 +86,10 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             serverInfo: [String: SourceServerInfo],
             identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
         ) {
-            self.serverInfo = serverInfo
-            self.identitySources = identitySources
+            self.merger = IncrementalMediaItemMerger(
+                serverInfo: { serverInfo[$0] },
+                identitySources: identitySources
+            )
         }
 
         func initialize(with sourceIDs: [String]) {
@@ -60,42 +97,22 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             for id in sourceIDs { offsets[id] = 0 }
         }
 
-        func offset(for accountID: String) -> Int { offsets[accountID] ?? 0 }
-        func setOffset(_ offset: Int, for accountID: String) { offsets[accountID] = offset }
-        func setTotal(_ total: Int, for accountID: String) { totals[accountID] = total }
-        func markExhausted(_ accountID: String) { exhausted.insert(accountID) }
-        func isExhausted(_ accountID: String) -> Bool { exhausted.contains(accountID) }
-        func mergedCount() -> Int { merged.count }
-        func mergedItems() -> [MediaItem] { merged }
+        func offset(for sourceKey: String) -> Int { offsets[sourceKey] ?? 0 }
+        func setOffset(_ offset: Int, for sourceKey: String) { offsets[sourceKey] = offset }
+        func setTotal(_ total: Int, for sourceKey: String) { totals[sourceKey] = total }
+        func markExhausted(_ sourceKey: String) { exhausted.insert(sourceKey) }
+        func isExhausted(_ sourceKey: String) -> Bool { exhausted.contains(sourceKey) }
+        func mergedCount() -> Int { merger.count }
+        func mergedSlice(from start: Int, limit: Int) -> [MediaItem] {
+            merger.slice(from: start, limit: limit)
+        }
 
-        /// Re-runs the shared cross-server merge over everything seen so far plus
-        /// the freshly fetched batch, so duplicates that arrive on a later page
-        /// (a title that sorts differently per server) still collapse. Done under
-        /// the actor lock so concurrent page requests can't corrupt the buffer.
+        /// Folds the freshly fetched batch into the running merge, so duplicates
+        /// that arrive on a later page (a title that sorts differently per server)
+        /// still collapse. Done under the actor lock so concurrent page requests
+        /// can't corrupt the buffer.
         func appendMergedBatch(_ items: [MediaItem]) {
-            // Re-merges `merged + items` from scratch each page rather than folding
-            // the new batch into the existing clusters. This is deliberate: the
-            // union-find merge is near-linear per call, and real tvOS browse fills
-            // are tens–hundreds of items paged lazily as the user scrolls, so each
-            // call is sub-millisecond. An incremental merger would only help a full
-            // multi-thousand-item scroll (spread over minutes anyway) and would have
-            // to re-implement the same-server two-account dedup and cross-server
-            // identity union statefully — trading a proven, correct merge for a
-            // subtle one to shave time off a path that is never hot. Kept simple.
-            //
-            // The `identitySources` closure (an identity-index snapshot lookup) is
-            // re-invoked for every already-merged item on each page, so a deep
-            // scroll is O(pages × merged) lookups. That is accepted for the same
-            // reason: each lookup is a dictionary hit on an immutable snapshot, the
-            // merged set only reaches the thousands after minutes of continuous
-            // scrolling, and caching per-item results would have to be invalidated
-            // whenever the live index warms a new cross-server twin (the very reason
-            // the closure is re-consulted). Not worth the staleness risk. (r7-agg-fanout)
-            merged = MediaItemMerger.merge(
-                merged + items,
-                serverInfo: { [serverInfo] id in serverInfo[id] },
-                identitySources: identitySources
-            )
+            merger.append(items)
         }
 
         func totalUpperBound() -> Int { totals.values.reduce(0, +) }
@@ -183,7 +200,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     }
 
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
-        let sourceIDs = sources.map(\.accountID)
+        let sourceIDs = sources.map(\.sourceKey)
         await cache.initialize(with: sourceIDs)
         let targetCount = page.startIndex + page.limit
         let t0 = Date()
@@ -204,22 +221,22 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             await cache.appendMergedBatch(fetched)
             mergeMs += Int(Date().timeIntervalSince(tm) * 1000)
         }
-        let merged = await cache.mergedItems()
+        let mergedCount = await cache.mergedCount()
+        // Only the requested window is materialized — a deep scroll never copies the
+        // whole accumulated buffer just to hand back 60 cards.
+        let pageItems = await cache.mergedSlice(from: page.startIndex, limit: page.limit)
         let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
         let upperBound = await cache.totalUpperBound()
         await cache.releaseFill()
 
-        let start = min(page.startIndex, merged.count)
-        let end = min(start + page.limit, merged.count)
-        let pageItems = Array(merged[start..<end])
         // Until every source is drained the true post-merge total is unknown;
         // report an optimistic upper bound (sum of per-server totals) so the grid
         // keeps requesting pages, then settle on the exact merged count.
-        let totalCount = allExhausted ? merged.count : max(merged.count, upperBound)
+        let totalCount = allExhausted ? mergedCount : max(mergedCount, upperBound)
 
         if ProcessInfo.processInfo.environment["PLZXPAGE"] == "1" {
             let totalMs = Int(Date().timeIntervalSince(t0) * 1000)
-            HandoffDiagnostics.emit("PAGE start=\(page.startIndex) limit=\(page.limit) total=\(totalMs)ms fetch=\(fetchMs)ms merge=\(mergeMs)ms mergedCount=\(merged.count) sources=\(sourceIDs.count)")
+            HandoffDiagnostics.emit("PAGE start=\(page.startIndex) limit=\(page.limit) total=\(totalMs)ms fetch=\(fetchMs)ms merge=\(mergeMs)ms mergedCount=\(mergedCount) sources=\(sourceIDs.count)")
         }
 
         return MediaPage(items: pageItems, startIndex: page.startIndex, totalCount: totalCount)
@@ -239,22 +256,24 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     ) async -> [MediaItem] {
         let chunkSize = max(20, limit)
 
-        typealias BatchResult = (accountID: String, page: MediaPage?)
+        typealias BatchResult = (sourceKey: String, accountID: String, page: MediaPage?)
         let results: [BatchResult] = await withTaskGroup(of: BatchResult.self) { group in
             for source in sources {
                 group.addTask {
-                    if await self.cache.isExhausted(source.accountID) {
-                        return (source.accountID, nil)
+                    if await self.cache.isExhausted(source.sourceKey) {
+                        return (source.sourceKey, source.accountID, nil)
                     }
-                    let offset = await self.cache.offset(for: source.accountID)
+                    let offset = await self.cache.offset(for: source.sourceKey)
                     if let page = try? await source.provider.items(
                         in: source.containerID,
-                        kind: kind,
+                        // A combined browse mixes libraries of different kinds, so
+                        // each source pages with ITS OWN kind when it declares one.
+                        kind: source.kind ?? kind,
                         page: PageRequest(startIndex: offset, limit: chunkSize, sort: sort)
                     ) {
-                        return (source.accountID, page)
+                        return (source.sourceKey, source.accountID, page)
                     }
-                    return (source.accountID, nil)
+                    return (source.sourceKey, source.accountID, nil)
                 }
             }
 
@@ -278,10 +297,10 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
                 continue
             }
 
-            let currentOffset = await cache.offset(for: result.accountID)
+            let currentOffset = await cache.offset(for: result.sourceKey)
             let nextOffset = currentOffset + page.items.count
-            await cache.setOffset(nextOffset, for: result.accountID)
-            await cache.setTotal(page.totalCount, for: result.accountID)
+            await cache.setOffset(nextOffset, for: result.sourceKey)
+            await cache.setTotal(page.totalCount, for: result.sourceKey)
             // Only trust `totalCount` as an end signal when the provider actually
             // reports one (> 0), mirroring `AppState.indexAccount`. A provider that
             // omits the server total falls back to `startIndex + items.count`, so a
@@ -289,12 +308,12 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             // the very first page and silently truncate that server's contribution
             // to the grid. An empty page is the reliable cross-provider end signal.
             if page.items.isEmpty || (page.totalCount > 0 && nextOffset >= page.totalCount) {
-                await cache.markExhausted(result.accountID)
+                await cache.markExhausted(result.sourceKey)
             }
-            grouped[result.accountID] = page.items.map { $0.taggingSource(result.accountID) }
+            grouped[result.sourceKey] = page.items.map { $0.taggingSource(result.accountID) }
         }
 
-        let orderedGroups = sources.map { grouped[$0.accountID] ?? [] }
+        let orderedGroups = sources.map { grouped[$0.sourceKey] ?? [] }
         return interleave(orderedGroups)
     }
 

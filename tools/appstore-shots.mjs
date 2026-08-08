@@ -38,7 +38,15 @@ import path from 'node:path';
 const run = promisify(execFile);
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const SHOTS = path.join(ROOT, 'build', 'shots');
+/**
+ * Captures land in one directory per platform, because a tvOS run and an iOS
+ * run are separate simulator sessions and were overwriting each other's output
+ * when they shared one.
+ */
+const SHOT_DIRS = [
+  path.join(ROOT, 'build', 'shots'),
+  path.join(ROOT, 'build', 'shots-ios'),
+];
 const CHROME =
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
@@ -87,10 +95,12 @@ const PLATFORMS = {
     orientation: 'portrait',
     panels: [
       ['plozz-iphone-home', 'Your whole library in your pocket'],
-      ['plozz-iphone-detail', 'Artwork, ratings and cast — from bare files'],
-      ['plozz-iphone-library', 'Browse everything you own'],
-      ['plozz-iphone-player', 'Native playback, nothing transcoded'],
+      ['plozz-iphone-oppenheimer', 'Artwork, ratings and cast — from bare files'],
+      ['plozz-iphone-lastofus', 'Pick up exactly where you left off'],
       ['plozz-iphone-cast', 'Follow an actor through your whole library'],
+      ['plozz-iphone-library', 'Browse everything you own'],
+      ['plozz-iphone-search', 'Search every server at once'],
+      ['plozz-iphone-player', 'Native playback, nothing transcoded'],
     ],
   },
   ipad: {
@@ -100,9 +110,12 @@ const PLATFORMS = {
     orientation: 'portrait',
     panels: [
       ['plozz-ipad-home', 'Your whole library, everywhere you watch'],
-      ['plozz-ipad-detail', 'Artwork, ratings and cast — from bare files'],
-      ['plozz-ipad-player', 'Native playback, nothing transcoded'],
+      ['plozz-ipad-oppenheimer', 'Artwork, ratings and cast — from bare files'],
+      ['plozz-ipad-lastofus', 'Pick up exactly where you left off'],
       ['plozz-ipad-cast', 'Follow an actor through your whole library'],
+      ['plozz-ipad-library', 'Browse everything you own'],
+      ['plozz-ipad-search', 'Search every server at once'],
+      ['plozz-ipad-player', 'Native playback, nothing transcoded'],
     ],
   },
 };
@@ -214,15 +227,21 @@ async function main() {
       `Google Chrome is required to render the panels and was not at:\n  ${CHROME}`
     );
   }
-  if (!existsSync(SHOTS)) {
+  const present = SHOT_DIRS.filter((dir) => existsSync(dir));
+  if (present.length === 0) {
     throw new Error(
-      `No captures in ${SHOTS}. Run ./tools/capture-shots.sh first.`
+      `No captures found. Run ./tools/capture-shots.sh first.\nLooked in:\n  ` +
+        SHOT_DIRS.join('\n  ')
     );
   }
 
-  const available = new Set(
-    (await readdir(SHOTS)).filter((name) => name.endsWith('.png'))
-  );
+  /** Capture name -> the file it came from, across every platform's directory. */
+  const available = new Map();
+  for (const dir of present) {
+    for (const file of await readdir(dir)) {
+      if (file.endsWith('.png')) available.set(file, path.join(dir, file));
+    }
+  }
 
   const wanted = onlyPlatform
     ? { [onlyPlatform]: PLATFORMS[onlyPlatform] }
@@ -234,7 +253,7 @@ async function main() {
   }
 
   for (const [key, platform] of Object.entries(wanted)) {
-    const present = platform.panels.filter(([name]) =>
+    const found = platform.panels.filter(([name]) =>
       available.has(`${name}.png`)
     );
     const missing = platform.panels.filter(
@@ -242,7 +261,7 @@ async function main() {
     );
 
     console.log(`\n${platform.label}  ${platform.width}x${platform.height}`);
-    if (present.length === 0) {
+    if (found.length === 0) {
       console.log('  no captures yet — skipped');
       for (const [name] of missing) console.log(`    missing ${name}.png`);
       continue;
@@ -252,13 +271,13 @@ async function main() {
     await mkdir(dir, { recursive: true });
 
     let index = 0;
-    for (const [name, caption] of present) {
+    for (const [name, caption] of found) {
       index += 1;
       const stem = `${String(index).padStart(2, '0')}-${name.replace(/^plozz-/, '')}`;
       const html = path.join(dir, `${stem}.html`);
       const png = path.join(dir, `${stem}.png`);
 
-      const capturePath = path.join(SHOTS, `${name}.png`);
+      const capturePath = available.get(`${name}.png`);
       const { stdout: raw } = await run('magick', [
         'identify', '-format', '%w %h', capturePath,
       ]);

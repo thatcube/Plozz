@@ -1868,17 +1868,23 @@ struct PlozziOSScreenshotRouter: View {
                 }
                 fallback = fallback ?? tagged.first
             }
-            if fallback != nil { break }
         }
         return fallback
     }
 
-    /// The full title, then progressively shorter leading phrases. Stops at two
-    /// words: a one-word query against a large library is a lottery.
+    /// The full title, then progressively shorter leading phrases, down to one
+    /// word.
+    ///
+    /// Every level is tried even after one of them returns results, because
+    /// returning *something* is not the same as returning the right thing:
+    /// stopping at the first non-empty level answered "Dune: Part Two" with
+    /// whatever the two-word query "Dune: Part" happened to surface, and a
+    /// two-word floor never reached the bare "Dune" that finds it. Only an
+    /// exact title match short-circuits.
     private static func queries(for title: String) -> [String] {
         let words = title.split(separator: " ").map(String.init)
-        guard words.count > 2 else { return [title] }
-        return (2...words.count)
+        guard words.count > 1 else { return [title] }
+        return (1...words.count)
             .reversed()
             .map { words.prefix($0).joined(separator: " ") }
     }

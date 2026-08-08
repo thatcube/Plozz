@@ -121,6 +121,9 @@ struct HomeHeroView: View {
     /// only when the item's provider supports it and its mutation fans out
     /// exactly like everywhere else.
     @Environment(\.mediaItemActionHandler) private var actionHandler
+    /// How far the navigation chrome has inset this page's content, so the hero's
+    /// full-bleed artwork can cancel it. `0` under the native tab styles.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
     @Environment(\.mediaItemActionContext) private var actionContext
 
     /// The index of the slide currently fronted.
@@ -1052,7 +1055,7 @@ struct HomeHeroView: View {
         .frame(height: HomeHeroLayout.screenHeight - Self.contentBottomInset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-        .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+        .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding + navigationContentInset)
         // Lift the content column off the very bottom of the full-screen hero so
         // the logo / metadata / buttons / dots sit near the lower third and the
         // Continue Watching row can peek in just beneath the dots. This inset is
@@ -1114,7 +1117,7 @@ struct HomeHeroView: View {
             .accessibilityHidden(true)
         }
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-        .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+        .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding + navigationContentInset)
         // Lower the whole UIKit column (visuals + focus overlay) by `uikitContentDrop`.
         .padding(.bottom, Self.contentBottomInset - Self.uikitContentDrop)
         .offset(y: receded ? -Self.recedeContentLift : 0)

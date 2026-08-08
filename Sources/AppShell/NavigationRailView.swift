@@ -7,17 +7,34 @@ import FeatureProfiles
 /// Fixed geometry for the custom navigation rail. Collected here so the shell's
 /// content inset and the rail's own layout can never drift apart.
 enum NavigationRailMetrics {
-    /// Width of the collapsed rail — the inset the shell reserves for it, and the
-    /// width the icons are centred in. Sized so a 40 pt glyph plus its focus card
-    /// sits comfortably without crowding the screen edge.
-    static let collapsedWidth: CGFloat = 124
-    /// Width the rail grows to once focus enters it. It **overlays** the content
-    /// rather than pushing it, so expanding never relayouts a poster grid.
-    static let expandedWidth: CGFloat = 460
+    /// How far a row's icon sits from the **physical** left edge of the screen.
+    ///
+    /// The rail deliberately breaks out of the tvOS title-safe area. That margin is
+    /// the empty band down the side of the picture, and it is exactly where this
+    /// navigation belongs — sitting inside the safe area instead put the icons on
+    /// top of the page's own left-aligned content, which is what made the rail read
+    /// as floating over the page rather than beside it.
+    static let leadingInset: CGFloat = 20
+    /// The icon column inside a row.
+    static let iconColumnWidth: CGFloat = 42
+    /// Total width of the collapsed rail, measured from the physical screen edge.
+    static let collapsedWidth: CGFloat = leadingInset + iconColumnWidth + 18
+
+    /// Extra inset applied to the page's content, ON TOP of the title-safe area it
+    /// already respects.
+    ///
+    /// Small on purpose: the rail lives in the safe-area margin, so the page only
+    /// has to give up the sliver where the two would otherwise touch. Applied as
+    /// real padding rather than a safe-area inset because the Home hero sizes its
+    /// foreground to the full screen width by design, and a safe-area inset leaves
+    /// that column exactly where it was — under the icons.
+    static let contentInset: CGFloat = 64
+
+    /// Width the rail grows to once focus enters it.
+    static let expandedWidth: CGFloat = 420
     static let itemSpacing: CGFloat = 6
-    static let iconColumnWidth: CGFloat = 52
-    static let avatarSize: CGFloat = 62
-    static let verticalPadding: CGFloat = 36
+    static let avatarSize: CGFloat = 48
+    static let verticalPadding: CGFloat = 28
     static let expandAnimation = Animation.easeOut(duration: 0.22)
 }
 
@@ -41,17 +58,51 @@ struct NavigationRailView: View {
     let entries: [NavigationRailLibraryEntry]
     let showsMusic: Bool
     @Binding var selection: NavigationRailDestination
+    /// Mirrors "focus is inside the rail" outward, so the shell can slide the page
+    /// aside rather than let the expanded rail cover it.
+    @Binding var isExpandedOutward: Bool
     let onOpenProfileSwitcher: () -> Void
 
     @Environment(\.themePalette) private var palette
     @FocusState private var focusedTarget: RailFocusTarget?
+    /// The last row that actually held focus, so an edge bumper can hand focus
+    /// straight back to it.
+    @State private var lastFocusedRow: RailFocusTarget?
 
     /// The rail is expanded exactly while it holds focus — "move focus into it to
     /// open it", with no timers and no separate toggle to get out of sync.
     private var isExpanded: Bool { focusedTarget != nil }
 
+    /// Whether focus is currently inside the rail.
+    ///
+    /// Drives which rows are focusable at all: see ``isRowFocusable(_:)``.
+    private var hasFocus: Bool { focusedTarget != nil }
+
+    /// Whether a row may hold focus right now.
+    ///
+    /// **From outside the rail, only the CURRENT destination is focusable.** That
+    /// is what makes a Left press land on the tab you are actually on rather than
+    /// on whichever row happens to sit nearest the card you came from. Steering
+    /// focus by controlling what is focusable is the approach that works on tvOS;
+    /// redirecting after the fact visibly flashes the wrong row first.
+    ///
+    /// Once focus is inside, everything opens up so Up/Down walk the whole rail.
+    private func isRowFocusable(_ target: RailFocusTarget) -> Bool {
+        if hasFocus { return true }
+        return target == .destination(selection)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Invisible focus walls. Pressing Up from the top row (or Down from
+            // Settings) must do NOTHING — the rail is a list you leave sideways,
+            // not by falling out of either end. The focus engine will happily jump
+            // to a page card that is merely near, so the reliable block is to give
+            // it a nearer candidate inside the rail and hand focus straight back.
+            // The bumper draws nothing, so the bounce is invisible: the row you
+            // were on simply stays put.
+            edgeBumper(.topBumper)
+
             profileButton
                 .padding(.bottom, PlozzTheme.Spacing.large)
 
@@ -70,13 +121,22 @@ struct NavigationRailView: View {
 
             item(.settings, symbol: "gearshape.fill", label: Text(Self.settingsTitle))
                 .padding(.top, PlozzTheme.Spacing.large)
+
+            edgeBumper(.bottomBumper)
         }
         .padding(.vertical, NavigationRailMetrics.verticalPadding)
+        .padding(.leading, NavigationRailMetrics.leadingInset)
         .frame(
             width: isExpanded ? NavigationRailMetrics.expandedWidth : NavigationRailMetrics.collapsedWidth,
             alignment: .leading
         )
         .frame(maxHeight: .infinity, alignment: .top)
+        // Legibility WITHOUT a backing while collapsed — see `backdrop`. Two
+        // shadows: a tight one for the glyph's own edge, a wide soft one to lift it
+        // off a pale patch of artwork. This is what overlay text on video does, and
+        // it costs no visible area, so nothing reads as a bar down the screen.
+        .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
+        .shadow(color: .black.opacity(0.38), radius: 12, y: 2)
         .background(alignment: .leading) { backdrop }
         .animation(NavigationRailMetrics.expandAnimation, value: isExpanded)
         // One focus section, so a Left press from the content lands in the rail as
@@ -85,6 +145,55 @@ struct NavigationRailView: View {
         // through every remaining rail row.
         .focusSection()
         .accessibilityLabel(Text(Self.accessibilityTitle))
+        .onChange(of: isExpanded) { _, expanded in
+            isExpandedOutward = expanded
+        }
+        .onDisappear { isExpandedOutward = false }
+        .onChange(of: focusedTarget) { _, target in
+            switch target {
+            case .topBumper, .bottomBumper:
+                returnFromBumper()
+            case .some(let row):
+                lastFocusedRow = row
+            case nil:
+                break
+            }
+        }
+    }
+
+    /// A zero-chrome focus target at each end of the rail. It renders nothing, so
+    /// landing on it and bouncing away is invisible.
+    private func edgeBumper(_ target: RailFocusTarget) -> some View {
+        Button(action: {}) {
+            Color.clear
+                .frame(height: 44)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .focused($focusedTarget, equals: target)
+        // Only a wall while focus is actually inside the rail — otherwise it would
+        // be one more thing competing to catch a Left press from the page.
+        .disabled(!hasFocus)
+        .accessibilityHidden(true)
+    }
+
+    /// Hands focus back to the row the viewer was on, so an Up/Down press at
+    /// either end of the rail is a no-op rather than an exit.
+    ///
+    /// Deliberately no re-entrancy guard: the destination is never a bumper, so
+    /// this cannot recurse — and a guard that latched would leave focus parked on
+    /// an invisible row, which is the one outcome worse than the bounce itself.
+    /// The hand-back waits a run-loop turn because assigning `@FocusState` from
+    /// inside its own `onChange` is dropped (the same reason the reorder list
+    /// restores focus after layout).
+    private func returnFromBumper() {
+        let destination = lastFocusedRow ?? .destination(selection)
+        Task { @MainActor in
+            await Task.yield()
+            focusedTarget = destination
+        }
     }
 
     // MARK: - Pieces
@@ -128,13 +237,14 @@ struct NavigationRailView: View {
                     }
                     .transition(.opacity)
                 }
-                Spacer(minLength: 0)
+                if isExpanded { Spacer(minLength: 0) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: isExpanded ? .infinity : nil, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(NavigationRailItemStyle(isSelected: false, accent: palette.accent))
         .focused($focusedTarget, equals: .profile)
+        .disabled(!isRowFocusable(.profile))
         .accessibilityLabel(Text(Self.switchProfileSubtitle))
         .accessibilityValue(Text(verbatim: profile.name))
     }
@@ -149,7 +259,7 @@ struct NavigationRailView: View {
         } label: {
             HStack(spacing: PlozzTheme.Spacing.medium) {
                 Image(systemName: symbol)
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: 28, weight: .semibold))
                     .frame(width: NavigationRailMetrics.iconColumnWidth)
                     .accessibilityHidden(true)
                 if isExpanded {
@@ -159,9 +269,12 @@ struct NavigationRailView: View {
                         .truncationMode(.tail)
                         .transition(.opacity)
                 }
-                Spacer(minLength: 0)
+                if isExpanded { Spacer(minLength: 0) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Collapsed, the row hugs its icon: stretching it to the rail's full
+            // width made the selected/focused pill wider than the glyph, so the
+            // icon read as sitting left of centre inside it.
+            .frame(maxWidth: isExpanded ? .infinity : nil, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(
@@ -171,6 +284,7 @@ struct NavigationRailView: View {
             )
         )
         .focused($focusedTarget, equals: .destination(destination))
+        .disabled(!isRowFocusable(.destination(destination)))
         .accessibilityLabel(label)
         .accessibilityAddTraits(selection == destination ? [.isSelected] : [])
     }
@@ -181,7 +295,7 @@ struct NavigationRailView: View {
             .textCase(.uppercase)
             .plozzForeground(.secondary)
             .lineLimit(1)
-            .padding(.horizontal, PlozzTheme.Spacing.medium)
+            .padding(.leading, PlozzTheme.Spacing.small)
             .padding(.top, PlozzTheme.Spacing.large)
             .padding(.bottom, PlozzTheme.Spacing.xSmall)
             // Collapsed, there is no room for a word — the icons speak for
@@ -190,24 +304,40 @@ struct NavigationRailView: View {
             .accessibilityHidden(!isExpanded)
     }
 
-    /// A vertical scrim behind the rail so labels stay legible over artwork when
-    /// expanded, fading out to nothing past the rail's trailing edge. Collapsed, it
-    /// is a narrow, near-transparent wash that keeps the icons readable without
-    /// putting a hard chrome slab over the page.
+    /// The rail's backing.
+    ///
+    /// Never a panel with an edge, and nothing at all while collapsed.
+    ///
+    /// A wash wide enough to sit under the LABELS is far wider than the icon
+    /// column, so while collapsed it painted a dark band roughly 180pt into a
+    /// bright hero — indistinguishable from a black bar down the side of the
+    /// picture. Collapsed, the rail is icons only, and a shadow on the glyphs
+    /// (applied above) keeps those legible over anything without covering
+    /// artwork. So the wash appears only when the labels do.
+    ///
+    /// Expanded it is a wide, slow gradient that has fully dissolved before it
+    /// reaches the page: a short one over a bright backdrop reads as a hard
+    /// vertical seam. The page also slides aside on expand, so this never has to
+    /// make text readable over content it overlaps.
+    @ViewBuilder
     private var backdrop: some View {
-        LinearGradient(
+        if isExpanded { expandedBackdrop }
+    }
+
+    private var expandedBackdrop: some View {
+        let strength = 0.82
+        return LinearGradient(
             stops: [
-                .init(color: .black.opacity(isExpanded ? 0.92 : 0.55), location: 0),
-                .init(color: .black.opacity(isExpanded ? 0.86 : 0.34), location: 0.62),
+                .init(color: .black.opacity(strength), location: 0),
+                .init(color: .black.opacity(strength * 0.92), location: 0.35),
+                .init(color: .black.opacity(strength * 0.55), location: 0.68),
+                .init(color: .black.opacity(strength * 0.18), location: 0.87),
                 .init(color: .black.opacity(0), location: 1)
             ],
             startPoint: .leading,
             endPoint: .trailing
         )
-        .frame(
-            width: (isExpanded ? NavigationRailMetrics.expandedWidth : NavigationRailMetrics.collapsedWidth)
-                + NavigationRailMetrics.iconColumnWidth
-        )
+        .frame(width: NavigationRailMetrics.expandedWidth + 180)
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }
@@ -261,6 +391,9 @@ struct NavigationRailView: View {
 private enum RailFocusTarget: Hashable {
     case profile
     case destination(NavigationRailDestination)
+    /// The invisible walls at each end that stop focus falling out of the rail.
+    case topBumper
+    case bottomBumper
 }
 
 /// Rail row chrome. Focus is the standard tvOS inverted card; the *selected*
@@ -280,12 +413,15 @@ private struct NavigationRailItemStyle: ButtonStyle {
             : AnyShapeStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.primary))
         let fill: AnyShapeStyle = isFocused
             ? AnyShapeStyle(invertedFill)
-            : AnyShapeStyle(isSelected ? accent.opacity(0.18) : Color.clear)
+            : AnyShapeStyle(isSelected ? accent.opacity(0.20) : Color.clear)
 
         return configuration.label
-            .padding(.horizontal, PlozzTheme.Spacing.medium)
-            .padding(.vertical, PlozzTheme.Spacing.small)
+            .padding(.horizontal, PlozzTheme.Spacing.xSmall)
+            .padding(.vertical, PlozzTheme.Spacing.xSmall)
             .foregroundStyle(foreground)
+            // The rail sits over artwork, so an unfocused glyph carries its own
+            // contrast rather than relying on the scrim alone.
+            .shadow(color: .black.opacity(isFocused ? 0 : 0.85), radius: 5, y: 1)
             .background(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.content, style: .continuous)
                     .fill(fill)

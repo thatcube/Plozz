@@ -90,6 +90,17 @@ public struct MediaRowView: View {
     /// screen padding (Home rows); detail pages pass the larger hero leading
     /// padding so the row aligns with the hero text above it.
     private let leadingInset: CGFloat
+    /// How far the navigation chrome insets page content. Added to `leadingInset`
+    /// so the row's FIRST card clears the rail, while the scroll viewport still
+    /// spans the full width — which is what lets cards scroll *under* the rail and
+    /// fade out there instead of being cut off at a narrowed viewport edge.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
+
+    /// Extra scroll margin beyond the fade, so a FOCUSED card — which grows
+    /// outward past its layout frame — still parks entirely clear of the feather.
+    /// Parking a card exactly at the fade's end looks correct at rest and clipped
+    /// the moment it takes focus, which is the symptom this exists to prevent.
+    private var focusLiftAllowance: CGFloat { 28 }
     private let onSelect: (MediaItem) -> Void
     /// When `true`, selecting a card starts playback immediately, so its cards
     /// show the resume chip (play glyph + progress bar + time). Threaded to
@@ -338,7 +349,7 @@ public struct MediaRowView: View {
                         .font(PlozzRailTitle.font(
                             sectionHeaderFontSize: layoutMetrics.sectionHeaderFontSize
                         ))
-                        .padding(.leading, leadingInset)
+                        .padding(.leading, leadingInset + navigationContentInset)
                 }
 
                 ScrollViewReader { proxy in
@@ -348,20 +359,43 @@ public struct MediaRowView: View {
                                 tappableCard(for: item)
                             }
                         }
+                        // The row's ordinary page gutters, unchanged from before the
+                        // navigation rail existed. Only the extra NAVIGATION inset is
+                        // handled differently (by the viewport below) — this is not.
                         .padding(.leading, leadingInset)
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                         // Reserve generous vertical room *inside* the clip so a
-                        // focused card's lift + drop shadow are never cut. The rail
-                        // keeps clipping (no `scrollClipDisabled`) — that's what
-                        // keeps the focus engine's edge math correct so the first/
-                        // last card holds its inset instead of being yanked flush to
-                        // the screen. The negative outer padding below cancels this
-                        // clearance in layout, so the row's height and its gap to the
-                        // neighbouring rows are unchanged; only the clip grows.
+                        // focused card's lift + drop shadow are never cut. The
+                        // negative outer padding below cancels this clearance in
+                        // layout, so the row's height and its gap to the neighbouring
+                        // rows are unchanged; only the drawing area grows.
                         .padding(.vertical, layoutMetrics.railShadowClearance)
                     }
                     .padding(.top, layoutMetrics.railTopClearanceOffset)
                     .padding(.bottom, layoutMetrics.railBottomClearanceOffset)
+                    // The navigation gutter is a scroll-content MARGIN, not a
+                    // narrower viewport — the same shape as the in-player cast rail.
+                    //
+                    // As a viewport inset it was wrong in both directions: the row
+                    // gained a gutter's worth of extra travel, and because cards draw
+                    // outside the viewport (clip disabled, for the fade) a card
+                    // already visible in the gutter still had to be scrolled INTO the
+                    // viewport when focused — so moving focus back left jumped.
+                    //
+                    // A margin keeps the viewport full width and IS honoured by the
+                    // focus engine, so a card parks just inside the gutter and its
+                    // neighbour stays where it was drawn. (An earlier attempt at this
+                    // appeared not to work only because the stack also carried leading
+                    // padding, which fought it.)
+                    .contentMargins(.leading, navigationContentInset, for: .scrollContent)
+                    .scrollClipDisabled()
+                    // With the clip off, cards keep drawing into the margin. This
+                    // feathers them there and clips whatever is left, so content
+                    // slides under the rail instead of ending at a hard line.
+                    .leadingEdgeFadeMask(
+                        fadeWidth: navigationContentInset,
+                        verticalOverhang: layoutMetrics.railShadowClearance
+                    )
                     // Section the whole rail VIEWPORT (the full-width horizontal
                     // ScrollView) — NOT the scrolled inner LazyHStack — but ONLY for
                     // the gated single-target flow (the episode rail). tvOS only enters

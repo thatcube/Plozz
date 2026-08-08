@@ -32,12 +32,37 @@ struct NavigationRailShell<Content: View>: View {
     /// the initial pick, which would open the navigation every time the app launches
     /// or the viewer switches destination.
     @Namespace private var focusScopeID
+    /// Whether focus is inside the rail, reported up from it.
+    @State private var railExpanded = false
+
+    /// How far the page slides right while the rail is expanded.
+    ///
+    /// The page MOVES rather than being covered. Covering it meant the expanded
+    /// rail needed an opaque panel to stay readable — which read as a slab bolted
+    /// over the picture — and, worse, it occluded the very cards a Right press
+    /// needs to land on, so leaving the rail could fail. Sliding solves both.
+    private var pageShift: CGFloat {
+        NavigationRailMetrics.expandedWidth - NavigationRailMetrics.collapsedWidth
+    }
 
     var body: some View {
         let hidden = chrome.isChromeHidden
         return ZStack(alignment: .leading) {
             content
-                .safeAreaPadding(.leading, hidden ? 0 : NavigationRailMetrics.collapsedWidth)
+                // The rail makes room for itself by PUBLISHING an inset, never by
+                // insetting this container.
+                //
+                // Insetting the container here — with padding or a safe area —
+                // narrows the page as a whole, which drags the Home hero's
+                // full-bleed artwork in with it and leaves a black band down the
+                // side of the picture. Each surface instead applies this to its own
+                // CONTENT (a row's cards, the hero's text column) and leaves its
+                // artwork alone.
+                .environment(
+                    \.plozzNavigationContentInset,
+                    hidden ? 0 : NavigationRailMetrics.contentInset
+                )
+                .offset(x: railExpanded && !hidden ? pageShift : 0)
                 .prefersDefaultFocus(true, in: focusScopeID)
 
             if !hidden {
@@ -46,13 +71,19 @@ struct NavigationRailShell<Content: View>: View {
                     entries: entries,
                     showsMusic: showsMusic,
                     selection: $selection,
+                    isExpandedOutward: $railExpanded,
                     onOpenProfileSwitcher: onOpenProfileSwitcher
                 )
+                // Breaks out of the title-safe area so the icons sit in the empty
+                // margin down the side of the picture rather than inside the
+                // page's own content column.
+                .ignoresSafeArea(edges: .leading)
                 .transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
         .focusScope(focusScopeID)
         .animation(.easeInOut(duration: 0.26), value: hidden)
+        .animation(NavigationRailMetrics.expandAnimation, value: railExpanded)
         .onChange(of: selection) { _, _ in
             // The outgoing destination's stack is torn down without reporting, so
             // without this the rail would stay hidden after leaving a detail page

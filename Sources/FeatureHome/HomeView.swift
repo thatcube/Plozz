@@ -198,6 +198,9 @@ public struct HomeView: View {
     @Namespace private var heroFocusScope
 
     @Environment(\.plozzMetrics) private var metrics
+    /// How far the navigation rail insets page content, so the libraries row can
+    /// carry the same gutter as every media row.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
 
     public init(
         viewModel: HomeViewModel,
@@ -561,7 +564,15 @@ public struct HomeView: View {
                 // above the backdrop (the gap that made the hero sit too low).
                 // An empty edge set is a no-op, so the classic rows layout keeps
                 // its normal top inset under the tab bar.
-                .ignoresSafeArea(.container, edges: heroLayoutActive ? .top : [])
+                // `.trailing` lets the rows scroll out to the physical edge of the
+                // panel. The scroll view was reserving a trailing inset, so every
+                // row's viewport ended short of the screen and cards were cut there
+                // with a dead black bar beyond. It can only be refused here, at the
+                // scroll view — by the time layout reaches a row the inset has
+                // already been applied, which is why `ignoresSafeArea` on the row
+                // itself did nothing. Leading is deliberately still honoured: the
+                // rail's gutter is measured from it.
+                .ignoresSafeArea(.container, edges: heroLayoutActive ? [.top, .trailing] : .trailing)
             }
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too. Only in
@@ -1019,7 +1030,7 @@ public struct HomeView: View {
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             Text("Libraries")
                 .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
-                .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                .padding(.leading, PlozzTheme.Metrics.screenPadding + navigationContentInset)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: metrics.cardSpacing) {
                     ForEach(libraries) { aggregated in
@@ -1031,15 +1042,22 @@ public struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
-                // engine doesn't yank the first/last tile flush to the screen edge,
-                // and reserve room *inside* the clip for the focused tile's lift +
+                // Reserve room *inside* the clip for the focused tile's lift +
                 // shadow. The negative outer padding cancels that room in layout, so
                 // the row's height and spacing are unchanged — only the clip grows.
                 .padding(.vertical, metrics.railShadowClearance)
             }
             .padding(.top, metrics.railTopClearanceOffset)
             .padding(.bottom, metrics.railBottomClearanceOffset)
+            // Same navigation gutter as every media row — see `MediaRowView`. A
+            // scroll-content margin rather than a viewport inset, so the focus
+            // engine parks a tile just inside the gutter instead of jumping.
+            .contentMargins(.leading, navigationContentInset, for: .scrollContent)
+            .scrollClipDisabled()
+            .leadingEdgeFadeMask(
+                fadeWidth: navigationContentInset,
+                verticalOverhang: metrics.railShadowClearance
+            )
         }
     }
 

@@ -316,6 +316,7 @@ public struct RootView: View {
                         audioController: appState.audioController,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
                         homeContentStore: HomeContentStore(namespace: appState.profilesModel.activeNamespace),
+                        navigationLibrariesSnapshotStore: NavigationLibrariesSnapshotStore(namespace: appState.profilesModel.activeNamespace),
                         mediaItemActionHandler: appState.mediaItemActionHandler,
                         enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
                         // These bridge closures are `@Sendable` (the player may invoke

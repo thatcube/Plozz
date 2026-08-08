@@ -26,11 +26,15 @@ extension View {
     /// `NavigationStyle`. Kept as a `@ViewBuilder` switch (rather than a ternary)
     /// because `.sidebarAdaptable` and `.tabBarOnly` are distinct concrete
     /// `TabViewStyle` types that can't share one expression.
+    ///
+    /// `.rail` never reaches here — that style replaces the `TabView` outright with
+    /// ``NavigationRailShell`` — but it still has to be handled, and the sidebar is
+    /// the closest native shape if it ever did.
     @ViewBuilder
     func plozzTabStyle(_ style: NavigationStyle) -> some View {
         switch style {
         case .tabBar: self.tabViewStyle(.tabBarOnly)
-        case .sidebar: self.tabViewStyle(.sidebarAdaptable)
+        case .sidebar, .rail: self.tabViewStyle(.sidebarAdaptable)
         }
     }
 }
@@ -547,6 +551,56 @@ func resolveLibraryBrowse(
         }
     }
     return (resolveProvider(library.sourceAccountID, in: accounts), library.sourceAccountID)
+}
+
+/// Builds the provider that backs the combined **All Libraries** grid: every
+/// browsable library on every signed-in account, paged concurrently and
+/// de-duplicated into one wall through the same ``AggregatedLibraryProvider`` the
+/// cross-server single-library browse uses.
+///
+/// Each source declares its **own** kind, because this grid mixes a movie library
+/// with a TV library — asking a movie section for series returns nothing on both
+/// backends. A cross-server-merged library contributes one source per server, so a
+/// title held on two servers still collapses to one card here exactly as it does
+/// in that library's own browse.
+///
+/// Returns `nil` when nothing resolves (every account signed out mid-flight), so
+/// the caller can fall back rather than construct a provider with no sources —
+/// ``AggregatedLibraryProvider`` requires at least one.
+func resolveAllLibrariesBrowse(
+    libraries: [AggregatedLibrary],
+    in accounts: [ResolvedAccount],
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+) -> (any MediaProvider)? {
+    var sources: [AggregatedLibrarySource] = []
+    var seen: Set<String> = []
+    for aggregated in libraries where !aggregated.library.isMusic {
+        let library = aggregated.library
+        for accountID in library.allSourceAccountIDs {
+            guard
+                let provider = resolveOptionalProvider(accountID, in: accounts),
+                let containerID = library.containerID(forSourceAccountID: accountID)
+            else { continue }
+            // A merged library is listed once but names several accounts, and the
+            // same (account, container) pair must never be paged twice — that would
+            // double every one of its titles' fetches for no extra content.
+            guard seen.insert("\(accountID)\u{1F}\(containerID)").inserted else { continue }
+            sources.append(
+                AggregatedLibrarySource(
+                    accountID: accountID,
+                    containerID: containerID,
+                    provider: provider,
+                    kind: library.kind
+                )
+            )
+        }
+    }
+    guard !sources.isEmpty else { return nil }
+    return AggregatedLibraryProvider(
+        sources: sources,
+        serverInfo: accounts.sourceServerInfo(),
+        identitySources: identitySources
+    )
 }
 
 /// Retargets a cross-server-merged card to the **locality-best** copy before it

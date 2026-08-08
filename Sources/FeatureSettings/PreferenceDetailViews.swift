@@ -4,6 +4,10 @@ import CoreModels
 import CoreUI
 
 struct AppearanceDetailView: View {
+    /// The household's libraries + per-profile availability, needed by the
+    /// navigation-arrangement pane. Passed in (rather than reached for) so this
+    /// view stays a plain function of what Settings already resolved.
+    let librariesScope: ProfileLibrariesScope
     @Bindable var theme: ThemeSettingsModel
     /// Circadian Mode (night-warming) settings, folded in as sections here — it's
     /// a display concern, so it no longer earns its own top-level row.
@@ -72,7 +76,7 @@ struct AppearanceDetailView: View {
                 SettingsSplitRow(
                     id: "navigation",
                     title: "Navigation",
-                    description: "Horizontal tabs across the top, or a collapsible left sidebar.",
+                    description: "A slim left rail with your libraries, horizontal tabs across the top, or the system sidebar.",
                 ) {
                     CompactNavigationPicker(selection: $navigation.style)
                 },
@@ -86,8 +90,25 @@ struct AppearanceDetailView: View {
                         showTrackDetails: $musicPlayer.showTrackDetails
                     )
                 }
-        ] + CircadianRowsBuilder(model: nightShift).rows
+        ] + navigationLibraryRows
+            + CircadianRowsBuilder(model: nightShift).rows
             + SpoilerRowsBuilder(spoilers: spoilers).rows
+    }
+
+    /// The rail's library arrangement, offered only while the rail is the chosen
+    /// chrome — under the two native tab styles there is no library list to
+    /// arrange, and a row that edits something invisible is worse than no row.
+    private var navigationLibraryRows: [SettingsSplitRow] {
+        guard navigation.style == .rail else { return [] }
+        return [
+            SettingsSplitRow(
+                id: "navigation-libraries",
+                title: "Navigation Libraries",
+                description: "Choose which libraries appear in the navigation, and the order they appear in."
+            ) {
+                NavigationLibrariesDetailView(scope: librariesScope)
+            }
+        ]
     }
 
     /// Theme cards plus the transparency (liquid-glass) control folded in beneath

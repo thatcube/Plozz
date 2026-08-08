@@ -36,10 +36,10 @@ public enum HeroFocusOutcome: Equatable, Sendable {
 /// - At the **first (left-most) button, Left goes to the previous item**, again
 ///   keeping the button index. Backward paging **wraps only in Top-Bar
 ///   navigation**.
-/// - In **Sidebar** navigation, when on the **first item** and the **left-most
-///   button**, Left **escapes to the side navigation** instead of wrapping —
-///   preventing a focus fight with the sidebar. (Top-Bar has no left chrome, so
-///   there Left wraps backward to the last item.)
+/// - In **Sidebar** or **Library Rail** navigation, when on the **first item** and
+///   the **left-most button**, Left **escapes to the side navigation** instead of
+///   wrapping — preventing a focus fight with the leading-edge chrome. (Top-Bar has
+///   no left chrome, so there Left wraps backward to the last item.)
 ///
 /// SwiftUI-free and exhaustively testable.
 public enum HeroCarouselFocus {
@@ -73,15 +73,14 @@ public enum HeroCarouselFocus {
             }
             // At the left edge of the FIRST item, behaviour depends on nav chrome.
             if itemIndex == 0 {
-                switch navigationStyle {
-                case .sidebar:
-                    // Hand the move to the system so the sidebar opens; don't wrap.
+                if navigationStyle.hasLeadingEdgeChrome {
+                    // Hand the move to the system so the side navigation opens;
+                    // don't wrap.
                     return .escape
-                case .tabBar:
-                    // No left chrome to fight — wrap backward to the last item.
-                    guard itemCount > 1 else { return .blocked }
-                    return .advance(toItem: itemCount - 1, keepButton: focusedButton)
                 }
+                // No left chrome to fight — wrap backward to the last item.
+                guard itemCount > 1 else { return .blocked }
+                return .advance(toItem: itemCount - 1, keepButton: focusedButton)
             }
             // Any later item: step to the previous item, keeping the button index.
             return .advance(toItem: itemIndex - 1, keepButton: focusedButton)

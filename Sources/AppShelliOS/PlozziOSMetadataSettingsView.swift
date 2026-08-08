@@ -135,7 +135,7 @@ struct PlozziOSMetadataSettingsView: View {
         split: MetadataProviderListLogic.Sections
     ) -> some View {
         switch item {
-        case let .provider(source):
+        case let .element(source):
             let isEnabled = split.enabled.contains(source)
             HStack(spacing: 12) {
                 if let index = split.enabled.firstIndex(of: source) {

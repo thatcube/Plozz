@@ -21,6 +21,8 @@ private enum NavigationPreviewColors {
 
 /// A tiny mock app window painted with fixed colours, illustrating one
 /// `NavigationStyle`:
+/// - `.rail` ("Library Rail"): Plozz's own full-height leading rail of collapsed
+///   icon dots, with Settings pinned to the bottom.
 /// - `.tabBar` ("Top Bar"): a centred pill of tabs across the top, page content
 ///   beneath.
 /// - `.sidebar` ("Sidebar"): a compact top-left rail of tabs, page content to its
@@ -46,6 +48,7 @@ private struct NavigationStyleMini: View {
                 switch style {
                 case .tabBar: topBar(availW: availW, availH: availH)
                 case .sidebar: sidebar(availW: availW, availH: availH)
+                case .rail: rail(availW: availW, availH: availH)
                 }
             }
             .frame(width: availW, height: availH, alignment: .topLeading)
@@ -130,6 +133,50 @@ private struct NavigationStyleMini: View {
 
             posterRow(availH: availH)
         }
+    }
+
+    // MARK: Library rail
+
+    /// Plozz's own chrome: a slim FULL-HEIGHT rail of round icon dots down the
+    /// leading edge (collapsed, which is how it sits until focus enters it), with a
+    /// profile dot at the top and a settings dot pinned to the bottom. The rail
+    /// running the whole height — and the gap it leaves at the bottom — is what
+    /// distinguishes it from the native sidebar's short top-left cluster.
+    private func rail(availW: CGFloat, availH: CGFloat) -> some View {
+        let dot = tabThickness(availH) * 2.2
+        let railWidth = dot * 1.9
+        return HStack(alignment: .top, spacing: availW * 0.06) {
+            VStack(spacing: 0) {
+                railDot(size: dot, active: false)
+                    .padding(.bottom, dot * 0.7)
+                railDot(size: dot, active: true)
+                railDot(size: dot, active: false)
+                    .padding(.top, tabGap(availH))
+                railDot(size: dot, active: false)
+                    .padding(.top, tabGap(availH))
+                Spacer(minLength: 0)
+                // Pinned to the bottom, exactly like the real rail's Settings slot.
+                railDot(size: dot, active: false)
+            }
+            .padding(.vertical, dot * 0.5)
+            .frame(width: railWidth, height: availH)
+            .background(
+                RoundedRectangle(cornerRadius: railWidth * 0.45, style: .continuous)
+                    .fill(NavigationPreviewColors.chrome)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: railWidth * 0.45, style: .continuous)
+                    .strokeBorder(NavigationPreviewColors.chromeBorder, lineWidth: 1)
+            )
+
+            posterRow(availH: availH)
+        }
+    }
+
+    private func railDot(size: CGFloat, active: Bool) -> some View {
+        Circle()
+            .fill(active ? ThemePalette.brandBlue : NavigationPreviewColors.itemIdle)
+            .frame(width: size, height: size)
     }
 
     // MARK: Shared page content

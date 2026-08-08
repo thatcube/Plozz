@@ -178,6 +178,11 @@ struct PlozziOSHomeView: View {
                 )
             }
         }
+        .modifier(PlozziOSScreenshotPlaybackRegistration(
+            director: appModel.screenshotDirector,
+            play: { item, seconds in playForScreenshot(item, seconds: seconds) },
+            dismiss: { playbackRequest = nil }
+        ))
         .confirmationDialog(
             "Request as Administrator?",
             isPresented: Binding(
@@ -521,6 +526,37 @@ struct PlozziOSHomeView: View {
             playbackRequest = PlozziOSPlaybackRequest(
                 item: episode,
                 startPosition: episode.resumePosition ?? 0,
+                versionPreferences: appModel.versionPreferences
+            )
+        }
+    }
+
+    /// Plays `item` for a capture run, forced to start `seconds` in.
+    ///
+    /// Separate from `play` because a screenshot wants a specific playhead — a
+    /// shot taken at 0:00 is a black frame under an empty scrubber — rather than
+    /// the item's own resume point, and it never wants the Resume/Start Over
+    /// prompt a resume position would raise. A series still resolves to its
+    /// next-up episode first, the same as every other play path.
+    private func playForScreenshot(_ item: MediaItem, seconds: Double) {
+        trailerController.stop()
+        guard item.kind.needsPlaybackTargetResolution else {
+            playbackRequest = PlozziOSPlaybackRequest(
+                item: item,
+                startPosition: seconds,
+                versionPreferences: appModel.versionPreferences
+            )
+            return
+        }
+        guard let provider = appModel.provider(for: item) else { return }
+        Task { @MainActor in
+            guard let episode = await HeroPlayTargetResolver.playbackTarget(
+                for: item,
+                provider: provider
+            ) else { return }
+            playbackRequest = PlozziOSPlaybackRequest(
+                item: episode,
+                startPosition: seconds,
                 versionPreferences: appModel.versionPreferences
             )
         }
@@ -1692,6 +1728,205 @@ private struct PlozziOSHomeLibraryCard: View {
             )
         }
         .frame(width: width, alignment: .leading)
+    }
+}
+
+/// Performs the capture rig's screen requests on iOS. A zero-size leaf for the
+/// same reason as the tvOS `ScreenshotRouter`: reading the request in the Home
+/// body would subscribe the whole page to it, so every request would rebuild it.
+///
+/// Each request is resolved by *searching the real library* for the named title
+/// and driving the same navigation a tap drives — the item/person navigators the
+/// enclosing stack installs, and the player this view's owner presents — so the
+/// captured screen is the one a person would reach, only reached by name.
+/// Performs the capture rig's screen requests on iOS. A zero-size leaf placed in
+/// the tab shell's background — OUTSIDE every navigation stack — because a router
+/// mounted on the Home screen had its `.task` cancelled the instant the first
+/// pushed page covered it, and every request after the first was then consumed
+/// without ever being acked. It reaches the pushes and the player through the
+/// seams each screen registers on the director.
+///
+/// Each request is resolved by *searching the real library* for the named title
+/// and driving the same navigation a tap drives, so the captured screen is the
+/// one a person would reach, only reached by name.
+struct PlozziOSScreenshotRouter: View {
+    let appModel: PlozziOSAppModel
+
+    private var director: PlozziOSScreenshotDirector { appModel.screenshotDirector }
+    private var accounts: [ResolvedAccount] { appModel.accountsProviders.resolvedActiveAccounts }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .task(id: director.request) { await perform() }
+    }
+
+    private func perform() async {
+        guard let request = director.request else { return }
+        director.request = nil
+        director.finish(await reach(request))
+    }
+
+    /// Reaches the requested screen and answers with what the capture script
+    /// should see in the ack. Returns text rather than an enum so a probe can
+    /// answer with the titles it found; every other request answers `ok` or
+    /// `notFound`.
+    private func reach(_ request: PlozziOSScreenshotDirector.Request) async -> String {
+        switch request {
+        case .home:
+            await popToRoot()
+
+        case let .detail(title):
+            guard let item = await find(title) else { return notFound }
+            await popToRoot()
+            let checkpoint = director.arrivalCheckpoint()
+            director.navigateToItem?(item)
+            await director.awaitArrival(after: checkpoint)
+
+        case let .person(title, name):
+            guard let item = await find(title) else { return notFound }
+            // The cast list belongs to the detail page's fetch, so read the person
+            // off the item's own credits rather than waiting on a page to render
+            // one. The person page is self-contained, so it is pushed straight onto
+            // the root — no detail page underneath it to reach it through.
+            guard let person = await person(named: name, in: item) else { return notFound }
+            await popToRoot()
+            let checkpoint = director.arrivalCheckpoint()
+            director.navigateToPerson?(person, item.sourceAccountID)
+            await director.awaitArrival(after: checkpoint)
+
+        case let .library(name):
+            guard let route = await library(named: name) else { return notFound }
+            await popToRoot()
+            let checkpoint = director.arrivalCheckpoint()
+            director.navigateToLibrary?(route)
+            await director.awaitArrival(after: checkpoint)
+
+        case let .play(title, seconds):
+            guard let item = await find(title) else { return notFound }
+            await popToRoot()
+            // Starting partway in is what puts real progress in the scrubber and
+            // real artwork behind the overlay — a shot taken at 0:00 is a black
+            // frame under a full-width empty bar.
+            director.startPlayback?(item, seconds)
+
+        case let .probe(title):
+            var found: [String] = []
+            for resolved in accounts {
+                guard let results = try? await resolved.provider.search(query: title, limit: 25)
+                else { continue }
+                found.append(contentsOf: results.map { "\($0.title) [\($0.kind.rawValue)]" })
+            }
+            return found.isEmpty ? notFound : found.joined(separator: "\n")
+        }
+        return PlozziOSScreenshotDirector.Outcome.ok.rawValue
+    }
+
+    private var notFound: String { PlozziOSScreenshotDirector.Outcome.notFound.rawValue }
+
+    /// Brings the Home tab forward, dismisses the player, and empties the stack,
+    /// then lets them all land.
+    ///
+    /// Emptying the stack and pushing again in the same runloop turn nets out to
+    /// no change as far as SwiftUI is concerned — the tvOS shell photographed the
+    /// first title four times over from exactly this — so the pop is separated
+    /// from the push by a turn, and the player is dropped here too, or every
+    /// request after a `play` would photograph the still-running video.
+    private func popToRoot() async {
+        director.selectHomeTab?()
+        director.dismissPlayback?()
+        director.resetNavigation?()
+        await settlePush()
+    }
+
+    private func settlePush() async {
+        try? await Task.sleep(for: .milliseconds(700))
+    }
+
+    /// The best match for `title` across every signed-in account.
+    ///
+    /// Searched by shortening rather than by the full title, because a full title
+    /// is often the one query that fails. Asking the share catalog for "The Lord
+    /// of the Rings: The Fellowship of the Ring" returns nothing, while "Lord of
+    /// the Rings" returns all four films. So the query is shortened a word at a
+    /// time until something comes back, and the *full* requested title is then
+    /// matched against those results — shortening only widens the search, and the
+    /// exact match still decides which result wins.
+    private func find(_ title: String) async -> MediaItem? {
+        var fallback: MediaItem?
+        for query in Self.queries(for: title) {
+            for resolved in accounts {
+                guard let results = try? await resolved.provider.search(query: query, limit: 40),
+                      !results.isEmpty
+                else { continue }
+                let tagged = results.map { $0.taggingSource(resolved.account.id) }
+                if let exact = tagged.first(where: {
+                    $0.title.compare(title, options: .caseInsensitive) == .orderedSame
+                }) {
+                    return exact
+                }
+                fallback = fallback ?? tagged.first
+            }
+            if fallback != nil { break }
+        }
+        return fallback
+    }
+
+    /// The full title, then progressively shorter leading phrases. Stops at two
+    /// words: a one-word query against a large library is a lottery.
+    private static func queries(for title: String) -> [String] {
+        let words = title.split(separator: " ").map(String.init)
+        guard words.count > 2 else { return [title] }
+        return (2...words.count)
+            .reversed()
+            .map { words.prefix($0).joined(separator: " ") }
+    }
+
+    private func person(named name: String, in item: MediaItem) async -> MediaPerson? {
+        let detailed = (try? await appModel.provider(for: item)?.item(id: item.id)) ?? item
+        let cast = detailed.cast.isEmpty ? detailed.people : detailed.cast
+        return cast.first {
+            $0.name.compare(name, options: .caseInsensitive) == .orderedSame
+        } ?? cast.first { $0.name.localizedCaseInsensitiveContains(name) }
+    }
+
+    private func library(named name: String?) async -> PlozziOSLibraryRoute? {
+        for resolved in accounts {
+            guard let libraries = try? await resolved.provider.libraries(),
+                  !libraries.isEmpty
+            else { continue }
+            guard let name else {
+                return PlozziOSLibraryRoute(library: libraries[0], accountID: resolved.account.id)
+            }
+            if let match = libraries.first(where: {
+                $0.title.localizedCaseInsensitiveContains(name)
+            }) {
+                return PlozziOSLibraryRoute(library: match, accountID: resolved.account.id)
+            }
+        }
+        return nil
+    }
+}
+
+/// Hands the Home view's player controls to the screenshot director so the
+/// out-of-stack router can start and dismiss playback — the player lives here,
+/// but the router does not. Compiled to nothing outside DEBUG, so a shipped build
+/// never wires the seam.
+private struct PlozziOSScreenshotPlaybackRegistration: ViewModifier {
+    let director: PlozziOSScreenshotDirector
+    let play: (MediaItem, Double) -> Void
+    let dismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        content.onAppear {
+            director.startPlayback = play
+            director.dismissPlayback = dismiss
+        }
+        #else
+        content
+        #endif
     }
 }
 #endif

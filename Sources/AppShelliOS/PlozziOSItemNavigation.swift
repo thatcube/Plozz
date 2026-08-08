@@ -28,16 +28,28 @@ private struct PlozziOSPersonRoute: Identifiable, Hashable {
 
 private struct PlozziOSItemNavigationModifier: ViewModifier {
     let appModel: PlozziOSAppModel
+    var registersScreenshotRouting = false
     @State private var navigatedItem: MediaItem?
     @State private var navigatedPerson: PlozziOSPersonRoute?
+    @State private var navigatedLibrary: PlozziOSLibraryRoute?
 
     func body(content: Content) -> some View {
         content
             .navigationDestination(item: $navigatedItem) { item in
                 PlozziOSItemPage(appModel: appModel, item: item)
+                    .modifier(ScreenshotArrivalBeacon(appModel: appModel, enabled: registersScreenshotRouting))
             }
             .navigationDestination(item: $navigatedPerson) { route in
                 PlozziOSPersonPage(appModel: appModel, route: route)
+                    .modifier(ScreenshotArrivalBeacon(appModel: appModel, enabled: registersScreenshotRouting))
+            }
+            // The programmatic twin of the value-typed `plozziOSLibraryDestination`
+            // push, so the screenshot router can open a library grid without a
+            // `NavigationLink`. Both build `PlozziOSLibraryDestinationView`, so the
+            // page is the same one a tap opens.
+            .navigationDestination(item: $navigatedLibrary) { route in
+                PlozziOSLibraryDestinationView(appModel: appModel, route: route)
+                    .modifier(ScreenshotArrivalBeacon(appModel: appModel, enabled: registersScreenshotRouting))
             }
             // Applied *after* the destinations so the environment encloses them
             // and pushed pages inherit the router. The other order leaves the
@@ -51,6 +63,68 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
             .mediaPersonSourceNavigator { person, accountID in
                 navigatedPerson = .init(person: person, sourceAccountID: accountID)
             }
+            .modifier(ScreenshotRoutingRegistration(
+                appModel: appModel,
+                enabled: registersScreenshotRouting,
+                setItem: { navigatedItem = $0 },
+                setPerson: { navigatedPerson = .init(person: $0, sourceAccountID: $1) },
+                setLibrary: { navigatedLibrary = $0 },
+                reset: {
+                    navigatedItem = nil
+                    navigatedPerson = nil
+                    navigatedLibrary = nil
+                }
+            ))
+    }
+}
+
+/// Reports a pushed page's appearance to the director so the out-of-stack router
+/// can ack a navigation only once the page is really on screen — see the note on
+/// `pageArrivals`. Compiled to nothing outside DEBUG and reporting only from the
+/// stack that the router drives, so a shipped build never counts and the search
+/// stack's own pushes don't wake the rig.
+private struct ScreenshotArrivalBeacon: ViewModifier {
+    let appModel: PlozziOSAppModel
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        content.onAppear {
+            guard enabled else { return }
+            appModel.screenshotDirector.notePageArrival()
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+/// Hands this stack's navigation setters to the screenshot director so the
+/// out-of-stack router can drive it — see the note on the director's routing
+/// seams. Compiled to nothing outside DEBUG and applied only by the Home stack,
+/// so the search stack never fights it for the same seams and a shipped build
+/// never wires them at all.
+private struct ScreenshotRoutingRegistration: ViewModifier {
+    let appModel: PlozziOSAppModel
+    let enabled: Bool
+    let setItem: (MediaItem) -> Void
+    let setPerson: (MediaPerson, String?) -> Void
+    let setLibrary: (PlozziOSLibraryRoute) -> Void
+    let reset: () -> Void
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        content.onAppear {
+            guard enabled else { return }
+            let director = appModel.screenshotDirector
+            director.navigateToItem = setItem
+            director.navigateToPerson = setPerson
+            director.navigateToLibrary = setLibrary
+            director.resetNavigation = reset
+        }
+        #else
+        content
+        #endif
     }
 }
 
@@ -155,8 +229,18 @@ private struct PlozziOSPersonPage: View {
 
 extension View {
     /// Lets menu actions push an item's detail page within this navigation stack.
-    func plozziOSItemNavigation(appModel: PlozziOSAppModel) -> some View {
-        modifier(PlozziOSItemNavigationModifier(appModel: appModel))
+    ///
+    /// `registersScreenshotRouting` hands this stack's programmatic navigation to
+    /// the screenshot director; only the Home stack passes `true`, so the search
+    /// stack does not overwrite the seams the capture run drives.
+    func plozziOSItemNavigation(
+        appModel: PlozziOSAppModel,
+        registersScreenshotRouting: Bool = false
+    ) -> some View {
+        modifier(PlozziOSItemNavigationModifier(
+            appModel: appModel,
+            registersScreenshotRouting: registersScreenshotRouting
+        ))
     }
 }
 #endif

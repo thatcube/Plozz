@@ -300,6 +300,14 @@ struct PlozziOSPlayerControlsOverlay: View {
 
     private func scheduleAutoHide() {
         cancelAutoHide()
+        #if DEBUG
+        // A file-driven capture run supplies no touch to reveal the transport, and
+        // it fades a few seconds after playback starts — so a shot that waits for
+        // the scene to settle catches bare video with no chrome. When the capture
+        // rig asks, auto-hide is suspended and the bar the run set up stays up to
+        // be photographed. Inert in any run the rig did not seed.
+        if PlozziOSScreenshotSeed.holdsPlayerControls { return }
+        #endif
         // An open Info / Cast card counts as being in use, like an open sheet.
         // Reading a synopsis or scrolling a cast row involves long stretches
         // with no taps, and the timer cannot tell that from abandonment — so it

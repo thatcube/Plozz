@@ -135,6 +135,7 @@ public struct PlozziOSRootView: View {
             )
         }
         .task { appModel.resumeProfileOnboardingIfNeeded() }
+        .onAppear { PlozziOSScreenshotSeed.applyIfRequested(to: appModel) }
         .task {
             // Detect on cold launch: fire immediately if the pending set is already
             // warm, and close the cold-launch window after a short grace period so a
@@ -555,6 +556,24 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// Performs the capture rig's tab requests. See ``PlozziOSScreenshotDirector``.
+private struct PlozziOSScreenshotTabRouter: View {
+    let director: PlozziOSScreenshotDirector
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .task(id: director.tab) {
+                guard let tab = director.tab else { return }
+                director.tab = nil
+                onSelect(tab)
+                director.finish(.ok)
+            }
+    }
+}
+
 private struct PlozziOSTabShell: View {
     @Environment(\.themePalette) private var palette
     @Environment(PlozziOSSidebarGeometryModel.self)
@@ -604,7 +623,7 @@ private struct PlozziOSTabShell: View {
                         onShowSettings: showSettings
                     )
                     .plozziOSLibraryDestination(appModel: appModel)
-                    .plozziOSItemNavigation(appModel: appModel)
+                    .plozziOSItemNavigation(appModel: appModel, registersScreenshotRouting: true)
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbarBackground(.hidden, for: .tabBar)
@@ -662,6 +681,33 @@ private struct PlozziOSTabShell: View {
                 geometryModel: sidebarGeometry
             )
             .frame(width: 0, height: 0)
+        }
+        .background {
+            // Switching tabs is the shell's job, so the capture rig's tab requests
+            // are consumed here rather than in the Home stack. A zero-size leaf, so
+            // reading the request never invalidates the tab view.
+            PlozziOSScreenshotTabRouter(
+                director: appModel.screenshotDirector,
+                onSelect: { name in
+                    guard let destination = PlozziOSDestination(rawValue: name) else { return }
+                    selectedDestination = destination
+                }
+            )
+            #if DEBUG
+            // The push seams live on the Home stack, so the router brings this tab
+            // forward before it navigates. Registered here because only the shell
+            // owns the tab selection.
+            .onAppear { appModel.screenshotDirector.selectHomeTab = { selectedDestination = .home } }
+            #endif
+        }
+        .background {
+            // Every other request — detail, person, library, play — is performed
+            // here too, OUTSIDE the navigation stacks. On the Home screen the
+            // router's `.task` was cancelled the moment a pushed page covered it,
+            // so only the first request of a run was ever acked; out here nothing
+            // covers it, and it reaches the pushes and player through the seams the
+            // Home stack and Home view register on the director.
+            PlozziOSScreenshotRouter(appModel: appModel)
         }
         // The setup cover is presented from inside Settings when Settings is up,
         // and from the root when it isn't — see `ProfileOnboardingOrigin`. That

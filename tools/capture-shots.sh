@@ -315,12 +315,21 @@ capture_device() {
     else
       # A push animates, then artwork loads. Settling covers both, but a page
       # that legitimately never stops moving will never settle — so a timeout
-      # still takes the shot.
+      # still takes the shot. The app only acks once the pushed page has actually
+      # appeared, so the page under this settle is already the requested one.
       settle "$udid" 60 3 2 || true
     fi
 
     file="$OUT/plozz-${slug:+$slug-}$name.png"
     xcrun simctl io "$udid" screenshot "$file" >/dev/null 2>&1
+
+    # simctl writes RGBA. The alpha is fully opaque and so carries nothing, but
+    # App Store Connect rejects a screenshot that has an alpha channel at all,
+    # and it also wrecks any DSSIM comparison against an encoder that drops it
+    # (0.13 against a true 0.005). Flattening here means neither consumer of
+    # these files has to remember to.
+    magick "$file" -alpha off -colorspace sRGB "$file" 2>/dev/null || true
+
     printf '  %-28s %s\n' "plozz-${slug:+$slug-}$name.png" \
       "$(magick identify -format '%wx%h' "$file" 2>/dev/null || echo '?')"
 

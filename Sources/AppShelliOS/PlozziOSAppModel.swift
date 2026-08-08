@@ -285,6 +285,9 @@ final class PlozziOSAppModel {
     private(set) var downloads: PlozziOSDownloadsModel
     private(set) var pendingLibrarySelection: PendingLibrarySelection?
     private(set) var pendingFirstRunStep: FirstRunStep?
+    /// Drives the app to a named screen for an automated capture run. Inert unless
+    /// the capture environment seeded this launch — see ``PlozziOSScreenshotSeed``.
+    let screenshotDirector = PlozziOSScreenshotDirector()
     /// A pairing invite captured from a Sync & Setup universal link
     /// (`https://plozz.app/pair#…`). When set, the root presents the pairing send
     /// flow and auto-sends this device's setup to the device that showed the QR.

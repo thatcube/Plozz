@@ -78,6 +78,15 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         var offsets: [String: Int] = [:]
         var totals: [String: Int] = [:]
         var exhausted: Set<String> = []
+        /// Whole fills, back to back, in which a source was asked and answered
+        /// nothing. Survives across calls (unlike the per-call `stalled` set) so a
+        /// momentary outage can be told apart from a server that has gone.
+        private var consecutiveSilentFills: [String: Int] = [:]
+
+        /// How many consecutive fills a source must miss before its undelivered
+        /// remainder stops counting toward the grid's size. Three is enough that a
+        /// blip or a single slow response can never shrink a scrolled grid.
+        private static let silentFillsBeforeDeparted = 3
 
         /// The stateful cross-server merge. Folding each batch in (rather than
         /// re-merging everything every page) is what keeps a deep scroll linear:
@@ -133,6 +142,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             offsets = Dictionary(uniqueKeysWithValues: sourceIDs.map { ($0, 0) })
             totals.removeAll()
             exhausted.removeAll()
+            consecutiveSilentFills.removeAll()
             pending.removeAll()
             merger = makeMerger()
         }
@@ -141,6 +151,15 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         func setOffset(_ offset: Int, for sourceKey: String) { offsets[sourceKey] = offset }
         func setTotal(_ total: Int, for sourceKey: String) { totals[sourceKey] = total }
         func markExhausted(_ sourceKey: String) { exhausted.insert(sourceKey) }
+
+        /// Records one whole fill's outcome per source: answering clears the
+        /// departure latch, staying silent advances it.
+        func recordFillOutcome(answered: Set<String>, silent: Set<String>) {
+            for key in answered { consecutiveSilentFills[key] = 0 }
+            for key in silent where !exhausted.contains(key) {
+                consecutiveSilentFills[key, default: 0] += 1
+            }
+        }
         func isExhausted(_ sourceKey: String) -> Bool { exhausted.contains(sourceKey) }
         func mergedCount() -> Int { merger.count }
         func mergedSlice(from start: Int, limit: Int) -> [MediaItem] {
@@ -245,22 +264,32 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         }
 
         /// Optimistic post-merge total: each source's reported size, EXCEPT for
-        /// sources being stepped over this call, which contribute only what they
+        /// sources judged to have DEPARTED, which contribute only what they
         /// actually delivered.
         ///
         /// A server that answered a first page and then went away leaves its full
-        /// reported total behind. Counting it would keep the grid sized for items
-        /// that are not coming, and the grid marks a short page loaded — so those
-        /// slots become placeholders that can never retry. Counting only what it
-        /// delivered keeps the total honest about what is actually reachable.
-        func totalUpperBound(stalled: Set<String>) -> Int {
+        /// reported total behind. Counting it keeps the grid sized for items that
+        /// are not coming, and the grid marks a short page loaded — so those slots
+        /// become placeholders that can never retry.
+        ///
+        /// Departure is deliberately judged on ``consecutiveSilentFills``, a
+        /// CROSS-CALL latch, and never on the per-call `stalled` set. The total is
+        /// destructive input: `LibraryBrowseViewModel` resizes to it, and shrinking
+        /// destroys slots, discards loaded pages and — on tvOS — takes the focused
+        /// cell with it. A two-second blip must not be able to tear a scrolled grid
+        /// down and rebuild it, so the discount waits for a source to miss several
+        /// whole fills in a row, and is given back the moment it answers again.
+        func totalUpperBound() -> Int {
             totals.reduce(0) { running, entry in
                 let (key, total) = entry
-                guard stalled.contains(key), !exhausted.contains(key) else {
-                    return running + total
-                }
+                guard hasDeparted(key) else { return running + total }
                 return running + (offsets[key] ?? 0)
             }
+        }
+
+        private func hasDeparted(_ sourceKey: String) -> Bool {
+            !exhausted.contains(sourceKey)
+                && (consecutiveSilentFills[sourceKey] ?? 0) >= Self.silentFillsBeforeDeparted
         }
 
         func allExhausted(sourceIDs: [String]) -> Bool {
@@ -386,6 +415,11 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         var stalled: Set<String> = []
         /// Consecutive silent attempts per source WITHIN this fill.
         var silentAttempts: [String: Int] = [:]
+        /// Sources that produced at least once during this whole fill, and those
+        /// that were asked and never did — folded into the cross-call departure
+        /// latch once, after the loop.
+        var answeredThisFill: Set<String> = []
+        var askedThisFill: Set<String> = []
         while await cache.mergedCount() < targetCount {
             let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
             let hasPending = await cache.hasPending(sourceIDs)
@@ -410,6 +444,8 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
                 // A hungry source that answered with nothing is either offline or
                 // erroring. Don't let it hold the ordered frontier hostage this
                 // call; it stays un-exhausted, so the next page retries it.
+                askedThisFill.formUnion(hungry)
+                answeredThisFill.formUnion(produced)
                 for key in produced { silentAttempts[key] = 0 }
                 for key in hungry where !produced.contains(key) {
                     silentAttempts[key, default: 0] += 1
@@ -443,12 +479,20 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             }
             if !progressed, !retryable { break }
         }
+        // One outcome per FILL, not per loop iteration: the loop retries a hungry
+        // source a couple of times, and counting each retry would trip the
+        // departure latch inside a single call — the very thing it exists to avoid.
+        await cache.recordFillOutcome(
+            answered: answeredThisFill,
+            silent: askedThisFill.subtracting(answeredThisFill)
+        )
+
         let mergedCount = await cache.mergedCount()
         // Only the requested window is materialized — a deep scroll never copies the
         // whole accumulated buffer just to hand back 60 cards.
         let pageItems = await cache.mergedSlice(from: page.startIndex, limit: page.limit)
         let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
-        let upperBound = await cache.totalUpperBound(stalled: stalled)
+        let upperBound = await cache.totalUpperBound()
         // Until every source is drained the true post-merge total is unknown;
         // report an optimistic upper bound (sum of per-server totals) so the grid
         // keeps requesting pages, then settle on the exact merged count.

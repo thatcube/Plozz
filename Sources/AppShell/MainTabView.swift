@@ -382,6 +382,23 @@ struct MainTabView: View {
         NavigationRailDestination(storageValue: railSelectionRaw) ?? .home
     }
 
+    /// Commits the pruning, so a destination that has genuinely gone away stops
+    /// being the stored one — otherwise the moment its server answers again the
+    /// viewer is thrown out of whatever they were looking at and back into a
+    /// library they never picked.
+    ///
+    /// Gated on the library list being known: at launch it is empty, so every
+    /// library selection prunes to Home, and writing THAT back would erase the
+    /// remembered destination on every cold start. The rail still *displays* the
+    /// pruned value throughout, so its highlight is never a lie — only the
+    /// persistence waits.
+    private func persistPrunedRailSelection() {
+        guard railLibrariesLoaded else { return }
+        let resolved = resolvedRailSelection
+        guard resolved.storageValue != railSelectionRaw else { return }
+        railSelectionRaw = resolved.storageValue
+    }
+
     /// The rail's candidate libraries: discovered (or remembered), still owned by a
     /// signed-in account, and not switched off.
     ///
@@ -710,20 +727,14 @@ struct MainTabView: View {
             content: railDestination
         )
         .environment(navigationChrome)
-        .onChange(of: resolvedRailSelection) { _, resolved in
-            // Persist the pruning, so a destination that has genuinely gone away
-            // stops being the stored one — otherwise the moment its server answers
-            // again the viewer is thrown out of whatever they were looking at and
-            // back into a library they never picked.
-            //
-            // Gated on the library list being known. At launch it is empty, so
-            // every library selection prunes to Home; writing THAT back would erase
-            // the viewer's remembered destination on every cold start. The rail
-            // still *displays* the pruned value throughout, so its highlight is
-            // never a lie — only the persistence waits.
-            guard railLibrariesLoaded, resolved.storageValue != railSelectionRaw else { return }
-            railSelectionRaw = resolved.storageValue
-        }
+        .onChange(of: resolvedRailSelection) { _, _ in persistPrunedRailSelection() }
+        // Also on the FLAG, not just the value. At launch the library list is empty
+        // so a stored `library:X` already resolves to Home; when the list finally
+        // arrives without X, the resolved value is Home before and after — no edge,
+        // so a value-only observer would never fire and the dead selection would
+        // sit in scene storage forever, waiting to hijack the screen the next time
+        // X happened to resolve.
+        .onChange(of: railLibrariesLoaded) { _, _ in persistPrunedRailSelection() }
         .task(id: railLibrariesKey) {
             // Paint the rail's real libraries on the first frame from the persisted
             // snapshot — no network — then refresh below. Without this the chrome

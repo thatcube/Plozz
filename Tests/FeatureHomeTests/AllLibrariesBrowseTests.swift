@@ -156,13 +156,18 @@ final class AllLibrariesBrowseTests: XCTestCase {
 
     /// Two sources, one large, so the total is dominated by a server that can be
     /// taken away mid-browse.
-    private func flakyPair() -> (AggregatedLibraryProvider, FakeMediaProvider) {
+    private func flakyPair(
+        departureGrace: TimeInterval = AggregatedLibraryProvider.defaultDepartureGrace
+    ) -> (AggregatedLibraryProvider, FakeMediaProvider) {
         let healthy = FakeMediaProvider(allItems: (0..<5).map { movie("h\($0)", title: "H\($0)") })
         let flaky = FakeMediaProvider(allItems: (0..<200).map { movie("f\($0)", title: "F\($0)") })
-        let provider = AggregatedLibraryProvider(sources: [
-            source(account: "a", container: "1", kind: .movie, provider: healthy),
-            source(account: "b", container: "1", kind: .movie, provider: flaky)
-        ])
+        let provider = AggregatedLibraryProvider(
+            sources: [
+                source(account: "a", container: "1", kind: .movie, provider: healthy),
+                source(account: "b", container: "1", kind: .movie, provider: flaky)
+            ],
+            departureGrace: departureGrace
+        )
         return (provider, flaky)
     }
 
@@ -188,11 +193,32 @@ final class AllLibrariesBrowseTests: XCTestCase {
         XCTAssertFalse(recovered.items.isEmpty, "the recovered server's titles arrive")
     }
 
-    func testASourceThatDiesForGoodStopsInflatingTheTotal() async throws {
-        // The other half of the trade: once a server has missed several whole
-        // fills, its undelivered remainder must stop counting, or the grid keeps
-        // placeholder slots for items that are never coming.
+    func testAScrollBurstDuringAnOutageDoesNotShrinkTheGrid() async throws {
+        // One scroll gesture fans out into a burst of page requests (the browse
+        // view model prefetches several pages ahead), and during an outage each
+        // fails instantly — so a purely count-based departure latch would trip in
+        // milliseconds and tear the grid down. Departure needs a clock too.
         let (provider, flaky) = flakyPair()
+        let first = try await page(provider, start: 0, limit: 20)
+        let establishedTotal = first.totalCount
+
+        flaky.alwaysFail = true
+        var latest = first
+        for _ in 0..<6 {
+            latest = try await page(provider, start: first.items.count, limit: 20)
+        }
+        XCTAssertEqual(
+            latest.totalCount, establishedTotal,
+            "a burst of failed fills inside the grace period must not resize the grid"
+        )
+    }
+
+    func testASourceThatDiesForGoodStopsInflatingTheTotal() async throws {
+        // The other half of the trade: once a server has been silent for several
+        // whole fills AND long enough to mean it, its undelivered remainder must
+        // stop counting, or the grid keeps placeholder slots for items that are
+        // never coming. Zero grace so the test doesn't have to wait.
+        let (provider, flaky) = flakyPair(departureGrace: 0)
         let first = try await page(provider, start: 0, limit: 20)
         let establishedTotal = first.totalCount
 

@@ -225,8 +225,23 @@ public struct IncrementalMediaItemMerger {
 
         let slot: Int
         if let target = candidates.min() {
-            for candidate in candidates where candidate != target {
-                union(target, candidate)
+            // Fusing two EXISTING clusters removes a card, which shortens the
+            // collection and slides every later index down. Before anything has
+            // been handed out that is just the merge doing its job; afterwards the
+            // caller owns those indices — the grid addresses cards by index and
+            // never re-reads a page it has stored, so a fuse would show one title
+            // twice and skip another on screen.
+            //
+            // So after exposure the output becomes strictly append-only: a new item
+            // still JOINS the earliest cluster it matches (that only enriches the
+            // card already at that index), but two clusters that were separate when
+            // the caller last looked stay separate. They were already showing as two
+            // cards; leaving them that way is the honest, stable outcome, and the
+            // next time the grid is opened they merge from the start.
+            if !hasExposedItems {
+                for candidate in candidates where candidate != target {
+                    union(target, candidate)
+                }
             }
             slot = find(target)
             // Ordinals only ever increase, so the newest member always belongs last.

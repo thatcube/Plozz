@@ -438,6 +438,30 @@ struct MainTabView: View {
         )
     }
 
+    /// Folds a discovery result into what the rail already knew, **per account**.
+    ///
+    /// Discovery is a whole-household fan-out, and a single unreachable server
+    /// comes back as "that account contributed nothing" — indistinguishable, in the
+    /// merged result, from "that account has no libraries". Replacing the rail
+    /// wholesale on a partial answer therefore deletes the unreachable server's
+    /// rows, and because the rail persists its pruned selection, a two-second
+    /// outage would permanently forget the library the viewer had chosen.
+    ///
+    /// So an account that answered is authoritative for its own libraries (removals
+    /// included), and an account that did not answer keeps what it had. A library
+    /// only leaves the rail when its own server says it is gone.
+    static func reconcileRailLibraries(
+        discovered: [AggregatedLibrary],
+        unreachableAccountIDs: Set<String>,
+        remembered: [AggregatedLibrary]
+    ) -> [AggregatedLibrary] {
+        guard !unreachableAccountIDs.isEmpty else { return discovered }
+        let carriedOver = remembered.filter { unreachableAccountIDs.contains($0.accountID) }
+        guard !carriedOver.isEmpty else { return discovered }
+        var seen: Set<String> = []
+        return (discovered + carriedOver).filter { seen.insert($0.key).inserted }
+    }
+
     /// Re-runs library discovery for the rail when the signed-in accounts or the
     /// per-profile library switches change.
     private var railLibrariesKey: String {
@@ -752,12 +776,15 @@ struct MainTabView: View {
             // reconciles it with what the servers actually have.
             let discovered = await discovery.libraryDiscovery(from: currentAccounts())
             guard !Task.isCancelled else { return }
-            // An account that failed to answer contributes nothing this pass; keep
-            // the remembered set rather than blanking the chrome on a blip.
-            guard !discovered.libraries.isEmpty || discovered.unreachableAccountIDs.isEmpty else { return }
-            railLibraries = discovered.libraries
+            let reconciled = Self.reconcileRailLibraries(
+                discovered: discovered.libraries,
+                unreachableAccountIDs: discovered.unreachableAccountIDs,
+                remembered: railLibraries
+            )
+            guard !reconciled.isEmpty || discovered.unreachableAccountIDs.isEmpty else { return }
+            railLibraries = reconciled
             railLibrariesLoaded = true
-            navigationLibrariesSnapshotStore.save(discovered.libraries)
+            navigationLibrariesSnapshotStore.save(reconciled)
         }
     }
 

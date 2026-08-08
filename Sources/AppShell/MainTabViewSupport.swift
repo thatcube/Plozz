@@ -631,10 +631,14 @@ func allLibrariesSourceSignature(_ libraries: [AggregatedLibrary]) -> String {
 /// The same signature for ONE library, so a single-library grid also rebuilds when
 /// its cross-server source set changes.
 func librarySourceSignature(_ library: MediaLibrary) -> String {
-    library.allSourceAccountIDs
+    // The KIND is part of it too: `LibraryBrowseViewModel` captures it once as
+    // `containerKind` and pages with it forever, so a library whose kind is
+    // re-classified under the same id would keep being asked for the old one.
+    let sources = library.allSourceAccountIDs
         .map { "\($0)/\(library.containerID(forSourceAccountID: $0) ?? "")" }
         .sorted()
         .joined(separator: ",")
+    return "\(library.kind.rawValue)|\(sources)"
 }
 
 /// Retargets a cross-server-merged card to the **locality-best** copy before it

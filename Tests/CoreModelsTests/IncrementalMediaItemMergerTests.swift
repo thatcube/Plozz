@@ -267,9 +267,11 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["p1", "x1"], "arrival order survives the re-fold")
     }
 
-    func testIndexGrowthIsFoldedInEvenWhenNoFurtherBatchArrives() {
-        // A drained grid never appends again, so the reconcile has to also fire on
-        // the read path — otherwise the index's late link is never applied.
+    func testIndexGrowthIsNotFoldedInOnTheReadPath() {
+        // The re-fold is bound to `append` on purpose: collapsing two cards shifts
+        // every index after them, and the paged grid addresses items by index and
+        // never re-reads a stored page. Doing it on a read would move items under
+        // already-painted cells. A drained grid therefore keeps what it had.
         final class Index: @unchecked Sendable {
             var revision = 0
             var linked = false
@@ -292,8 +294,12 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
         index.linked = true
         index.revision += 1
         // No further append — just a read, as a fully-drained grid would do.
-        XCTAssertEqual(merger.count, 1)
-        XCTAssertEqual(merger.mergedItems().map(\.id), ["p1"])
+        XCTAssertEqual(merger.count, 2, "indices stay put under a grid that has stopped loading")
+
+        // The very next batch does fold it in, because then the caller is writing
+        // a page anyway.
+        merger.append([item("x1", title: "Arrival", year: 2016, account: "plex")])
+        XCTAssertEqual(merger.mergedItems().map(\.id), ["p1", "x1"])
     }
 
     func testUnchangedIndexRevisionDoesNotRefold() {

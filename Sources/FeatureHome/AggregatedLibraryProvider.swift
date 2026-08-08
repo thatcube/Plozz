@@ -78,15 +78,6 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         var offsets: [String: Int] = [:]
         var totals: [String: Int] = [:]
         var exhausted: Set<String> = []
-        /// Consecutive fills in which a source answered with nothing at all. Used
-        /// to tell a blip apart from a server that is simply down — see
-        /// ``hasSourceWithUnknownTotal(sourceIDs:)``.
-        private var silentFills: [String: Int] = [:]
-
-        /// How many fills a never-yet-answering source is given before the grid
-        /// stops holding a slot open for it. One retry is enough to cover a blip;
-        /// more would leave a placeholder on screen for a server that is down.
-        private static let optimisticRetryLimit = 2
 
         /// The stateful cross-server merge. Folding each batch in (rather than
         /// re-merging everything every page) is what keeps a deep scroll linear:
@@ -100,35 +91,56 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         private var fillInProgress = false
         private var fillWaiters: [CheckedContinuation<Void, Never>] = []
 
+        /// Rebuilds a merger with this session's identity seams — used at init and
+        /// whenever the sort changes and the accumulated merge has to be discarded.
+        private let makeMerger: () -> IncrementalMediaItemMerger
+
         init(
             serverInfo: [String: SourceServerInfo],
             identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
             identityRevision: @escaping @Sendable () -> Int
         ) {
-            self.merger = IncrementalMediaItemMerger(
-                serverInfo: { serverInfo[$0] },
-                identitySources: identitySources,
-                identityRevision: identityRevision
-            )
+            let make = {
+                IncrementalMediaItemMerger(
+                    serverInfo: { serverInfo[$0] },
+                    identitySources: identitySources,
+                    identityRevision: identityRevision
+                )
+            }
+            self.makeMerger = make
+            self.merger = make()
         }
+
+        /// The sort every piece of retained state was fetched under. All paging
+        /// state — offsets, buffers, exhaustion, totals and the running merge — is
+        /// only meaningful for ONE ordering, so a changed sort has to throw it away.
+        private var activeSort: CoreModels.SortDescriptor?
 
         func initialize(with sourceIDs: [String]) {
             guard offsets.isEmpty else { return }
             for id in sourceIDs { offsets[id] = 0 }
         }
 
+        /// Resets everything when the caller asks for a different ordering.
+        ///
+        /// `LibraryBrowseViewModel.setSort` reloads from index 0 against the SAME
+        /// provider instance, so without this the aggregate would answer the new
+        /// sort out of a buffer built for the old one — a sort menu that appears to
+        /// do nothing, or worse, silently mixes two orderings.
+        func prepare(for sort: CoreModels.SortDescriptor, sourceIDs: [String]) {
+            guard activeSort != sort else { return }
+            activeSort = sort
+            offsets = Dictionary(uniqueKeysWithValues: sourceIDs.map { ($0, 0) })
+            totals.removeAll()
+            exhausted.removeAll()
+            pending.removeAll()
+            merger = makeMerger()
+        }
+
         func offset(for sourceKey: String) -> Int { offsets[sourceKey] ?? 0 }
         func setOffset(_ offset: Int, for sourceKey: String) { offsets[sourceKey] = offset }
         func setTotal(_ total: Int, for sourceKey: String) { totals[sourceKey] = total }
         func markExhausted(_ sourceKey: String) { exhausted.insert(sourceKey) }
-        /// Records one fill's per-source outcome: an answering source resets its
-        /// silence, a silent live one accrues it.
-        func recordFillOutcome(answered: Set<String>, silent: Set<String>) {
-            for key in answered { silentFills[key] = 0 }
-            for key in silent where !exhausted.contains(key) {
-                silentFills[key, default: 0] += 1
-            }
-        }
         func isExhausted(_ sourceKey: String) -> Bool { exhausted.contains(sourceKey) }
         func mergedCount() -> Int { merger.count }
         func mergedSlice(from start: Int, limit: Int) -> [MediaItem] {
@@ -234,21 +246,6 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
 
         func totalUpperBound() -> Int { totals.values.reduce(0, +) }
 
-        /// Whether any source is still live, has never reported a total, and hasn't
-        /// yet used up its retries — i.e. might still have something to contribute.
-        ///
-        /// Such a source adds nothing to the optimistic upper bound (it has answered
-        /// nothing), so without this the grid would size itself to exactly what is
-        /// loaded and never ask again. The retry limit is what stops the opposite
-        /// failure: a server that is genuinely down must not leave a placeholder
-        /// cell on screen forever.
-        func hasSourceWithUnknownTotal(sourceIDs: [String]) -> Bool {
-            sourceIDs.contains {
-                !exhausted.contains($0)
-                    && totals[$0] == nil
-                    && (silentFills[$0] ?? 0) < Self.optimisticRetryLimit
-            }
-        }
         func allExhausted(sourceIDs: [String]) -> Bool {
             sourceIDs.allSatisfy { exhausted.contains($0) }
         }
@@ -344,6 +341,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         let sourceIDs = sources.map(\.sourceKey)
         await cache.initialize(with: sourceIDs)
+
         let targetCount = page.startIndex + page.limit
         let t0 = Date()
         var fetchMs = 0
@@ -362,11 +360,13 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         // control flow staying the way it is today.
         await cache.acquireFill()
         defer { Task { [cache] in await cache.releaseFill() } }
+        // A changed sort invalidates every buffered page and the whole running
+        // merge. Done inside the gate, so a concurrent prefetch can never observe
+        // a half-reset cache or fold a page fetched under the old ordering.
+        await cache.prepare(for: page.sort, sourceIDs: sourceIDs)
         /// Sources that have used up their in-fill retries and are being emitted
         /// past. Scoped per call so a blip never persists into the next request.
         var stalled: Set<String> = []
-        /// Sources that produced at least one item during this call.
-        var answered: Set<String> = []
         /// Consecutive silent attempts per source WITHIN this fill.
         var silentAttempts: [String: Int] = [:]
         while await cache.mergedCount() < targetCount {
@@ -393,7 +393,6 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
                 // A hungry source that answered with nothing is either offline or
                 // erroring. Don't let it hold the ordered frontier hostage this
                 // call; it stays un-exhausted, so the next page retries it.
-                answered.formUnion(produced)
                 for key in produced { silentAttempts[key] = 0 }
                 for key in hungry where !produced.contains(key) {
                     silentAttempts[key, default: 0] += 1
@@ -427,35 +426,23 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             }
             if !progressed, !retryable { break }
         }
-        // Silence is counted per CALL, not per loop iteration: one fill retries a
-        // hungry source a couple of times, and counting each of those would exhaust
-        // the cross-call optimism budget before the grid ever got a chance to ask
-        // again.
-        await cache.recordFillOutcome(answered: answered, silent: stalled.subtracting(answered))
-
         let mergedCount = await cache.mergedCount()
         // Only the requested window is materialized — a deep scroll never copies the
         // whole accumulated buffer just to hand back 60 cards.
         let pageItems = await cache.mergedSlice(from: page.startIndex, limit: page.limit)
         let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
         let upperBound = await cache.totalUpperBound()
-        let hasUnknownSource = await cache.hasSourceWithUnknownTotal(sourceIDs: sourceIDs)
-
         // Until every source is drained the true post-merge total is unknown;
         // report an optimistic upper bound (sum of per-server totals) so the grid
         // keeps requesting pages, then settle on the exact merged count.
         //
-        // The `hasUnknownSource` term is what keeps a *stalled* server recoverable.
-        // A source that never answered contributes no total, so the upper bound can
-        // equal what is already merged — the grid would then size itself to exactly
-        // the loaded items and never ask again, stranding that server's titles for
-        // the life of the screen. Claiming one more page keeps the grid pulling, and
-        // costs nothing lasting: if the retry also comes back empty this returns to
-        // the exact merged count on the very next call and the slots go away.
-        var totalCount = allExhausted ? mergedCount : max(mergedCount, upperBound)
-        if !allExhausted, hasUnknownSource, totalCount <= mergedCount {
-            totalCount = mergedCount + 1
-        }
+        // Deliberately NOT padded to keep an unreachable server's slot open. The
+        // grid marks a page loaded once it has been served, whatever it contained,
+        // so a padded total would render as a permanently empty cell that can never
+        // ask again — a visible defect traded for an invisible one. A server that
+        // is down when the grid opens simply contributes nothing until the screen
+        // is opened again, which is what the single-library browse has always done.
+        let totalCount = allExhausted ? mergedCount : max(mergedCount, upperBound)
 
         if ProcessInfo.processInfo.environment["PLZXPAGE"] == "1" {
             let totalMs = Int(Date().timeIntervalSince(t0) * 1000)

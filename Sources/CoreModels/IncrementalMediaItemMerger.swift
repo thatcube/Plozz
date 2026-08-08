@@ -142,6 +142,16 @@ public struct IncrementalMediaItemMerger {
     /// reuses the same insertion path — no second, subtly-different merge rule to
     /// keep in sync. It costs one linear pass, and only when the index actually
     /// grew (a handful of times per session as accounts warm), not per page.
+    ///
+    /// Called from ``append(_:)`` **only**, never from the read path, and that is a
+    /// deliberate limit rather than an oversight. Collapsing two cards shortens the
+    /// collection, which shifts every index after them — and the paged grid above
+    /// addresses items *by index* and never re-reads a page it has already stored.
+    /// Re-folding while a page is being served is safe because the caller is about
+    /// to write that page anyway; re-folding under a grid that has finished loading
+    /// would silently move items beneath already-painted cells. So a grid that has
+    /// fully drained keeps whatever duplicates existed when it drained, and picks up
+    /// the index's later knowledge the next time it is opened.
     private mutating func reconcileIfIndexChanged() {
         let revision = identityRevision()
         guard revision != lastIdentityRevision else { return }
@@ -290,12 +300,6 @@ public struct IncrementalMediaItemMerger {
     // MARK: - Output
 
     private mutating func flattenIfNeeded() {
-        // Also checked on the READ path, not just on append. Once every source is
-        // drained no further batch arrives, so an index publish after that point
-        // would otherwise never be folded in — and that is exactly the case the
-        // revision signal exists for. Guarded by a plain integer compare, so a
-        // read with an unchanged index costs one closure call.
-        reconcileIfIndexChanged()
         guard isFlattenedStale else { return }
         var output: [MediaItem] = []
         output.reserveCapacity(flattened.count + 32)

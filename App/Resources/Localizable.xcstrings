@@ -23584,6 +23584,9 @@
         }
       }
     },
+    "A slim left rail with your libraries, horizontal tabs across the top, or the system sidebar." : {
+
+    },
     "A username, password, or token requires a secure (https://) address." : {
       "localizations" : {
         "ar" : {
@@ -61416,6 +61419,9 @@
         }
       }
     },
+    "Choose which libraries appear in the navigation, and the order they appear in." : {
+
+    },
     "Choose which media sources each profile uses" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -93271,6 +93277,7 @@
     },
     "Disabled providers" : {
       "comment" : "Accessibility label for the divider area that holds disabled metadata providers in the priority editor.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -133184,6 +133191,7 @@
       }
     },
     "Horizontal tabs across the top, or a collapsible left sidebar." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -157770,6 +157778,7 @@
       }
     },
     "Move a provider here to stop using it." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -161297,6 +161306,9 @@
           }
         }
       }
+    },
+    "Navigation Libraries" : {
+
     },
     "Nearby servers" : {
       "comment" : "Heading above the discovered local Jellyfin or Emby server list on the iOS/iPadOS Add Server screen.",
@@ -365192,6 +365204,42 @@
         }
       }
     },
+    "allLibraries.empty.message" : {
+      "comment" : "Guidance under the empty state of the combined All Libraries grid.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn on a server or a library in Settings to see everything here."
+          }
+        }
+      }
+    },
+    "allLibraries.empty.title" : {
+      "comment" : "Shown when the combined All Libraries grid has no libraries to page.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Nothing to browse"
+          }
+        }
+      }
+    },
+    "allLibraries.title" : {
+      "comment" : "Title of the grid that browses every library at once.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "All Libraries"
+          }
+        }
+      }
+    },
     "auto" : {
       "comment" : "Subtitle track qualifier appended when the shown language was guessed from the file's content rather than tagged by the provider.",
       "localizations" : {
@@ -386067,6 +386115,42 @@
         }
       }
     },
+    "metadataProviders.disabledDivider" : {
+      "comment" : "Divider in the metadata-providers list; providers below it are turned off.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Disabled"
+          }
+        }
+      }
+    },
+    "metadataProviders.disabledPlaceholder" : {
+      "comment" : "Empty-state drop target shown under the Disabled divider on iPhone/iPad.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Drag a provider here to turn it off"
+          }
+        }
+      }
+    },
+    "metadataProviders.disabledPlaceholder.tv" : {
+      "comment" : "Empty-state drop target shown under the Disabled divider on Apple TV.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Move a provider here to stop using it."
+          }
+        }
+      }
+    },
     "music.transport.repeatAll" : {
       "comment" : "Transient confirmation after setting music to repeat the full queue.",
       "extractionState" : "extracted_with_value",
@@ -388119,6 +388203,186 @@
         }
       }
     },
+    "navigationLibraries.footnote" : {
+      "comment" : "Explains that hiding a library from the navigation is not the same as turning it off.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hiding a library here only removes it from the navigation. It stays on Home and in Search. To turn a library off everywhere, use Your Libraries."
+          }
+        }
+      }
+    },
+    "navigationLibraries.hiddenDivider" : {
+      "comment" : "Divider in the navigation-libraries list; libraries below it are not shown in the navigation.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hidden"
+          }
+        }
+      }
+    },
+    "navigationLibraries.hiddenPlaceholder" : {
+      "comment" : "Empty-state drop target under the Hidden divider.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Move a library here to keep it out of the navigation."
+          }
+        }
+      }
+    },
+    "navigationLibraries.none" : {
+      "comment" : "Shown when the household has no libraries to arrange.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No libraries yet. Add a server to see them here."
+          }
+        }
+      }
+    },
+    "navigationLibraries.reset" : {
+      "comment" : "Button that restores the default navigation arrangement.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show Every Library"
+          }
+        }
+      }
+    },
+    "navigationLibraries.unavailable" : {
+      "comment" : "Shown when library discovery failed while arranging the navigation.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn't reach your servers. Your arrangement is safe — try again in a moment."
+          }
+        }
+      }
+    },
+    "navigationRail.accessibilityLabel" : {
+      "comment" : "VoiceOver label for the app's left navigation rail.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Navigation"
+          }
+        }
+      }
+    },
+    "navigationRail.allLibraries" : {
+      "comment" : "Navigation destination that browses every library at once.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "All Libraries"
+          }
+        }
+      }
+    },
+    "navigationRail.home" : {
+      "comment" : "Navigation rail destination.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Home"
+          }
+        }
+      }
+    },
+    "navigationRail.librariesHeader" : {
+      "comment" : "Heading above the list of libraries in the navigation rail.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Libraries"
+          }
+        }
+      }
+    },
+    "navigationRail.music" : {
+      "comment" : "Navigation rail destination.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Music"
+          }
+        }
+      }
+    },
+    "navigationRail.search" : {
+      "comment" : "Navigation rail destination.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Search"
+          }
+        }
+      }
+    },
+    "navigationRail.settings" : {
+      "comment" : "Navigation rail destination.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Settings"
+          }
+        }
+      }
+    },
+    "navigationRail.switchProfile" : {
+      "comment" : "Subtitle under the profile name in the navigation rail.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Switch profile"
+          }
+        }
+      }
+    },
+    "navigationStyle.detail.rail" : {
+      "comment" : "One-line explanation shown under the navigation-style picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Your libraries in a slim left rail that expands on focus and steps aside on a title page."
+          }
+        }
+      }
+    },
     "navigationStyle.detail.sidebar" : {
       "comment" : "One-line explanation shown under the navigation-style picker.",
       "extractionState" : "extracted_with_value",
@@ -388571,6 +388835,18 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "分頁列橫跨於每個頁面的頂端。"
+          }
+        }
+      }
+    },
+    "navigationStyle.rail" : {
+      "comment" : "Navigation layout option in Settings > Appearance.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Library Rail"
           }
         }
       }

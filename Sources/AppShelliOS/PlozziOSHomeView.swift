@@ -1803,13 +1803,18 @@ struct PlozziOSScreenshotRouter: View {
             director.navigateToLibrary?(route)
             await director.awaitArrival(after: checkpoint)
 
-        case let .play(title, seconds):
+        case let .play(title, seconds, pause):
             guard let item = await find(title) else { return notFound }
             await popToRoot()
             // Starting partway in is what puts real progress in the scrubber and
             // real artwork behind the overlay — a shot taken at 0:00 is a black
             // frame under a full-width empty bar.
+            PlozziOSScreenshotSeed.pausesPlayback = pause
+            PlozziOSScreenshotSeed.pendingPlayerSeek = pause ? seconds : nil
             director.startPlayback?(item, seconds)
+
+        case let .rotate(landscape):
+            await rotate(landscape: landscape)
 
         case let .probe(title):
             var found: [String] = []
@@ -1824,6 +1829,34 @@ struct PlozziOSScreenshotRouter: View {
     }
 
     private var notFound: String { PlozziOSScreenshotDirector.Outcome.notFound.rawValue }
+
+    /// Rotates the device.
+    ///
+    /// `XCUIDevice.orientation` is the documented way to do this and needs a UI
+    /// test running alongside the app — the machinery this capture rig exists to
+    /// avoid. `requestGeometryUpdate` asks for the same thing from inside the
+    /// app, which is all that is wanted here: the app already declares every
+    /// orientation, so nothing is being forced that a user could not do by
+    /// turning the device.
+    ///
+    /// This is what makes a landscape iPad shot possible at all. `simctl` cannot
+    /// rotate a simulator, so before this the iPad captures were portrait — the
+    /// player among them, which in portrait is a small strip of video adrift in
+    /// a lot of black.
+    @MainActor
+    private func rotate(landscape: Bool) async {
+        #if canImport(UIKit)
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        for scene in scenes {
+            scene.requestGeometryUpdate(
+                .iOS(interfaceOrientations: landscape ? .landscapeRight : .portrait)
+            )
+        }
+        // The rotation animates, and the ack is what the host waits on before it
+        // screenshots — returning early photographs the turn.
+        try? await Task.sleep(for: .milliseconds(1200))
+        #endif
+    }
 
     /// Brings the Home tab forward, dismisses the player, and empties the stack,
     /// then lets them all land.

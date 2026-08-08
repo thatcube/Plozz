@@ -339,6 +339,31 @@ struct PlayerControls: View {
         // is nil for Info, so this can't fire for — or retime — the Info reveal.
         .animation(.easeInOut(duration: 0.2), value: optionsPanel)
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipGesture.hintVisible)
+        .task {
+            // The capture rig asking for a panel it cannot reach without the
+            // remote. Set before the player was built, so one read is enough —
+            // see `PlayerScreenshotHook`.
+            guard let panel = PlayerScreenshotHook.pendingPanel else { return }
+            PlayerScreenshotHook.pendingPanel = nil
+            switch panel {
+            case .subtitleStyle:
+                model.controlsVisible = true
+                model.isPanelOpen = true
+                openPanel = .subtitles
+                // A turn later, because opening a panel resets the subtitle
+                // sub-screen to the track list — setting both together lands the
+                // reset *after* the write and photographs the track list.
+                try? await Task.sleep(for: .milliseconds(400))
+                openSubtitleScreen(.style)
+                // Pinned so two runs photograph the same panel. Without it the
+                // focus engine had settled on the first row by the time some
+                // runs were captured and not others, and a focus highlight is a
+                // full-width white bar — the one thing still differing between
+                // otherwise identical frames.
+                try? await Task.sleep(for: .milliseconds(600))
+                focus = .row(0)
+            }
+        }
         .onChange(of: model.controlBarVisible) { _, focused in
             titleVisible = true
             guard focused else {

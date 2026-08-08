@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import FeaturePlayback
 import Foundation
 import Observation
 import SwiftUI
@@ -180,8 +181,11 @@ final class PlozziOSScreenshotDirector {
         /// Answered in the ack, so the shot list can be written against the names
         /// the library really has rather than the ones it ought to.
         case probe(title: String)
-        /// Play the best match of `title`, starting `seconds` in.
-        case play(title: String, seconds: Double)
+        /// Play the best match of `title`, starting `seconds` in, optionally
+        /// pausing so the frame is the same on every run.
+        case play(title: String, seconds: Double, pause: Bool)
+        /// Rotate the device. `landscape` or `portrait`.
+        case rotate(landscape: Bool)
     }
 
     // MARK: URL
@@ -218,7 +222,13 @@ final class PlozziOSScreenshotDirector {
             request = .probe(title: title)
         case "play":
             guard let title = query("title") else { return false }
-            request = .play(title: title, seconds: query("at").flatMap(Double.init) ?? 0)
+            request = .play(
+                title: title,
+                seconds: query("at").flatMap(Double.init) ?? 0,
+                pause: query("pause") == "1"
+            )
+        case "rotate":
+            request = .rotate(landscape: query("to") == "landscape")
         case "tab":
             guard let name = query("name") else { return false }
             tab = name
@@ -328,6 +338,53 @@ enum PlozziOSScreenshotSeed {
             && environment["PLOZZ_SHOTS_HOLD_CONTROLS"] == "1"
         #else
         return false
+        #endif
+    }
+
+    /// Whether the *current* play request should park on an exact frame, and
+    /// which one. Set by the router that performed the request and consumed by
+    /// the player it started. See the tvOS `ScreenshotSeed` for why this is
+    /// stored rather than passed.
+    @MainActor
+    static var pausesPlayback = false
+
+    @MainActor
+    static var pendingPlayerSeek: TimeInterval?
+
+    /// Waits for playback to genuinely be up, then parks it on an exact frame.
+    ///
+    /// The order matters and both halves were learned the hard way. Pausing on a
+    /// timer paused whatever was on screen at that moment, and what was on
+    /// screen was often still the bring-up spinner — so the shot came back with
+    /// a loading message across the middle of it, permanently, because a paused
+    /// player never finishes loading. And even once playing, the frame reached
+    /// after a fixed wait moves with however long the file took to buffer, so
+    /// two runs never produced the same picture.
+    @MainActor
+    static func freezeIfRequested(_ viewModel: PlayerViewModel?) {
+        #if DEBUG
+        guard pausesPlayback, let viewModel else { return }
+        pausesPlayback = false
+        let target = pendingPlayerSeek
+        pendingPlayerSeek = nil
+
+        Task { @MainActor in
+            for _ in 0..<120 {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !viewModel.showBringUpSpinner else { continue }
+                try? await Task.sleep(for: .seconds(2))
+                break
+            }
+            if let target { await viewModel.seek(to: target) }
+            // The seek re-arms the spinner briefly. Let it clear again, or the
+            // pause lands back on a loading frame.
+            for _ in 0..<80 {
+                try? await Task.sleep(for: .milliseconds(250))
+                if !viewModel.showBringUpSpinner { break }
+            }
+            try? await Task.sleep(for: .milliseconds(750))
+            if !viewModel.controls.isPaused { viewModel.togglePlayPause() }
+        }
         #endif
     }
 }

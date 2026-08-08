@@ -64,11 +64,28 @@ const TOKENS = {
 };
 
 /**
- * Each panel is a capture plus the one thing that panel is there to say.
+ * Each panel is a capture plus the one thing that panel is there to say, and
+ * optionally where to crop it from.
  *
  * The lines are deliberately flat statements of fact rather than slogans. The
  * app's whole pitch is that it plays what you already own without asking for an
  * account, and that reads as more credible unadorned.
+ *
+ * Nothing is cropped by default: the whole capture is shown at its own aspect
+ * ratio and the panel takes the leftover as margin. On Apple TV that is margin
+ * down the left and right, because a 16:9 capture in a 16:9 panel has to give
+ * up width once the caption has taken height.
+ *
+ * Cropping was tried and is worse. Every screen turned out to have something
+ * worth keeping at an edge — the player's transport bar sits along the bottom,
+ * the subtitle style editor has its title at the top AND the caption it is
+ * restyling at the bottom — so each panel needed its own exception and the ones
+ * that got it wrong lost the only piece of UI in the shot. Margin costs nothing
+ * by comparison, and it is nearly invisible here anyway: the page behind it is
+ * the same near-black as the app's own chrome.
+ *
+ * A panel may still opt into a crop with a third field (`top` / `bottom` /
+ * `center`) where that genuinely reads better.
  */
 const PLATFORMS = {
   tv: {
@@ -139,24 +156,29 @@ const OUT = outIndex === -1
  * A quiet margin also reads as deliberate at thumbnail size, which is the size
  * that decides whether anyone taps.
  */
-function page({ width, height, orientation, image, caption, capture }) {
+function page({ width, height, orientation, image, caption, anchor, capture }) {
   const landscape = orientation === 'landscape';
   // Proportional so one stylesheet serves a 3840px TV panel and a 1320px phone.
   const pad = Math.round(width * (landscape ? 0.055 : 0.07));
   const titleSize = Math.round(width * (landscape ? 0.036 : 0.062));
   const radius = Math.round(width * (landscape ? 0.014 : 0.035));
 
-  // A 16:9 capture laid out at 100% of a 3840px panel's content width is 1923px
-  // tall, which together with the caption overflows a 2160px panel — and
-  // `overflow: hidden` then silently cropped the bottom two thirds of every
-  // landscape shot rather than failing. So the frame is fitted to whatever the
-  // caption leaves.
+  // The frame takes whatever the caption leaves, and the capture *crops* to
+  // fill it rather than being scaled to fit.
   //
-  // Fitted by the browser, not computed here: computing it meant guessing how
-  // many lines the caption would wrap to, and one caption that guessed high
-  // ("Plex, Jellyfin, Emby, SMB, NFS, WebDAV, SFTP, FTP") shrank its panel's
-  // frame to noticeably smaller than every other panel's. `aspect-ratio` with
-  // both a max width and a max height is the same fit without the guess.
+  // Fitting was the obvious thing and it was wrong twice. Sizing the frame by
+  // `width: 100%` plus `max-height: 100%` looks like it preserves the aspect
+  // ratio and does not: once the height clamp bites, the box is no longer the
+  // ratio it was asked for and the image inside stretches — which is why the
+  // phone panels had a visibly squashed poster. Computing the frame's height
+  // here instead meant guessing how many lines the caption would wrap to, and a
+  // long caption that guessed high shrank its panel's frame well below every
+  // other panel's.
+  //
+  // Cropping sidesteps both. `object-fit: cover` cannot distort, whatever shape
+  // the box ends up, and losing an edge of a screenshot costs nothing — the
+  // bottom of a shelf reading as "there is more below" is arguably better than
+  // a shrunken full screen floating in padding.
   const gap = Math.round(pad * 0.85);
   const aspect = `${capture.width} / ${capture.height}`;
 
@@ -200,12 +222,20 @@ function page({ width, height, orientation, image, caption, capture }) {
     max-width: ${Math.round(width * 0.9)}px;
   }
   figure {
+    /* The frame takes the CAPTURE's shape, not the cell's, so the border and
+       shadow hug the screenshot instead of standing off it with black bars
+       inside them.
+       Height-led with width derived: the caption always takes height, so height
+       is the constrained axis and width is what is left over. A width of 100%
+       here is what caused the original squashing: it forces the width, and the
+       height clamp then breaks the ratio the box was asked for. */
+    height: 100%;
+    width: auto;
     aspect-ratio: ${aspect};
-    width: 100%;
     max-width: 100%;
-    max-height: 100%;
     margin: auto;
     border-radius: ${radius}px;
+    background: #000;
     overflow: hidden;
     border: ${Math.max(2, Math.round(width * 0.0012))}px solid ${TOKENS.border};
     /* Lifts the capture off a background that is nearly the same black as the
@@ -215,7 +245,14 @@ function page({ width, height, orientation, image, caption, capture }) {
       0 0 ${Math.round(width * 0.09)}px ${TOKENS.brand}1c;
     line-height: 0;
   }
-  img { width: 100%; height: 100%; display: block; }
+  img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    /* Never distorts. Crops, or letterboxes when nothing can be lost. */
+    object-fit: ${anchor === 'fit' ? 'contain' : 'cover'};
+    object-position: ${anchor === 'fit' ? 'center' : anchor} center;
+  }
 </style>
 <h1>${caption}</h1>
 <figure><img src="${image}"></figure>
@@ -277,7 +314,7 @@ async function main() {
     await mkdir(dir, { recursive: true });
 
     let index = 0;
-    for (const [name, caption] of found) {
+    for (const [name, caption, anchor = 'fit'] of found) {
       index += 1;
       const stem = `${String(index).padStart(2, '0')}-${name.replace(/^plozz-/, '')}`;
       const html = path.join(dir, `${stem}.html`);
@@ -297,6 +334,7 @@ async function main() {
           orientation: platform.orientation,
           image: capturePath,
           caption,
+          anchor,
           capture: { width: captureWidth, height: captureHeight },
         })
       );

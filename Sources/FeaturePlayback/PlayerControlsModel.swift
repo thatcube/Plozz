@@ -477,6 +477,7 @@ public final class PlayerControlsModel {
     /// each change, so the transport never hides out from under an active viewer.
     public var controlBarActivity: Int = 0
 
+
     // MARK: Skipping
     /// Feedback for the seek/skip gesture: the per-profile intervals and the
     /// transient ±Ns indicator.

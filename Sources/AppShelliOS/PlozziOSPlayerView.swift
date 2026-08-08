@@ -100,6 +100,7 @@ struct PlozziOSPlayerView: View {
                 item: request.item,
                 startPosition: request.startPosition
             )
+            PlozziOSScreenshotSeed.freezeIfRequested(viewModel)
         }
         .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
             guard nextID != nil,

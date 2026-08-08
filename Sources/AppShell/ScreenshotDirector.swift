@@ -145,8 +145,16 @@ public final class ScreenshotDirector {
         /// Answered in the ack, so the shot list can be written against the
         /// names the library really has rather than the ones it ought to.
         case probe(title: String)
-        /// Play the best match of `title`, starting `seconds` in.
-        case play(title: String, seconds: Double)
+        /// Play the best match of `title`, starting `seconds` in, optionally
+        /// opening one of the player's own panels once it is up and optionally
+        /// pausing so the frame is the same on every run.
+        ///
+        /// `subtitles` overrides the seeded "subtitles on" default for this one
+        /// request. The seed turns them on because the subtitle *style* editor
+        /// is meaningless photographed with nothing to style — but a shot whose
+        /// subject is the transport bar wants clean picture behind it, not a
+        /// line of dialogue competing with the title for the same corner.
+        case play(title: String, seconds: Double, panel: String?, pause: Bool, subtitles: Bool)
     }
 
     // MARK: URL
@@ -187,7 +195,13 @@ public final class ScreenshotDirector {
             request = .probe(title: title)
         case "play":
             guard let title = query("title") else { return false }
-            request = .play(title: title, seconds: query("at").flatMap(Double.init) ?? 0)
+            request = .play(
+                title: title,
+                seconds: query("at").flatMap(Double.init) ?? 0,
+                panel: query("panel"),
+                pause: query("pause") == "1",
+                subtitles: query("subs") != "0"
+            )
         case "tab":
             guard let name = query("name") else { return false }
             tab = name

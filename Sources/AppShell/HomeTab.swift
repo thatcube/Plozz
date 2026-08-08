@@ -576,9 +576,21 @@ struct HomeTab: View {
                 await popToRoot()
                 onPush(library)
 
-            case let .play(title, seconds):
+            case let .play(title, seconds, panel, pause, subtitles):
                 guard let item = await find(title) else { return notFound }
                 await popToRoot()
+                // Set before the play so the player finds it already waiting;
+                // the player is built by the request below.
+                PlayerScreenshotHook.pendingPanel =
+                    panel.flatMap(PlayerScreenshotHook.Panel.init(rawValue:))
+                ScreenshotSeed.pausesPlayback = pause
+                ScreenshotSeed.pendingPlayerSeek = pause ? seconds : nil
+                // The subtitle track is picked while the player loads, so the
+                // mode has to be settled *and observed* before the request goes
+                // out — hence the settle. Setting it in the same turn as
+                // `onPlay` handed the player the previous shot's value.
+                ScreenshotSeed.setSubtitleMode?(subtitles ? .all : .off)
+                await settlePush()
                 // Starting partway in is what puts real progress in the scrubber
                 // and real artwork behind the overlay — a shot taken at 0:00 is a
                 // black frame under a full-width empty bar.

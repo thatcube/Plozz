@@ -59,8 +59,19 @@ detail?title=Oppenheimer
 person?title=Oppenheimer&person=Cillian%20Murphy
 library?name=TV
 play?title=The%20Office&at=600
+play?title=Dune&at=1800&pause=1&subs=0        # exact frame, no burned-in caption
+play?title=The%20Office&at=420&panel=subtitleStyle&pause=1
 probe?title=Dune          # answers with the titles the library actually has
 ```
+
+The `play` verb's modifiers, in the order they usually matter:
+
+| Modifier | Effect |
+| --- | --- |
+| `at=<seconds>` | Start partway in, so the scrubber shows real progress instead of an empty bar under a black frame. |
+| `pause=1` | Wait for playback to genuinely be up, seek to `at`, then pause. This is what makes a player shot reproducible: without it the photographed frame is wherever the film drifted to while the rig waited. |
+| `subs=0` | Force subtitles off for this shot. |
+| `panel=subtitleStyle` | Open one of the player's own panels once it is up. |
 
 See `Sources/AppShell/ScreenshotDirector.swift` for tvOS and
 `Sources/AppShelliOS/PlozziOSScreenshotSeed.swift` for iPhone/iPad — the two
@@ -85,7 +96,14 @@ silently photographing whatever was still on screen.
   problem.
 - **The first run scans the whole share** (~10.5k items) and takes a long while.
   That work persists in the Simulator's container, so later runs start already
-  populated. Do **not** pass `--reset` unless you mean it.
+  populated. Do **not** pass `--reset` unless you mean it. The run waits for the
+  scan by polling `probe?title=the` until the app answers with a match — a
+  direct answer from the app that its catalog is usable.
+- **Do not wait for the Home screen to hold still.** Its hero carousel
+  cross-fades forever, so a "wait until two consecutive screenshots are
+  identical" check on Home can never succeed and always burns its entire budget.
+  The startup wait used to do exactly that, at 1800 seconds, which cost every
+  run half an hour before it took a single shot.
 - **A file share cannot be re-sorted.** `CatalogReadQueries` pages with a fixed
   `ORDER BY sort_title`, so the library grid is always alphabetical and setting
   the sort menu's stored choice changes only its label. The library shot browses
@@ -93,9 +111,18 @@ silently photographing whatever was still on screen.
   artwork and sorts before "A".
 - **The player's transport bar auto-hides**, and a file-driven run supplies no
   input to reveal it. `ScreenshotSeed.holdPlayerControlsIfRequested` holds it
-  open for a capture run; the subtitle shot deliberately waits for that hold to
-  lapse so the subtitle is photographed against the picture instead of under the
-  bar.
+  open for a capture run.
+- **Subtitles and the transport bar want the same band of the screen.** A
+  burned-in caption sits directly on top of the elapsed-time readout, so the
+  shot whose subject is the transport bar passes `subs=0` and the shot whose
+  subject is subtitles opens the style editor instead of the transport bar.
+  The seed turns subtitles *on* by default, because a shot of the subtitle
+  style editor with nothing under it shows the controls and none of what they
+  control.
+- **Image-based subtitles cannot be restyled.** A PGS track (most film rips)
+  makes the style editor answer "PGS subtitles can't be restyled", and the shot
+  comes back showing the refusal. The subtitle shot has to use a title with a
+  *text* track — a TV rip generally does.
 - **The iPad Simulator captures portrait and cannot be rotated by `simctl`.**
   The marketing site's iPad shots are landscape, so those two masters are still
   hand-captured. The site's sync tool refuses a capture whose aspect differs

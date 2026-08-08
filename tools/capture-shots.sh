@@ -77,8 +77,16 @@ TVOS_SHOTS=(
   "tv-dune|detail?title=Dune%3A%20Part%20Two"
   "tv-cast|person?title=Oppenheimer&person=Cillian%20Murphy"
   "tv-library|library?name=TV"
-  "tv-player|play?title=The%20Office&at=600|35"
-  "tv-subtitles|play?title=Oppenheimer&at=2400|75"
+  # `subs=0`: a burned-in caption lands in the same band as the transport bar and
+  # collides with the elapsed-time readout. The transport bar is the subject
+  # here, so the subtitles are turned off for this one request. An SDR 1080p
+  # source is required — 4K/Dolby Vision files render washed out in the
+  # Simulator, which does not tone-map.
+  "tv-player|play?title=Breaking%20Bad&at=1200&pause=1&subs=0|60"
+  # The style editor rather than the bare transport bar, so the caption has room
+  # of its own. Needs a *text* subtitle track: PGS (image) subtitles cannot be
+  # restyled and the panel says so instead of showing the controls.
+  "tv-subtitles|play?title=The%20Office&at=420&panel=subtitleStyle&pause=1|55"
   # Last on purpose. Switching tabs is performed by a different router than the
   # one that performs navigation, and each router acks independently — so a tab
   # request in the middle of the list would ack the *next* shot early. Nothing
@@ -138,7 +146,19 @@ case "$PLATFORM" in
     OUT="${OUT:-${PLOZZ_SHOTS_OUT:-$REPO_ROOT/build/shots}}"
     # A single device. `-4K` matters: the "(at 1080p)" variants capture at
     # 1920x1080, below what the App Store wants for Apple TV.
-    SIMS=("${SIM_OVERRIDE:-${PLOZZ_SHOTS_SIM:-Apple TV 4K (3rd generation)}}")
+    #
+    # The default is a *list* of candidates, tried in order, because the device
+    # that holds the scanned library is a hand-made one ("Plozz tvOS Sim") that
+    # only exists on a machine the rig has already run on. Falling back to the
+    # stock 4K device keeps a fresh machine working (it just has to scan first).
+    if [ -n "$SIM_OVERRIDE" ]; then
+      SIM_CANDIDATES=("$SIM_OVERRIDE")
+    elif [ -n "${PLOZZ_SHOTS_SIM:-}" ]; then
+      SIM_CANDIDATES=("$PLOZZ_SHOTS_SIM")
+    else
+      SIM_CANDIDATES=("Plozz tvOS Sim" "Apple TV 4K (3rd generation)")
+    fi
+    SIMS=("${SIM_CANDIDATES[0]}")
     ;;
   ios)
     SCHEME="PlozziOS"
@@ -179,6 +199,16 @@ for runtime, devices in data.items():
             best = d["udid"]
 print(best or "")' "$name" "$SIM_PLATFORM"
 }
+
+# tvOS: walk the candidate list and keep the first name that actually exists.
+if [ "$PLATFORM" = "tvos" ]; then
+  for candidate in "${SIM_CANDIDATES[@]}"; do
+    if [ -n "$(resolve_udid "$candidate")" ]; then
+      SIMS=("$candidate")
+      break
+    fi
+  done
+fi
 
 # ── Build ────────────────────────────────────────────────────────────────────
 # Signing must stay ON. With CODE_SIGNING_ALLOWED=NO the app ships without
@@ -291,9 +321,26 @@ capture_device() {
   mkdir -p "$channel"
   rm -f "$channel/.plozz-shots-request" "$channel/.plozz-shots-ack"
 
-  echo "Waiting for the library to finish scanning and enriching…"
-  echo "(a fresh container walks the whole share — expect a long wait)"
-  settle "$udid" "${PLOZZ_SHOTS_SETTLE:-1800}" 5 10 || true
+  # Readiness, asked rather than guessed.
+  #
+  # This used to wait for the screen to stop changing, with a 30-minute budget
+  # to cover a fresh container walking the whole share. That wait could never
+  # succeed: Home's hero carousel cross-fades forever, so no two screenshots are
+  # ever identical and *every* run paid the full 30 minutes before taking its
+  # first shot — including warm runs whose library was already scanned.
+  #
+  # `probe` asks the app to search its real libraries, so a non-empty answer is
+  # direct evidence the catalog has content. Warm runs clear this in seconds.
+  echo "Waiting for the library to be searchable…"
+  local ready=0 answer
+  for _ in $(seq 1 "${PLOZZ_SHOTS_SCAN_TRIES:-240}"); do
+    answer="$(request "$channel" "probe?title=the" || true)"
+    case "$answer" in
+      ''|notFound|timeout) sleep 5 ;;
+      *) ready=1; break ;;
+    esac
+  done
+  [ "$ready" = 1 ] || echo "  (library still answers nothing — carrying on anyway)"
 
   echo
   echo "Capturing:"
@@ -303,7 +350,18 @@ capture_device() {
 
     if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then continue; fi
 
+    # A title the library has not indexed *yet* is indistinguishable from one it
+    # does not have, and on a fresh container the enrichment pass is still
+    # running while the first shots are taken. Retrying absorbs that without
+    # reinstating a blind wait: a title that is genuinely absent costs a couple
+    # of minutes and is then reported, and a warm run never enters the loop.
     outcome="$(request "$channel" "$verb" || true)"
+    local attempt=0
+    while [ "$outcome" = "notFound" ] && [ "$attempt" -lt "${PLOZZ_SHOTS_RETRIES:-8}" ]; do
+      attempt=$((attempt + 1))
+      sleep 15
+      outcome="$(request "$channel" "$verb" || true)"
+    done
     if [ "$outcome" != "ok" ]; then
       FAILED=$((FAILED + 1))
       printf '  %-28s %s\n' "${slug:+$slug-}$name" "SKIPPED ($outcome)"

@@ -42,7 +42,54 @@ public struct HorizontalEdgeFadeMask: View {
     }
 }
 
+/// Feathers only the LEADING edge, leaving the trailing edge hard.
+///
+/// For a rail that scrolls out under fixed chrome (the navigation rail): content
+/// has to dissolve on the side it disappears, while the other side keeps the
+/// ordinary edge so nothing looks washed out for no reason.
+public struct LeadingEdgeFadeMask: View {
+    private let fadeWidth: CGFloat
+    private let verticalOverhang: CGFloat
+
+    public init(fadeWidth: CGFloat, verticalOverhang: CGFloat = 0) {
+        self.fadeWidth = fadeWidth
+        self.verticalOverhang = verticalOverhang
+    }
+
+    public var body: some View {
+        HStack(spacing: 0) {
+            // Same 24-stop smoothstep as `HorizontalEdgeFadeMask` — a two-stop
+            // linear gradient shows a visible crease and bands on a TV panel.
+            LinearGradient(
+                stops: (0 ... 24).map { step in
+                    let t = Double(step) / 24
+                    return Gradient.Stop(color: .black.opacity(t * t * (3 - 2 * t)), location: t)
+                },
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: fadeWidth)
+            Color.black
+        }
+        .padding(.vertical, -verticalOverhang)
+    }
+}
+
 public extension View {
+    /// Feathers the leading edge only. `verticalOverhang` expands the mask above
+    /// and below so a focused card's lift and shadow are not clipped by it.
+    func leadingEdgeFadeMask(
+        fadeWidth: CGFloat,
+        verticalOverhang: CGFloat = 0
+    ) -> some View {
+        mask {
+            LeadingEdgeFadeMask(
+                fadeWidth: fadeWidth,
+                verticalOverhang: verticalOverhang
+            )
+        }
+    }
+
     func horizontalEdgeFadeMask(
         fadeWidth: CGFloat,
         verticalOverhang: CGFloat = 0

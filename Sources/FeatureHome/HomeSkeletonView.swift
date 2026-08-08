@@ -99,6 +99,10 @@ struct HomeSkeletonView: View {
 /// live server data while the cached hero and stable rows are already visible.
 struct HomeSkeletonRowView: View {
     let row: HomeRowLayout
+    /// Mirrors `MediaRowView`: the navigation inset lives INSIDE the scroll
+    /// content, so the placeholder's first card lands exactly where the real one
+    /// will.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
 
     @State private var availableWidth: CGFloat = 0
     @Environment(\.plozzMetrics) private var metrics
@@ -125,7 +129,7 @@ struct HomeSkeletonRowView: View {
                     Capsule(style: .continuous)
                         .fill(palette.fill)
                         .frame(width: 220, height: 26)
-                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                        .padding(.leading, PlozzTheme.Metrics.screenPadding + navigationContentInset)
                 }
                 .shimmering()
             
@@ -143,7 +147,7 @@ struct HomeSkeletonRowView: View {
                             .frame(width: cardWidth(for: kind))
                     }
                 }
-                .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                .padding(.leading, PlozzTheme.Metrics.screenPadding + navigationContentInset)
                 .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                 .padding(.top, metrics.railTopPadding)
                 .padding(.bottom, metrics.railVerticalPadding)
@@ -221,6 +225,9 @@ struct HomeSkeletonRowView: View {
 /// title exists as a logo image or as text. Featured-only can bypass this from its
 /// curated cache; mixed/local heroes keep it until complete fresh curation.
 struct HomeHeroSkeletonView: View {
+    /// How far the navigation chrome insets page content, so the placeholder sits
+    /// exactly where the real hero column will.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
     @Environment(\.themePalette) private var palette
     /// Button pill footprint — mirrors `HomeHeroView.heroPill` (28pt label +
     /// 18pt vertical / 30pt horizontal padding, ~34pt icon box).
@@ -261,7 +268,10 @@ struct HomeHeroSkeletonView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, PlozzTheme.Metrics.screenVerticalPadding)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-        .padding(.leading, HomeHeroLayout.contentLeadingPadding)
+        // Mirrors the real hero's text column (`HomeHeroView`), which adds the same
+        // navigation inset — otherwise the hero's title/buttons visibly slide
+        // sideways the moment live content replaces the placeholder.
+        .padding(.leading, HomeHeroLayout.contentLeadingPadding + navigationContentInset)
         .padding(.bottom, HomeHeroLayout.contentBottomInset)
         // Shimmer stays on the small placeholder shapes only — never the backdrop.
         .shimmering()

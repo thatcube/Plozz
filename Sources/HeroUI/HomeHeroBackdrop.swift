@@ -148,6 +148,21 @@ public struct HomeHeroBackdrop: View {
     /// width (see `dissolveMask`).
     private var meltStart: CGFloat { isLight ? 0.38 : 0.62 }
 
+    /// Where the artwork sits in its slot.
+    ///
+    /// On tvOS the slot begins at the physical leading edge of the panel but is
+    /// slightly WIDER than the screen, so centring the fixed-width artwork split
+    /// the difference and left a black strip down the left with the same amount
+    /// spilling off-screen to the right. Leading-aligned, the artwork starts at the
+    /// panel edge — which is what full-bleed means here.
+    private var artworkAlignment: Alignment {
+        #if os(tvOS)
+        return .leading
+        #else
+        return .center
+        #endif
+    }
+
     public var body: some View {
         backdropImage
             .frame(width: width, height: height)
@@ -176,7 +191,10 @@ public struct HomeHeroBackdrop: View {
             .overlay(scrim.opacity(scrimOpacity))
             .animation(.easeOut(duration: 0.18), value: scrimOpacity)
             .mask(dissolveMask)
-            .frame(maxWidth: .infinity, alignment: .center)
+            // Leading-aligned whenever the page is inset, so the artwork's left
+            // edge is the anchor and the bleed below can carry it to the screen
+            // edge. Centre stays the default everywhere else.
+            .frame(maxWidth: .infinity, alignment: artworkAlignment)
             // The recede rise MUST be applied here, BEFORE .ignoresSafeArea().
             // An .offset() applied AFTER .ignoresSafeArea() (as this view is when
             // hosted as a `.background` on tvOS) is silently cancelled: the

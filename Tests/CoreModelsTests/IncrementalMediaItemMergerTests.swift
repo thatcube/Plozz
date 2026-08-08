@@ -319,6 +319,39 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
         XCTAssertEqual(reads, 3, "one identity lookup per inserted item, never a re-fold")
     }
 
+    func testExposedPrefixNeverMovesWhenTheSplitGuardWouldInsertACard() {
+        // A sequel scraped with its predecessor's external id joins the cluster by
+        // key but CONTRADICTS its member, so the split guard would open a second
+        // sub-group — inserting a card between "Scream 6" and "Arrival" and sliding
+        // "Arrival" down. Anything already handed out must not move.
+        var merger = IncrementalMediaItemMerger()
+        merger.append([
+            item("s6", title: "Scream 6", year: 2023, account: "plex", ids: ["tmdb": "934433"]),
+            item("ar", title: "Arrival", year: 2016, account: "plex")
+        ])
+        let exposed = merger.slice(from: 0, limit: 20).map(\.id)
+        XCTAssertEqual(exposed, ["s6", "ar"])
+
+        merger.append([
+            item("s7", title: "Scream 7", year: 2026, account: "jelly", ids: ["tmdb": "934433"])
+        ])
+        let after = merger.mergedItems().map(\.id)
+        XCTAssertEqual(
+            Array(after.prefix(exposed.count)), exposed,
+            "the exposed prefix is untouched"
+        )
+        XCTAssertEqual(after, ["s6", "ar", "s7"], "the contradicting title lands at the tail, still reachable")
+    }
+
+    func testBeforeExposureTheSplitGuardStillPartitionsExactlyLikeBatch() {
+        // The append-only rule must not weaken the pre-exposure merge.
+        let batches = [
+            [item("s6", title: "Scream 6", year: 2023, account: "plex", ids: ["tmdb": "934433"])],
+            [item("s7", title: "Scream 7", year: 2026, account: "jelly", ids: ["tmdb": "934433"])]
+        ]
+        assertMatchesBatch(batches)
+    }
+
     // MARK: Slicing
 
     func testSliceReturnsTheRequestedWindowAndClamps() {

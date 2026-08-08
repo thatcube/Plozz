@@ -224,7 +224,8 @@ public struct IncrementalMediaItemMerger {
         nextOrdinal += 1
 
         let slot: Int
-        if let target = candidates.min() {
+        if let target = candidates.min(),
+           !hasExposedItems || canJoinWithoutReshaping(item, slot: find(target)) {
             // Fusing two EXISTING clusters removes a card, which shortens the
             // collection and slides every later index down. Before anything has
             // been handed out that is just the merge doing its job; afterwards the
@@ -267,6 +268,24 @@ public struct IncrementalMediaItemMerger {
             claimsByRef[ref, default: []].append(slot)
         }
         return slot
+    }
+
+    /// Whether `item` can join the cluster at `slot` without changing how many
+    /// cards that cluster renders.
+    ///
+    /// Joining normally only enriches the card already at that index. But the
+    /// split-guard (``MediaItemMerger/refineComponent(_:)``) partitions a cluster
+    /// into mutually-plausible sub-groups, and an item that contradicts every
+    /// existing sub-group opens a NEW one — which inserts a card *in the middle* of
+    /// the collection and slides every later index down, exactly what the
+    /// append-only rule exists to prevent. (The case is real: a sequel scraped with
+    /// its predecessor's external id.) Such an item becomes its own tail cluster
+    /// instead, so it is still reachable and nothing already on screen moves.
+    private func canJoinWithoutReshaping(_ item: MediaItem, slot: Int) -> Bool {
+        let groups = MediaItemMerger.refineComponent(members[slot].map(\.item))
+        return groups.contains { group in
+            !group.contains { MediaItemMerger.plausiblyContradicts($0, item) }
+        }
     }
 
     // MARK: - Union-find over clusters

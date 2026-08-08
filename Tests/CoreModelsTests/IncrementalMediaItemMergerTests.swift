@@ -378,6 +378,85 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
         assertMatchesBatch(batches)
     }
 
+    // MARK: Differential fuzz against the batch merger
+
+    /// A deterministic linear-congruential generator, so a failure is reproducible
+    /// from the seed printed in the assertion rather than being a flake.
+    private struct SeededRandom: RandomNumberGenerator {
+        private var state: UInt64
+        init(seed: UInt64) { self.state = seed &* 6364136223846793005 &+ 1442695040888963407 }
+        mutating func next() -> UInt64 {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return state
+        }
+    }
+
+    /// Folding a page at a time must produce byte-identical cards, in byte-identical
+    /// order, with byte-identical per-card source sets, to merging the whole lot at
+    /// once — for ANY split of the input into batches.
+    ///
+    /// This is the property the whole incremental merger rests on, and the cases
+    /// that break it are combinational (which items share which of three different
+    /// key kinds, in which arrival order, with the split guard firing or not), which
+    /// is exactly what hand-written examples are bad at covering. The corpus is
+    /// adversarial on purpose: ids are shared and dropped at random, two titles
+    /// deliberately contradict while sharing an id, and kinds are mixed so the
+    /// kind-scoping guards are exercised.
+    func testIncrementalFoldMatchesBatchMergeAcrossRandomBatchSplits() {
+        let titles = ["Dune", "Arrival", "Sicario", "Scream 6", "Scream 7", "Heat"]
+        let accounts = ["plex", "jelly", "share"]
+
+        for seed in UInt64(1)...200 {
+            var rng = SeededRandom(seed: seed)
+            var corpus: [MediaItem] = []
+            for index in 0..<12 {
+                let title = titles.randomElement(using: &rng)!
+                let account = accounts.randomElement(using: &rng)!
+                // "Scream 6" and "Scream 7" share one id on purpose: that is the
+                // false-merge the split guard has to break apart again.
+                let sharesBadID = title.hasPrefix("Scream")
+                var ids: [String: String] = [:]
+                if Bool.random(using: &rng) {
+                    ids["tmdb"] = sharesBadID ? "934433" : "id-\(title)"
+                }
+                if Bool.random(using: &rng) {
+                    ids["imdb"] = "tt-\(title)"
+                }
+                corpus.append(
+                    item(
+                        "i\(index)",
+                        title: title,
+                        kind: Bool.random(using: &rng) ? .movie : .series,
+                        year: sharesBadID ? (title == "Scream 6" ? 2023 : 2026) : 2000 + index,
+                        account: account,
+                        ids: ids
+                    )
+                )
+            }
+
+            // Random split into batches.
+            var batches: [[MediaItem]] = []
+            var remaining = corpus[...]
+            while !remaining.isEmpty {
+                let size = Int.random(in: 1...4, using: &rng)
+                batches.append(Array(remaining.prefix(size)))
+                remaining = remaining.dropFirst(size)
+            }
+
+            let incremental = merged(batches)
+            let batch = MediaItemMerger.merge(corpus)
+            XCTAssertEqual(
+                incremental.map(\.id), batch.map(\.id),
+                "card order/identity diverged (seed \(seed), batch sizes \(batches.map(\.count)))"
+            )
+            XCTAssertEqual(
+                incremental.map { Set($0.sources.map(\.accountID)) },
+                batch.map { Set($0.sources.map(\.accountID)) },
+                "per-card source fan-out diverged (seed \(seed))"
+            )
+        }
+    }
+
     // MARK: Slicing
 
     func testSliceReturnsTheRequestedWindowAndClamps() {

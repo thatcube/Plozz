@@ -79,6 +79,10 @@ public struct IncrementalMediaItemMerger {
     /// something.
     private var flattened: [MediaItem] = []
     private var isFlattenedStale = false
+    /// Whether any item has been read out yet. Once true, the collection's indices
+    /// belong to the caller and may not be re-shaped — see
+    /// ``reconcileIfIndexChanged``.
+    private var hasExposedItems = false
 
     public init(
         serverInfo: @escaping (String) -> SourceServerInfo? = { _ in nil },
@@ -102,6 +106,7 @@ public struct IncrementalMediaItemMerger {
     /// Every merged card, in first-appearance order.
     public mutating func mergedItems() -> [MediaItem] {
         flattenIfNeeded()
+        hasExposedItems = true
         return flattened
     }
 
@@ -109,6 +114,7 @@ public struct IncrementalMediaItemMerger {
     /// copy of the whole collection for a caller that only needs one page.
     public mutating func slice(from start: Int, limit: Int) -> [MediaItem] {
         flattenIfNeeded()
+        hasExposedItems = true
         let lower = min(max(0, start), flattened.count)
         let upper = min(lower + max(0, limit), flattened.count)
         return Array(flattened[lower..<upper])
@@ -143,19 +149,26 @@ public struct IncrementalMediaItemMerger {
     /// keep in sync. It costs one linear pass, and only when the index actually
     /// grew (a handful of times per session as accounts warm), not per page.
     ///
-    /// Called from ``append(_:)`` **only**, never from the read path, and that is a
-    /// deliberate limit rather than an oversight. Collapsing two cards shortens the
-    /// collection, which shifts every index after them — and the paged grid above
-    /// addresses items *by index* and never re-reads a page it has already stored.
-    /// Re-folding while a page is being served is safe because the caller is about
-    /// to write that page anyway; re-folding under a grid that has finished loading
-    /// would silently move items beneath already-painted cells. So a grid that has
-    /// fully drained keeps whatever duplicates existed when it drained, and picks up
-    /// the index's later knowledge the next time it is opened.
+    /// Only runs while **nothing has been handed out yet** (see ``hasExposedItems``),
+    /// and that is a deliberate limit rather than an oversight.
+    ///
+    /// Collapsing two cards shortens the collection, which shifts the index of
+    /// everything after them — and the paged grid above addresses items *by index*
+    /// and never re-reads a page it has already stored. Once a single slice has been
+    /// served, a re-fold would silently move items beneath already-painted cells,
+    /// showing one title twice and skipping another. Restricting it to the
+    /// pre-exposure window is the only point at which the collection can still be
+    /// re-shaped for free — which in practice is the launch window, exactly when the
+    /// index is still warming and the fix is worth most.
+    ///
+    /// A grid that has already painted keeps whatever duplicates existed at that
+    /// moment and picks up the index's later knowledge the next time it is opened.
     private mutating func reconcileIfIndexChanged() {
         let revision = identityRevision()
         guard revision != lastIdentityRevision else { return }
         lastIdentityRevision = revision
+        // Past this point the caller owns indices we have already given it.
+        guard !hasExposedItems else { return }
         let retained = members
             .flatMap { $0 }
             .sorted { $0.ordinal < $1.ordinal }

@@ -244,7 +244,24 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             merger.append(items)
         }
 
-        func totalUpperBound() -> Int { totals.values.reduce(0, +) }
+        /// Optimistic post-merge total: each source's reported size, EXCEPT for
+        /// sources being stepped over this call, which contribute only what they
+        /// actually delivered.
+        ///
+        /// A server that answered a first page and then went away leaves its full
+        /// reported total behind. Counting it would keep the grid sized for items
+        /// that are not coming, and the grid marks a short page loaded — so those
+        /// slots become placeholders that can never retry. Counting only what it
+        /// delivered keeps the total honest about what is actually reachable.
+        func totalUpperBound(stalled: Set<String>) -> Int {
+            totals.reduce(0) { running, entry in
+                let (key, total) = entry
+                guard stalled.contains(key), !exhausted.contains(key) else {
+                    return running + total
+                }
+                return running + (offsets[key] ?? 0)
+            }
+        }
 
         func allExhausted(sourceIDs: [String]) -> Bool {
             sourceIDs.allSatisfy { exhausted.contains($0) }
@@ -431,7 +448,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         // whole accumulated buffer just to hand back 60 cards.
         let pageItems = await cache.mergedSlice(from: page.startIndex, limit: page.limit)
         let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
-        let upperBound = await cache.totalUpperBound()
+        let upperBound = await cache.totalUpperBound(stalled: stalled)
         // Until every source is drained the true post-merge total is unknown;
         // report an optimistic upper bound (sum of per-server totals) so the grid
         // keeps requesting pages, then settle on the exact merged count.

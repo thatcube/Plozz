@@ -22,14 +22,14 @@ final class ProfileNamespaceOwnershipTests: XCTestCase {
     @MainActor
     func testExistingInstallKeepsItsLegacyKeys() {
         let defaults = makeDefaults()
-        defaults.set(AppTheme.pureBlack.rawValue, forKey: "com.plozz.appTheme")
+        defaults.set(AppTheme.light.rawValue, forKey: "com.plozz.appTheme")
 
         let model = ProfilesModel(store: ProfileStore(defaults: defaults))
 
         XCTAssertNil(model.activeNamespace, "the bootstrapped profile still reads the legacy keys")
         XCTAssertEqual(
             ThemeSettingsStore(defaults: defaults, namespace: model.activeNamespace).load(),
-            .pureBlack
+            .light
         )
     }
 
@@ -38,7 +38,7 @@ final class ProfileNamespaceOwnershipTests: XCTestCase {
     @MainActor
     func testDeletingTheOwnerDoesNotBequeathItsSettings() {
         let defaults = makeDefaults()
-        defaults.set(AppTheme.pureBlack.rawValue, forKey: "com.plozz.appTheme")
+        defaults.set(AppTheme.light.rawValue, forKey: "com.plozz.appTheme")
         let store = ProfileStore(defaults: defaults)
         let model = ProfilesModel(store: store)
 
@@ -48,7 +48,7 @@ final class ProfileNamespaceOwnershipTests: XCTestCase {
         ThemeSettingsStore(
             defaults: defaults,
             namespace: second.settingsNamespace(isDefault: model.isDefault(second))
-        ).save(.light)
+        ).save(.dark)
 
         model.remove(owner.id)
 
@@ -64,7 +64,7 @@ final class ProfileNamespaceOwnershipTests: XCTestCase {
                 defaults: defaults,
                 namespace: survivor.settingsNamespace(isDefault: model.isDefault(survivor))
             ).load(),
-            .light,
+            .dark,
             "the survivor keeps its OWN theme rather than adopting the deleted profile's"
         )
     }
@@ -114,7 +114,7 @@ final class ProfileNamespaceOwnershipTests: XCTestCase {
     @MainActor
     func testAProfileAddedAfterTheOwnerIsGoneGetsItsOwnNamespace() {
         let defaults = makeDefaults()
-        defaults.set(AppTheme.pureBlack.rawValue, forKey: "com.plozz.appTheme")
+        defaults.set(AppTheme.light.rawValue, forKey: "com.plozz.appTheme")
         let model = ProfilesModel(store: ProfileStore(defaults: defaults))
         let owner = model.profiles[0]
         _ = model.add(name: "Second")
@@ -132,7 +132,7 @@ final class ProfileNamespaceOwnershipTests: XCTestCase {
                 defaults: defaults,
                 namespace: newcomer.settingsNamespace(isDefault: model.isDefault(newcomer))
             ).load(),
-            .pureBlack,
+            .light,
             "the deleted owner's abandoned keys must not resurface on a new profile"
         )
     }

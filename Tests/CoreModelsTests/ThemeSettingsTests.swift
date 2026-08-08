@@ -45,9 +45,11 @@ final class ThemeSettingsStoreTests: XCTestCase {
     func testModelPersistsOnChange() {
         let defaults = makeDefaults()
         let model = ThemeSettingsModel(store: ThemeSettingsStore(defaults: defaults))
-        XCTAssertEqual(model.theme, .dark)
-        model.theme = .pureBlack
-        XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .pureBlack)
+        XCTAssertEqual(model.theme, .default)
+        // Anything but the default, so the assertion cannot pass by accident if
+        // the default moves again.
+        model.theme = .light
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .light)
     }
 
     func testCodableRoundTrip() throws {

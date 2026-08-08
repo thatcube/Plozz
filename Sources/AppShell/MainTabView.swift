@@ -693,7 +693,12 @@ struct MainTabView: View {
         case .allLibraries:
             homeTabContent(
                 root: .allLibraries(browsableRailLibraries),
-                id: "\(homeScopeKey)|allLibraries"
+                // The library SET is part of the identity: the grid's provider is
+                // built once from it, so a server coming back has to rebuild the
+                // stack rather than silently keep paging the old source list.
+                // Sorted so a reordered discovery result alone can't reset it.
+                id: "\(homeScopeKey)|allLibraries|"
+                    + browsableRailLibraries.map(\.key).sorted().joined(separator: ",")
             )
         case let .library(key):
             if let entry = railEntries.first(where: { $0.key == key }), let library = entry.library {

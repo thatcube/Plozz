@@ -107,6 +107,88 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             merger.slice(from: start, limit: limit)
         }
 
+        // MARK: Ordered k-way merge
+
+        /// Fetched-but-not-yet-emitted items per source, in the server's own order.
+        /// A source's head is therefore its smallest remaining item under the
+        /// requested sort, which is what makes the merge below correct.
+        private var pending: [String: [MediaItem]] = [:]
+
+        func enqueue(_ items: [MediaItem], for sourceKey: String) {
+            guard !items.isEmpty else { return }
+            pending[sourceKey, default: []].append(contentsOf: items)
+        }
+
+        /// Sources that have nothing buffered and more to give — the ones a fill has
+        /// to fetch from before it can emit anything else in order.
+        func sourcesNeedingFetch(_ sourceKeys: [String]) -> [String] {
+            sourceKeys.filter { (pending[$0]?.isEmpty ?? true) && !exhausted.contains($0) }
+        }
+
+        /// Pops every item that is *provably* next in the requested order.
+        ///
+        /// The rule is the classic k-way merge frontier: the globally smallest
+        /// buffered head can only be emitted while every source that still has more
+        /// to give has something buffered — otherwise an unfetched item from the
+        /// empty source might belong before it. When a source runs dry (and isn't
+        /// exhausted) the drain stops and the caller fetches more.
+        ///
+        /// `ordered` is false for sorts `MediaItemSortOrder` can't reproduce
+        /// locally (date-added, community rating, random). Those simply drain
+        /// everything buffered, round-robin — the pre-existing interleave.
+        /// `stalled` names sources that failed to answer this round. They are NOT
+        /// exhausted (a later call retries them), but they must not block the
+        /// frontier — otherwise one unreachable server would freeze the whole grid
+        /// with items already buffered and nothing on screen.
+        func drainOrdered(
+            sourceKeys: [String],
+            sort: CoreModels.SortDescriptor,
+            stalled: Set<String> = []
+        ) -> [MediaItem] {
+            guard MediaItemSortOrder.supportsLocalOrdering(sort.field) else {
+                return drainInterleaved(sourceKeys: sourceKeys)
+            }
+            var emitted: [MediaItem] = []
+            while true {
+                var bestKey: String?
+                var best: MediaItem?
+                for key in sourceKeys {
+                    guard let queue = pending[key], let head = queue.first else {
+                        // A source with more to give but nothing buffered blocks the
+                        // frontier: we cannot know whether its next item sorts first.
+                        if !exhausted.contains(key), !stalled.contains(key) { return emitted }
+                        continue
+                    }
+                    if best == nil || MediaItemSortOrder.isOrderedBefore(head, best!, sort: sort) {
+                        best = head
+                        bestKey = key
+                    }
+                }
+                guard let bestKey, best != nil else { return emitted }
+                emitted.append(pending[bestKey]!.removeFirst())
+            }
+        }
+
+        /// Round-robin drain used when the sort can't be reproduced locally.
+        private func drainInterleaved(sourceKeys: [String]) -> [MediaItem] {
+            var emitted: [MediaItem] = []
+            var exhaustedThisPass = false
+            while !exhaustedThisPass {
+                exhaustedThisPass = true
+                for key in sourceKeys where !(pending[key]?.isEmpty ?? true) {
+                    emitted.append(pending[key]!.removeFirst())
+                    exhaustedThisPass = false
+                }
+            }
+            return emitted
+        }
+
+        /// Whether anything at all is still buffered — part of the fill loop's
+        /// termination test.
+        func hasPending(_ sourceKeys: [String]) -> Bool {
+            sourceKeys.contains { !(pending[$0]?.isEmpty ?? true) }
+        }
+
         /// Folds the freshly fetched batch into the running merge, so duplicates
         /// that arrive on a later page (a title that sorts differently per server)
         /// still collapse. Done under the actor lock so concurrent page requests
@@ -211,15 +293,51 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         // read-fetch-advance loop AND the merged-buffer snapshot so a concurrent
         // prefetch can't skip a page window nor observe a half-advanced buffer.
         await cache.acquireFill()
+        /// Sources that failed to answer during THIS call. Scoped per call so a
+        /// blip never persists into the next page request.
+        var stalled: Set<String> = []
         while await cache.mergedCount() < targetCount {
-            if await cache.allExhausted(sourceIDs: sourceIDs) { break }
-            let tf = Date()
-            let fetched = await fetchNextBatch(kind: kind, sort: page.sort, limit: page.limit)
-            fetchMs += Int(Date().timeIntervalSince(tf) * 1000)
-            if fetched.isEmpty { break }
+            let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
+            let hasPending = await cache.hasPending(sourceIDs)
+            if allExhausted, !hasPending { break }
+
+            // Top up only the sources that are actually blocking the merge
+            // frontier — a source with a full buffer has nothing to gain from
+            // another round-trip, and skipping it is what keeps the read
+            // amplification of a many-library browse bounded.
+            let hungry = await cache.sourcesNeedingFetch(sourceIDs)
+            var progressed = false
+            if !hungry.isEmpty {
+                let tf = Date()
+                let produced = await fetchNextBatch(
+                    into: hungry,
+                    kind: kind,
+                    sort: page.sort,
+                    limit: page.limit
+                )
+                fetchMs += Int(Date().timeIntervalSince(tf) * 1000)
+                progressed = !produced.isEmpty
+                // A hungry source that answered with nothing is either offline or
+                // erroring. Don't let it hold the ordered frontier hostage this
+                // call; it stays un-exhausted, so the next page retries it.
+                stalled.formUnion(hungry.filter { !produced.contains($0) })
+                stalled.subtract(produced)
+            }
+
             let tm = Date()
-            await cache.appendMergedBatch(fetched)
+            let ready = await cache.drainOrdered(
+                sourceKeys: sourceIDs,
+                sort: page.sort,
+                stalled: stalled
+            )
+            if !ready.isEmpty {
+                await cache.appendMergedBatch(ready)
+                progressed = true
+            }
             mergeMs += Int(Date().timeIntervalSince(tm) * 1000)
+            // Neither a fetch nor a drain moved: nothing more is achievable on this
+            // call, so return what we have instead of spinning on a dead server.
+            if !progressed { break }
         }
         let mergedCount = await cache.mergedCount()
         // Only the requested window is materialized — a deep scroll never copies the
@@ -246,19 +364,27 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {}
     public func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }
 
-    /// Pulls one bounded page from every not-yet-exhausted source concurrently and
-    /// interleaves them, advancing per-source offsets and flagging exhaustion. No
-    /// full-library scan: at most `chunkSize` items per source per call.
+    /// Pulls one bounded page from each named source concurrently and buffers it,
+    /// advancing per-source offsets and flagging exhaustion. No full-library scan:
+    /// at most `chunkSize` items per source per call.
+    ///
+    /// Returns the sources that actually produced items. The fill loop uses it both
+    /// as its progress signal (a round where every request failed must not spin) and
+    /// to mark the silent ones as stalled so they stop blocking the ordered merge.
     private func fetchNextBatch(
+        into sourceKeys: [String],
         kind: MediaItemKind,
         sort: CoreModels.SortDescriptor,
         limit: Int
-    ) async -> [MediaItem] {
+    ) async -> Set<String> {
         let chunkSize = max(20, limit)
+        let wanted = Set(sourceKeys)
+        let targets = sources.filter { wanted.contains($0.sourceKey) }
+        guard !targets.isEmpty else { return [] }
 
         typealias BatchResult = (sourceKey: String, accountID: String, page: MediaPage?)
         let results: [BatchResult] = await withTaskGroup(of: BatchResult.self) { group in
-            for source in sources {
+            for source in targets {
                 group.addTask {
                     if await self.cache.isExhausted(source.sourceKey) {
                         return (source.sourceKey, source.accountID, nil)
@@ -282,7 +408,7 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             return collected
         }
 
-        var grouped: [String: [MediaItem]] = [:]
+        var produced: Set<String> = []
         for result in results {
             guard let page = result.page else {
                 // No page this round: the source was either already exhausted
@@ -310,22 +436,14 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             if page.items.isEmpty || (page.totalCount > 0 && nextOffset >= page.totalCount) {
                 await cache.markExhausted(result.sourceKey)
             }
-            grouped[result.sourceKey] = page.items.map { $0.taggingSource(result.accountID) }
+            guard !page.items.isEmpty else { continue }
+            produced.insert(result.sourceKey)
+            await cache.enqueue(
+                page.items.map { $0.taggingSource(result.accountID) },
+                for: result.sourceKey
+            )
         }
 
-        let orderedGroups = sources.map { grouped[$0.sourceKey] ?? [] }
-        return interleave(orderedGroups)
-    }
-
-    private func interleave<T>(_ groups: [[T]]) -> [T] {
-        let maxCount = groups.map(\.count).max() ?? 0
-        var result: [T] = []
-        result.reserveCapacity(groups.reduce(0) { $0 + $1.count })
-        for offset in 0..<maxCount {
-            for group in groups where offset < group.count {
-                result.append(group[offset])
-            }
-        }
-        return result
+        return produced
     }
 }

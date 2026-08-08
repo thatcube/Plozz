@@ -154,29 +154,56 @@ final class AllLibrariesBrowseTests: XCTestCase {
         XCTAssertFalse(result.hasMore)
     }
 
-    func testASourceThatDiesAfterOnePageDoesNotInflateTheTotal() async throws {
-        // It reported 40 items and delivered 20 before going away. Counting the
-        // other 20 would size the grid for items that are not coming, and the grid
-        // marks a short page loaded — so those slots become placeholders that can
-        // never retry.
+    /// Two sources, one large, so the total is dominated by a server that can be
+    /// taken away mid-browse.
+    private func flakyPair() -> (AggregatedLibraryProvider, FakeMediaProvider) {
         let healthy = FakeMediaProvider(allItems: (0..<5).map { movie("h\($0)", title: "H\($0)") })
-        let flaky = FakeMediaProvider(allItems: (0..<40).map { movie("f\($0)", title: "F\($0)") })
+        let flaky = FakeMediaProvider(allItems: (0..<200).map { movie("f\($0)", title: "F\($0)") })
         let provider = AggregatedLibraryProvider(sources: [
             source(account: "a", container: "1", kind: .movie, provider: healthy),
             source(account: "b", container: "1", kind: .movie, provider: flaky)
         ])
+        return (provider, flaky)
+    }
 
-        // First call gets a page from both.
+    func testABriefOutageDoesNotShrinkTheGrid() async throws {
+        // `totalCount` is destructive input: the browse view model resizes to it,
+        // and shrinking destroys slots, discards loaded pages and — on tvOS — takes
+        // the focused cell with it. A momentary outage must never do that.
+        let (provider, flaky) = flakyPair()
         let first = try await page(provider, start: 0, limit: 20)
-        XCTAssertFalse(first.items.isEmpty)
+        let establishedTotal = first.totalCount
+        XCTAssertGreaterThan(establishedTotal, 100)
 
-        // Now the flaky source goes away for good.
         flaky.alwaysFail = true
-        let second = try await page(provider, start: first.items.count, limit: 20)
-        XCTAssertLessThanOrEqual(
-            second.totalCount,
-            first.items.count + second.items.count,
-            "a departed source's undelivered remainder must not keep the grid sized for it"
+        let duringOutage = try await page(provider, start: first.items.count, limit: 20)
+        XCTAssertEqual(
+            duringOutage.totalCount, establishedTotal,
+            "one bad fill must not resize the grid"
+        )
+
+        flaky.alwaysFail = false
+        let recovered = try await page(provider, start: first.items.count, limit: 20)
+        XCTAssertEqual(recovered.totalCount, establishedTotal)
+        XCTAssertFalse(recovered.items.isEmpty, "the recovered server's titles arrive")
+    }
+
+    func testASourceThatDiesForGoodStopsInflatingTheTotal() async throws {
+        // The other half of the trade: once a server has missed several whole
+        // fills, its undelivered remainder must stop counting, or the grid keeps
+        // placeholder slots for items that are never coming.
+        let (provider, flaky) = flakyPair()
+        let first = try await page(provider, start: 0, limit: 20)
+        let establishedTotal = first.totalCount
+
+        flaky.alwaysFail = true
+        var latest = first
+        for _ in 0..<4 {
+            latest = try await page(provider, start: first.items.count, limit: 20)
+        }
+        XCTAssertLessThan(
+            latest.totalCount, establishedTotal,
+            "a departed source's undelivered remainder is eventually reclaimed"
         )
     }
 

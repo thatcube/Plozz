@@ -59,14 +59,22 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Fresh installs default to Dark, regardless of the device appearance —
-    /// dark and Black read best for a lean-back media app. Users can still pick any
-    /// look during onboarding or later in Settings.
-    public static let `default`: AppTheme = .dark
+    /// Fresh installs default to Black, regardless of the device appearance.
+    ///
+    /// Black rather than Dark because a media app is watched in the dark on a
+    /// panel whose black pixels are genuinely off — an OLED TV, an OLED phone —
+    /// so the chrome disappears and the artwork is the only thing lit. Dark grey
+    /// reads as a box around the picture on exactly the displays this app is
+    /// used on most. Users can still pick any look during onboarding or later
+    /// in Settings.
+    ///
+    /// Only affects fresh installs: an existing install has its choice
+    /// persisted under `com.plozz.appTheme` and keeps it.
+    public static let `default`: AppTheme = .pureBlack
 
     /// The order the theme pickers (onboarding + Settings) present options in:
-    /// Dark first (the default), then Black, Light, and System last.
-    public static let pickerOrder: [AppTheme] = [.dark, .pureBlack, .light, .system]
+    /// Black first (the default), then Dark, Light, and System last.
+    public static let pickerOrder: [AppTheme] = [.pureBlack, .dark, .light, .system]
 }
 
 /// How the full-screen music player paints its background and text. Independent

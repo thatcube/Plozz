@@ -9,10 +9,19 @@ final class ThemeSettingsStoreTests: XCTestCase {
         return defaults
     }
 
-    func testDefaultIsDarkWhenEmpty() {
+    func testDefaultIsBlackWhenEmpty() {
         let store = ThemeSettingsStore(defaults: makeDefaults())
-        XCTAssertEqual(store.load(), .dark)
-        XCTAssertEqual(AppTheme.default, .dark)
+        XCTAssertEqual(store.load(), .pureBlack)
+        XCTAssertEqual(AppTheme.default, .pureBlack)
+    }
+
+    /// An install that already chose Dark must keep it. The default moved to
+    /// Black, and a stored choice has to outrank a changed default or the theme
+    /// would appear to reset itself on update.
+    func testStoredDarkSurvivesTheDefaultMoving() {
+        let defaults = makeDefaults()
+        defaults.set(AppTheme.dark.rawValue, forKey: "com.plozz.appTheme")
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .dark)
     }
 
     func testRoundTripForEveryTheme() {

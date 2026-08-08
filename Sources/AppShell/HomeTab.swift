@@ -659,7 +659,7 @@ struct HomeTab: View {
         /// That ordering matters: shortening only widens what is searched, and
         /// the exact match still decides, so "Mario" cannot come back as a
         /// documentary about Mario Puzo when the requested film exists.
-        private func find(_ title: String) async -> MediaItem? {
+        private func find(_ title: String) async -> MediaItem? {  // l10n:content — a media title from the server
             var fallback: MediaItem?
             for query in Self.queries(for: title) {
                 for resolved in accounts {
@@ -686,7 +686,7 @@ struct HomeTab: View {
         /// stopping at the first non-empty level answered "Dune: Part Two" with
         /// whatever the two-word query "Dune: Part" happened to surface. Only an
         /// exact title match short-circuits.
-        private static func queries(for title: String) -> [String] {
+        private static func queries(for title: String) -> [String] {  // l10n:content — a media title from the server
             let words = title.split(separator: " ").map(String.init)
             guard words.count > 1 else { return [title] }
             var seen = Set<String>()

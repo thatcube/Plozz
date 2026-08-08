@@ -1853,7 +1853,7 @@ struct PlozziOSScreenshotRouter: View {
     /// time until something comes back, and the *full* requested title is then
     /// matched against those results — shortening only widens the search, and the
     /// exact match still decides which result wins.
-    private func find(_ title: String) async -> MediaItem? {
+    private func find(_ title: String) async -> MediaItem? {  // l10n:content — a media title from the server
         var fallback: MediaItem?
         for query in Self.queries(for: title) {
             for resolved in accounts {
@@ -1881,7 +1881,7 @@ struct PlozziOSScreenshotRouter: View {
     /// whatever the two-word query "Dune: Part" happened to surface, and a
     /// two-word floor never reached the bare "Dune" that finds it. Only an
     /// exact title match short-circuits.
-    private static func queries(for title: String) -> [String] {
+    private static func queries(for title: String) -> [String] {  // l10n:content — a media title from the server
         let words = title.split(separator: " ").map(String.init)
         guard words.count > 1 else { return [title] }
         var seen = Set<String>()

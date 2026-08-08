@@ -382,18 +382,31 @@ struct MainTabView: View {
         NavigationRailDestination(storageValue: railSelectionRaw) ?? .home
     }
 
-    /// The libraries the profile can actually browse right now: discovered, not
-    /// switched off, not music (music has its own destination).
+    /// The rail's candidate libraries: discovered (or remembered), still owned by a
+    /// signed-in account, and not switched off.
+    ///
+    /// The account filter is what makes the persisted snapshot safe to paint from.
+    /// A remembered library whose account has since been removed would otherwise
+    /// stay in the rail, and opening it resolves through `resolveProvider`, which
+    /// falls back to the PRIMARY account for an unknown id — i.e. it would browse a
+    /// different server's container id. Better to drop the row.
+    private var availableRailLibraries: [AggregatedLibrary] {
+        let liveAccountIDs = Set(accounts.map(\.account.id))
+        return railLibraries.filter {
+            liveAccountIDs.contains($0.accountID) && homeVisibility.isEnabled($0.key)
+        }
+    }
+
+    /// The libraries the profile can actually browse right now (music excluded —
+    /// it has its own destination).
     private var browsableRailLibraries: [AggregatedLibrary] {
-        NavigationRailPlan.browsableLibraries(
-            railLibraries.filter { homeVisibility.isEnabled($0.key) }
-        )
+        NavigationRailPlan.browsableLibraries(availableRailLibraries)
     }
 
     /// The rail's library slots, in the profile's own arrangement.
     private var railEntries: [NavigationRailLibraryEntry] {
         NavigationRailPlan.entries(
-            visibleLibraries: railLibraries.filter { homeVisibility.isEnabled($0.key) },
+            visibleLibraries: availableRailLibraries,
             layout: navigationStyleModel.libraryLayout
         )
     }

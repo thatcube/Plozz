@@ -154,6 +154,32 @@ final class AllLibrariesBrowseTests: XCTestCase {
         XCTAssertFalse(result.hasMore)
     }
 
+    func testASourceThatDiesAfterOnePageDoesNotInflateTheTotal() async throws {
+        // It reported 40 items and delivered 20 before going away. Counting the
+        // other 20 would size the grid for items that are not coming, and the grid
+        // marks a short page loaded — so those slots become placeholders that can
+        // never retry.
+        let healthy = FakeMediaProvider(allItems: (0..<5).map { movie("h\($0)", title: "H\($0)") })
+        let flaky = FakeMediaProvider(allItems: (0..<40).map { movie("f\($0)", title: "F\($0)") })
+        let provider = AggregatedLibraryProvider(sources: [
+            source(account: "a", container: "1", kind: .movie, provider: healthy),
+            source(account: "b", container: "1", kind: .movie, provider: flaky)
+        ])
+
+        // First call gets a page from both.
+        let first = try await page(provider, start: 0, limit: 20)
+        XCTAssertFalse(first.items.isEmpty)
+
+        // Now the flaky source goes away for good.
+        flaky.alwaysFail = true
+        let second = try await page(provider, start: first.items.count, limit: 20)
+        XCTAssertLessThanOrEqual(
+            second.totalCount,
+            first.items.count + second.items.count,
+            "a departed source's undelivered remainder must not keep the grid sized for it"
+        )
+    }
+
     func testChangingSortDiscardsEveryPageFetchedUnderTheOldOne() async throws {
         // `setSort` reloads from index 0 against the SAME provider instance, so the
         // aggregate has to throw away its buffers, offsets and running merge — or

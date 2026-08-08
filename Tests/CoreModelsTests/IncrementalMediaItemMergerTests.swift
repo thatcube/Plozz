@@ -254,7 +254,7 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
 
         index.linked = true
         index.revision += 1
-        // A later page (even an empty-ish one) re-folds; the two collapse.
+        // A later page re-folds, because nothing has been read out yet.
         merger.append([item("x1", title: "Arrival", year: 2016, account: "plex")])
 
         let result = merger.mergedItems()
@@ -267,7 +267,7 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["p1", "x1"], "arrival order survives the re-fold")
     }
 
-    func testIndexGrowthIsNotFoldedInOnTheReadPath() {
+    func testIndexGrowthIsNotFoldedInOnceItemsHaveBeenHandedOut() {
         // The re-fold is bound to `append` on purpose: collapsing two cards shifts
         // every index after them, and the paged grid addresses items by index and
         // never re-reads a stored page. Doing it on a read would move items under
@@ -289,17 +289,18 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
             item("p1", title: "Dune", year: 2021, account: "plex"),
             item("j1", title: "Dune 2021", year: 2021, account: "jelly")
         ])
-        XCTAssertEqual(merger.count, 2)
+        // Reading the first page hands out indices 0 and 1.
+        XCTAssertEqual(merger.slice(from: 0, limit: 20).count, 2)
 
         index.linked = true
         index.revision += 1
-        // No further append — just a read, as a fully-drained grid would do.
-        XCTAssertEqual(merger.count, 2, "indices stay put under a grid that has stopped loading")
-
-        // The very next batch does fold it in, because then the caller is writing
-        // a page anyway.
+        // Even a further append must NOT collapse them now: index 1 is already on
+        // screen, and shortening the collection would slide index 2 into its place.
         merger.append([item("x1", title: "Arrival", year: 2016, account: "plex")])
-        XCTAssertEqual(merger.mergedItems().map(\.id), ["p1", "x1"])
+        XCTAssertEqual(
+            merger.mergedItems().map(\.id), ["p1", "j1", "x1"],
+            "indices already handed out stay put"
+        )
     }
 
     func testUnchangedIndexRevisionDoesNotRefold() {

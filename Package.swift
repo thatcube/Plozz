@@ -83,7 +83,7 @@ let package = Package(
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
         // See AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to the UPSTREAM release tag 6.6.0 -> 2188b17fd5501c04fc0e05e689687a57131a923b.
+        // Pinned to the UPSTREAM release tag 6.15.2 -> c47db496b86e716f323417d4bb6996d04d112f2c.
         //
         // Plozz no longer carries an AetherEngine fork. Everything the old
         // `plozz-pin-*` stack existed for is upstream as of 5.23.2:
@@ -131,29 +131,38 @@ let package = Package(
         //     breaking change across the 84 releases in this range; no public
         //     symbol was removed or renamed.
         //
-        // Pinned to the 6.4.0 RELEASE rather than upstream HEAD. Same reasoning as
+        // Pinned to the 6.15.2 RELEASE rather than upstream HEAD. Same reasoning as
         // the exact-SHA pin: the playback path takes documented, released changes
-        // only. The SHA is the COMMIT the 6.4.0 tag points at, not the annotated
+        // only. The SHA is the COMMIT the 6.15.2 tag points at, not the annotated
         // tag object's own id — a `revision:` pin wants the commit.
         //
-        // Moved up from 6.0.2. Four minor releases, no breaking change and no
-        // symbol removed or renamed, and two of them answer shapes Plozz actually
-        // serves:
-        //   - 6.4.0 finite HEVC-in-MPEG-TS HLS VOD no longer reaches AVPlayer's
-        //     audio-only black native path (AVFoundation builds no video track for
-        //     HEVC in TS), plus a correct playhead for containers starting at a
-        //     non-zero PTS.
-        //   - 6.3.0 `ExternalSubtitleTrack.sourceStreamIndex`: registering one
-        //     track per embedded subtitle stream of the SAME MKV previously gave
-        //     several selectable tracks that all rendered the first stream's cues.
-        //   - 6.2.0 `presentationAxisMap`, source-PTS to item-time in both
-        //     directions, for compositing an overlay onto native playback.
-        //   - 6.1.0 `seekEvents`, which distinguishes a landing from a give-up
-        //     from a supersede — the falling edge of `isSeeking` cannot.
+        // Moved up from 6.6.0. Nine minor releases plus patches, every one of them
+        // documented drop-in with no consumer source change, no symbol removed or
+        // renamed. The ones that matter to shapes Plozz actually serves:
+        //   - 6.15.2 the live `AVIOReader` stopped cycling its own healthy
+        //     connections. The 16 MB high-water end had no live branch, so it was
+        //     the only thing terminating a healthy live connection: each end
+        //     dropped everything broadcast during the ~8 MB drain and the demuxer
+        //     rejoined on a corrupt TS packet.
+        //   - 6.15.1 a `nativeRemoteHLS` bypass that could neither play nor fail
+        //     (an origin answering everything while AVFoundation builds no track)
+        //     now does one of the two instead of sitting in `.loading` forever.
+        //   - 6.14.0 `LoadOptions.externalSubtitles` was silently dropped on a
+        //     remote-HLS source — empty `subtitleTracks`, no error, indistinguishable
+        //     from a source with no subtitles.
+        //   - 6.12.0 a source connection that dies silently is now noticed on
+        //     wall-clock time rather than only once a consumer drains the window.
+        //   - 6.11.0 an origin refusing every refill no longer spirals into ~15
+        //     reconnects a second.
+        //   - 6.13.0 `hasFirstFrameReadyForDisplay`, the edge a black cover should
+        //     come off on. `isSessionReady` is `readyToPlay`, which AVFoundation
+        //     reaches before the layer holds a picture and which stays true across
+        //     a seek — so it lifts a cover onto black. Plozz approximates this today
+        //     with `awaitingFirstFrame`; worth revisiting that against this signal.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "2188b17fd5501c04fc0e05e689687a57131a923b"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "c47db496b86e716f323417d4bb6996d04d112f2c"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

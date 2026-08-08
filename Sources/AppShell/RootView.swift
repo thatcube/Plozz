@@ -368,7 +368,8 @@ public struct RootView: View {
                                 plexIdentityGeneration:
                                     appState.plexHomeUsers.plexIdentityGeneration
                             ),
-                            pendingPlay: appState.pendingPlay
+                            pendingPlay: appState.pendingPlay,
+                            screenshotDirector: appState.screenshotDirector
                         ),
                         isAccountIncludedInActiveProfile: { appState.profileFlow.isAccountIncludedInActiveProfile($0) },
                         onSetAccountIncluded: { appState.profileFlow.setAccount($0, includedInActiveProfile: $1) },

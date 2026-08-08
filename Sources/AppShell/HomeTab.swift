@@ -473,6 +473,244 @@ struct HomeTab: View {
                 accounts: accounts,
                 onResolved: { requestPlay($0) }
             )
+            ScreenshotRouter(
+                director: runtime.screenshotDirector,
+                accounts: accounts,
+                onHome: {
+                    // The player is presented over the stack, not pushed onto
+                    // it, so emptying the path leaves it up — and every request
+                    // after a `play` then photographs the still-running video.
+                    playRequest = nil
+                    resumePrompt = nil
+                    path = NavigationPath()
+                },
+                onPush: { path.append($0) },
+                // Straight to the player, NOT through `requestPlay`: an item
+                // with progress raises the Resume/Start Over prompt, and a
+                // capture of the player is then a capture of that alert.
+                //
+                // A series still has to be resolved to an episode first. Series
+                // and seasons are containers with no media of their own, so
+                // handing one to the player answers "Can't play this right now"
+                // — which is exactly what a shot of a show's player looked like
+                // until this went through the same next-up resolver Play uses.
+                onPlay: { item, seconds in
+                    let target = bestSourcePlayItem(
+                        item, accounts: accounts, identitySources: identitySources
+                    )
+                    guard target.kind.needsPlaybackTargetResolution else {
+                        playRequest = PlayRequest(item: target, startPosition: seconds)
+                        return
+                    }
+                    Task { @MainActor in
+                        guard let episode = await resolveSeriesNextUpEpisode(target) else { return }
+                        playRequest = PlayRequest(
+                            item: bestSourcePlayItem(
+                                episode, accounts: accounts, identitySources: identitySources
+                            ),
+                            startPosition: seconds
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    /// Performs the capture rig's screen requests. A leaf for the same reason as
+    /// ``DeepLinkPlayRouter``: reading the request in `HomeTab.body` would
+    /// subscribe the whole tab to it, so every request would rebuild the
+    /// navigation stack and every pushed page.
+    ///
+    /// Each request is resolved by *searching the real library* for the named
+    /// title and pushing the value a tap would have pushed, so the resulting
+    /// screen is the same one a person would reach — only reached by name
+    /// instead of by counting remote presses.
+    private struct ScreenshotRouter: View {
+        let director: ScreenshotDirector
+        let accounts: [ResolvedAccount]
+        let onHome: () -> Void
+        let onPush: (any Hashable) -> Void
+        let onPlay: (MediaItem, Double) -> Void
+
+        var body: some View {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+                .task(id: director.request) { await perform() }
+        }
+
+        private func perform() async {
+            guard let request = director.request else { return }
+            director.request = nil
+            director.finish(await reach(request))
+        }
+
+        /// Reaches the requested screen and answers with what the capture script
+        /// should see in the ack. Returns text rather than an enum so a probe can
+        /// answer with the titles it found; every other request answers `ok` or
+        /// `notFound`.
+        private func reach(_ request: ScreenshotDirector.Request) async -> String {
+            switch request {
+            case .home:
+                await popToRoot()
+
+            case let .detail(title):
+                guard let item = await find(title) else { return notFound }
+                await popToRoot()
+                onPush(route(for: item))
+
+            case let .person(title, name):
+                guard let item = await find(title) else { return notFound }
+                await popToRoot()
+                onPush(route(for: item))
+                // The cast list belongs to the *detail* page's fetch, so read
+                // the person off the item's own credits rather than waiting on
+                // the page to render one.
+                guard let person = await person(named: name, in: item) else { return notFound }
+                await settlePush()
+                onPush(PersonRoute(person: person, sourceAccountID: item.sourceAccountID))
+
+            case let .library(name, sort):
+                guard let library = await library(named: name) else { return notFound }
+                applySort(sort)
+                await popToRoot()
+                onPush(library)
+
+            case let .play(title, seconds):
+                guard let item = await find(title) else { return notFound }
+                await popToRoot()
+                // Starting partway in is what puts real progress in the scrubber
+                // and real artwork behind the overlay — a shot taken at 0:00 is a
+                // black frame under a full-width empty bar.
+                onPlay(item, seconds)
+
+            case let .probe(title):
+                var found: [String] = []
+                for resolved in accounts {
+                    guard let results = try? await resolved.provider.search(query: title, limit: 25)
+                    else { continue }
+                    found.append(contentsOf: results.map { "\($0.title) [\($0.kind.rawValue)]" })
+                }
+                return found.isEmpty ? notFound : found.joined(separator: "\n")
+            }
+            return ScreenshotDirector.Outcome.ok.rawValue
+        }
+
+        private var notFound: String { ScreenshotDirector.Outcome.notFound.rawValue }
+
+        /// Points the library grid at a named ``SortField`` before it opens.
+        ///
+        /// The browse view model reads its sort from `UserDefaults` when it is
+        /// built, so setting the key here takes effect on the push that follows.
+        /// Left alone when no sort is asked for, so a run never quietly
+        /// rearranges a library that was opened by hand.
+        private func applySort(_ field: String?) {
+            guard let field, let sortField = SortField(rawValue: field) else { return }
+            let descriptor = SortDescriptor(
+                field: sortField,
+                direction: sortField == .name ? .ascending : .descending
+            )
+            guard let data = try? JSONEncoder().encode(descriptor) else { return }
+            for kind in [MediaItemKind.movie, .series] {
+                UserDefaults.standard.set(data, forKey: "LibraryBrowse.sort.\(kind.rawValue)")
+            }
+        }
+
+        /// Empties the stack and lets the pop finish.
+        ///
+        /// Resetting the path and appending to it in the same runloop turn nets
+        /// out to no change at all as far as `NavigationStack` is concerned: the
+        /// second capture run photographed the *first* title four times over,
+        /// because every later request popped and pushed within one turn and the
+        /// stack never noticed it had been asked to go anywhere. Separating them
+        /// by a turn — and giving the pop transition time to land — is what makes
+        /// each request actually move the stack.
+        private func popToRoot() async {
+            onHome()
+            await settlePush()
+        }
+
+        private func settlePush() async {
+            try? await Task.sleep(for: .milliseconds(700))
+        }
+
+        /// The value `navigate` would append for `item` — kept in step with it
+        /// so a captured page is the page a tap opens, not a near neighbour.
+        private func route(for item: MediaItem) -> any Hashable {
+            if item.kind == .episode, item.seriesID != nil {
+                return EpisodeContextRoute(episode: item, originAccountID: nil)
+            }
+            if item.kind == .season, item.seriesID != nil {
+                return SeasonContextRoute(season: item, originAccountID: nil)
+            }
+            return item
+        }
+
+        /// The best match for `title` across every signed-in account.
+        ///
+        /// Searched by shortening rather than by the full title, because a full
+        /// title is often the one query that fails. Asking the share catalog for
+        /// "The Lord of the Rings: The Fellowship of the Ring" returns nothing,
+        /// while "Lord of the Rings" returns all four films — long queries with
+        /// punctuation fall through whatever tokenisation it does. So the query
+        /// is shortened a word at a time until something comes back, and the
+        /// *full* requested title is then matched against those results.
+        ///
+        /// That ordering matters: shortening only widens what is searched, and
+        /// the exact match still decides, so "Mario" cannot come back as a
+        /// documentary about Mario Puzo when the requested film exists.
+        private func find(_ title: String) async -> MediaItem? {
+            var fallback: MediaItem?
+            for query in Self.queries(for: title) {
+                for resolved in accounts {
+                    guard let results = try? await resolved.provider.search(query: query, limit: 40),
+                          !results.isEmpty
+                    else { continue }
+                    let tagged = results.map { $0.taggingSource(resolved.account.id) }
+                    if let exact = tagged.first(where: {
+                        $0.title.compare(title, options: .caseInsensitive) == .orderedSame
+                    }) {
+                        return exact
+                    }
+                    fallback = fallback ?? tagged.first
+                }
+                if fallback != nil { break }
+            }
+            return fallback
+        }
+
+        /// The full title, then progressively shorter leading phrases. Stops at
+        /// two words: a one-word query against a large library is a lottery.
+        private static func queries(for title: String) -> [String] {
+            let words = title.split(separator: " ").map(String.init)
+            guard words.count > 2 else { return [title] }
+            return (2...words.count)
+                .reversed()
+                .map { words.prefix($0).joined(separator: " ") }
+        }
+
+        private func person(named name: String, in item: MediaItem) async -> MediaPerson? {
+            let provider = resolveProvider(item.sourceAccountID, in: accounts)
+            let detailed = (try? await provider.item(id: item.id)) ?? item
+            let cast = detailed.cast.isEmpty ? detailed.people : detailed.cast
+            return cast.first {
+                $0.name.compare(name, options: .caseInsensitive) == .orderedSame
+            } ?? cast.first { $0.name.localizedCaseInsensitiveContains(name) }
+        }
+
+        private func library(named name: String?) async -> MediaLibrary? {
+            for resolved in accounts {
+                guard let libraries = try? await resolved.provider.libraries(),
+                      !libraries.isEmpty
+                else { continue }
+                guard let name else { return libraries.first }
+                if let match = libraries.first(where: {
+                    $0.title.localizedCaseInsensitiveContains(name)
+                }) {
+                    return match
+                }
+            }
+            return nil
         }
     }
 

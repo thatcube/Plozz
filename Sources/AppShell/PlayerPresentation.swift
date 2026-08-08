@@ -92,6 +92,7 @@ struct PlayerPresentation: View {
                         + "tapToPresentation=\(HandoffDiagnostics.ms(activeRequest.requestedAt))"
                 )
                 viewModel = make(activeRequest, nil)
+                ScreenshotSeed.holdPlayerControlsIfRequested(viewModel)
                 HandoffDiagnostics.emit(
                     "viewModel CREATED trace=\(activeRequest.traceID.uuidString.prefix(8)) "
                         + "item=\(activeRequest.item.id) "

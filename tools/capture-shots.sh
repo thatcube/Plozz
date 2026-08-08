@@ -1,30 +1,36 @@
 #!/usr/bin/env bash
 #
-# Capture real Plozz screenshots from a Simulator, at native device resolution.
+# Capture Plozz screenshots from a Simulator, at native device resolution.
 #
 # Why a Simulator and not the Apple TV: a Simulator screenshot comes from the
 # framebuffer, so it is exactly 3840x2160 with no capture card, no HDMI, and no
 # device to leave plugged in. `xcrun simctl io screenshot` is lossless PNG.
 #
-# Why it does not need credentials: the app is seeded with brandon's NFS share
-# (cubeboi, exported to `*` with no auth), and Plozz enriches share content from
-# the keyless metadata tier — so a bare folder of files becomes a library with
-# real artwork, overviews, ratings and cast. That is what makes these look like
-# the marketing shots rather than a file browser.
+# Why it needs no credentials: the app is seeded with the NFS share (exported
+# to `*` with no auth), and Plozz enriches share content from the keyless
+# metadata tier — so a bare folder of files becomes a library with real
+# artwork, overviews, ratings and cast. That is what makes these look like
+# marketing shots rather than a file browser.
 #
-# The seed goes in through `ScreenshotSeed` (DEBUG-only, inert unless the
-# environment asks for it), which calls the same `didConfigureNFSShare` the
-# onboarding UI calls and then completes the first-run profile/theme steps. No
-# UI driving is needed to reach Home.
+# How a screen is reached: NOT by pressing the remote. tvOS focus moves one
+# cell at a time and the shelf order changes with what has been watched, so a
+# run that walks focus silently photographs the wrong title. Instead the app is
+# asked for a screen *by name* — see `ScreenshotDirector`. Requests go through a
+# file in the app's own container, and the app writes back an ack, so this
+# script waits for the request to be taken rather than sleeping and hoping.
 #
-#   ./tools/capture-shots.sh                 # tvOS, capture to build/shots
-#   ./tools/capture-shots.sh --no-build      # reuse the last build
-#   ./tools/capture-shots.sh --reset         # wipe app data and rescan
+# One launch serves the whole session, so the library is scanned once.
+#
+#   ./tools/capture-shots.sh                  # everything, to build/shots
+#   ./tools/capture-shots.sh --no-build       # reuse the last build
+#   ./tools/capture-shots.sh --only tv-home   # one shot, by name
+#   ./tools/capture-shots.sh --list           # what it can capture
+#   ./tools/capture-shots.sh --reset          # wipe app data and rescan (slow)
 #   ./tools/capture-shots.sh --out DIR
 #
-# The first run scans and enriches the whole library (~10.5k items) and takes a
-# long while. That work persists in the Simulator's container, so later runs
-# start already populated — do NOT pass --reset unless you mean it.
+# The first run against a fresh container scans and enriches the whole library
+# and takes a long while. That work persists in the Simulator's container, so
+# later runs start populated — do NOT pass --reset unless you mean it.
 #
 set -euo pipefail
 
@@ -46,15 +52,45 @@ NFS_NAME="${PLOZZ_SHOTS_NFS_NAME:-Brandoland}"
 
 DO_BUILD=1
 DO_RESET=0
+ONLY=""
 SIM_NAME="${PLOZZ_SHOTS_SIM:-Apple TV 4K (3rd generation)}"
+
+# ── The shot list ────────────────────────────────────────────────────────────
+# `name|request`, in the order they are taken.
+#
+# The titles are deliberately well-known: a marketing shot of an unrecognisable
+# title tells a visitor nothing about the app. They also exercise different
+# shapes — a film, an epic, an animated film, a prestige series, a long-running
+# sitcom — so the gallery is not five variations of one page.
+# A third field, when present, is a capture delay in seconds *instead of*
+# waiting for the screen to settle. Needed for anything that is deliberately
+# still moving: the player's transport bar fades a few seconds after playback
+# starts, so a shot that waits for stillness is a shot of bare video with no UI
+# in it at all.
+SHOTS=(
+  "tv-home|home"
+  "tv-detail-oppenheimer|detail?title=Oppenheimer"
+  "tv-detail-lotr|detail?title=The%20Lord%20of%20the%20Rings%3A%20The%20Fellowship%20of%20the%20Ring"
+  "tv-detail-mario|detail?title=The%20Super%20Mario%20Bros.%20Movie"
+  "tv-show-lastofus|detail?title=The%20Last%20of%20Us"
+  "tv-show-office|detail?title=The%20Office"
+  "tv-person|person?title=Oppenheimer&person=Cillian%20Murphy"
+  "tv-library|library?name=TV"
+  "tv-player|play?title=The%20Office&at=600|35"
+  "tv-subtitles|play?title=Oppenheimer&at=2400|75"
+)
+
+usage() { sed -n '2,34p' "$0"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-build) DO_BUILD=0 ;;
     --reset) DO_RESET=1 ;;
+    --only) ONLY="$2"; shift ;;
     --out) OUT="$2"; shift ;;
     --sim) SIM_NAME="$2"; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    --list) printf '%s\n' "${SHOTS[@]}" | cut -d'|' -f1 | sed 's/^/  /'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -125,113 +161,126 @@ fi
 xcrun simctl install "$UDID" "$APP"
 
 # ── Launch, seeded ───────────────────────────────────────────────────────────
+# NOTE on the library shot: it browses TV Shows, not Movies, and that is
+# deliberate. A file share cannot be re-sorted — `CatalogReadQueries` pages with
+# a fixed `ORDER BY sort_title` — so the grid is always alphabetical, and the
+# Movies library's first tile is a file with no artwork that sorts before "A".
+# Setting the sort menu's stored choice changes only its label. TV Shows leads
+# with real posters, so it is the honest grid that also photographs well.
+
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
 SIMCTL_CHILD_PLOZZ_SHOTS_NFS_HOST="$NFS_HOST" \
 SIMCTL_CHILD_PLOZZ_SHOTS_NFS_EXPORT="$NFS_EXPORT" \
 SIMCTL_CHILD_PLOZZ_SHOTS_NFS_NAME="$NFS_NAME" \
+SIMCTL_CHILD_PLOZZ_SHOTS_HOLD_CONTROLS=1 \
 xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null
 
-# ── Wait for the library to settle ───────────────────────────────────────────
-# The scan/enrich badge sits top-right on Home. Rather than parse it, watch for
-# the screen to stop changing: when successive captures are identical the rows
-# have stopped filling in. Artwork arrives progressively, so this is the honest
-# signal that the shot is ready.
+# The command channel lives in the app's own Documents directory, which the
+# host can write to directly — no entitlement, no port, and no "Open in Plozz?"
+# alert (which is what rules out `simctl openurl` for an unattended run).
+CONTAINER=""
+for _ in $(seq 1 30); do
+  CONTAINER="$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data 2>/dev/null || true)"
+  [ -n "$CONTAINER" ] && break
+  sleep 1
+done
+if [ -z "$CONTAINER" ]; then
+  echo "Could not find the app container." >&2
+  exit 1
+fi
+CHANNEL="$CONTAINER/Documents"
+mkdir -p "$CHANNEL"
+rm -f "$CHANNEL/.plozz-shots-request" "$CHANNEL/.plozz-shots-ack"
+
+# ── Waiting ──────────────────────────────────────────────────────────────────
+# Rather than parse the scan badge, watch for the screen to stop changing: when
+# successive captures are identical, rows have stopped filling in. Artwork
+# arrives progressively, so this is the honest signal that a shot is ready.
 settle() {
-  local budget="${1:-900}" stable_needed="${2:-4}"
+  local budget="${1:-90}" stable_needed="${2:-3}" interval="${3:-2}"
   local previous="" stable=0 waited=0
   while [ "$waited" -lt "$budget" ]; do
-    sleep 10
-    waited=$((waited + 10))
+    sleep "$interval"
+    waited=$((waited + interval))
     xcrun simctl io "$UDID" screenshot "$OUT/.settle.png" >/dev/null 2>&1 || continue
     local hash
     hash="$(shasum -a 256 "$OUT/.settle.png" | cut -c1-16)"
     if [ "$hash" = "$previous" ]; then
       stable=$((stable + 1))
-      [ "$stable" -ge "$stable_needed" ] && { rm -f "$OUT/.settle.png"; return 0; }
+      if [ "$stable" -ge "$stable_needed" ]; then
+        rm -f "$OUT/.settle.png"
+        return 0
+      fi
     else
       stable=0
     fi
     previous="$hash"
-    printf '\r  settling… %ss' "$waited"
   done
-  printf '\n'
   rm -f "$OUT/.settle.png"
-  return 0
+  return 1
+}
+
+# Asks the app for a screen and waits for it to say it got there.
+#
+# The app acks only once it has *reached* the screen, so `notFound` here means
+# the library genuinely has no such title — not that the request was malformed.
+# Echoes the outcome so the caller can report it.
+request() {
+  local verb="$1"
+  rm -f "$CHANNEL/.plozz-shots-ack"
+  printf '%s\n' "$verb" > "$CHANNEL/.plozz-shots-request"
+  for _ in $(seq 1 120); do
+    if [ -f "$CHANNEL/.plozz-shots-ack" ]; then
+      cat "$CHANNEL/.plozz-shots-ack"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "timeout"
+  return 1
 }
 
 echo "Waiting for the library to finish scanning and enriching…"
-echo "(first run on a fresh container walks ~10.5k items — expect a long wait)"
-settle "${PLOZZ_SHOTS_SETTLE:-1800}" 5
-printf '\n'
+echo "(a fresh container walks the whole share — expect a long wait)"
+settle "${PLOZZ_SHOTS_SETTLE:-1800}" 5 10 || true
 
 # ── Capture ──────────────────────────────────────────────────────────────────
-# Home needs no navigation, so it is taken straight from the framebuffer. That
-# path has no XCTest in it at all, which makes it the one capture that cannot be
-# broken by a focus change.
-shoot() {
-  local name="$1"
-  xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null 2>&1
-  printf '  %-30s %s\n' "$name.png" "$(magick identify -format '%wx%h' "$OUT/$name.png" 2>/dev/null || echo '?')"
-}
-
+echo
 echo "Capturing:"
-shoot "plozz-tv-home"
+FAILED=0
+for entry in "${SHOTS[@]}"; do
+  IFS='|' read -r name verb delay <<< "$entry"
 
-# Everything past Home needs the remote, which only a UI test can press. The
-# frames come back as test attachments; xcresulttool writes them out under
-# opaque UUID names, so the manifest is used to restore the intended name.
-if [ "${PLOZZ_SHOTS_SKIP_UITESTS:-0}" != "1" ]; then
-  echo
-  echo "Running PlozzShots for the screens that need navigation…"
-  RESULT="$OUT/.xcresult"
-  rm -rf "$RESULT"
+  if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then continue; fi
 
-  set +e
-  xcodebuild test \
-    -project Plozz.xcodeproj \
-    -scheme PlozzShots \
-    -destination "platform=tvOS Simulator,id=$UDID" \
-    -derivedDataPath "$DERIVED" \
-    -resultBundlePath "$RESULT" \
-    DEVELOPMENT_TEAM="$TEAM" \
-    ONLY_ACTIVE_ARCH=YES \
-    -quiet > "$OUT/.uitest.log" 2>&1
-  UITEST_STATUS=$?
-  set -e
-
-  if [ -d "$RESULT" ]; then
-    rm -rf "$OUT/.attachments"
-    xcrun xcresulttool export attachments \
-      --path "$RESULT" --output-path "$OUT/.attachments" >/dev/null 2>&1 || true
-
-    python3 - "$OUT" <<'PYEOF'
-import json, os, shutil, sys, re
-out = sys.argv[1]
-src = os.path.join(out, ".attachments")
-manifest = os.path.join(src, "manifest.json")
-if os.path.exists(manifest):
-    for entry in json.load(open(manifest)):
-        for a in entry.get("attachments", []):
-            name = a.get("suggestedHumanReadableName") or ""
-            exported = a.get("exportedFileName")
-            if not exported or not name.endswith(".png"):
-                continue
-            # "plozz-tv-home_0_<uuid>.png" -> "plozz-tv-home.png"
-            stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}\.png$", "", name)
-            shutil.copyfile(os.path.join(src, exported),
-                            os.path.join(out, stem + ".png"))
-            print(f"  {stem + '.png':<30} (from UI test)")
-PYEOF
-    rm -rf "$OUT/.attachments" "$RESULT"
+  OUTCOME="$(request "$verb" || true)"
+  if [ "$OUTCOME" != "ok" ]; then
+    FAILED=$((FAILED + 1))
+    printf '  %-26s %s\n' "plozz-$name.png" "SKIPPED ($OUTCOME)"
+    continue
   fi
 
-  if [ "$UITEST_STATUS" != "0" ]; then
-    echo
-    echo "  Some navigated screens did not capture — see $OUT/.uitest.log"
-    echo "  Home is unaffected; it is captured without XCTest."
+  if [ -n "${delay:-}" ]; then
+    sleep "$delay"
+  else
+    # A push animates, then artwork loads. Settling covers both, but a page
+    # that legitimately never stops moving will never settle — so a timeout
+    # still takes the shot.
+    settle 60 3 2 || true
   fi
-fi
+
+  xcrun simctl io "$UDID" screenshot "$OUT/plozz-$name.png" >/dev/null 2>&1
+  printf '  %-26s %s\n' "plozz-$name.png" \
+    "$(magick identify -format '%wx%h' "$OUT/plozz-$name.png" 2>/dev/null || echo '?')"
+
+  # Leave the player rather than letting it run under the next request.
+  case "$verb" in play*) request "home" >/dev/null 2>&1 || true ;; esac
+done
 
 echo
 echo "Wrote to $OUT"
-ls -1 "$OUT"/*.png 2>/dev/null | sed 's|.*/|  |'
+if [ "$FAILED" != "0" ]; then
+  echo "$FAILED shot(s) skipped. 'notFound' means the library has no such title —"
+  echo "check the exact name with the app's own search and edit SHOTS above."
+fi
+exit 0

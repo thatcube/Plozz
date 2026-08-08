@@ -1,4 +1,5 @@
 import CoreModels
+import FeaturePlayback
 import Foundation
 
 /// Seeds a media share from the environment so an automated capture run starts
@@ -33,6 +34,10 @@ enum ScreenshotSeed {
     @MainActor
     static func applyIfRequested(to appState: AppState) {
         #if DEBUG
+        // Start listening first: a repeat run finds the share already there and
+        // returns below, but it still needs to be drivable.
+        appState.screenshotDirector.startWatchingForRequests()
+
         let environment = ProcessInfo.processInfo.environment
         guard let host = environment["PLOZZ_SHOTS_NFS_HOST"],
               let export = environment["PLOZZ_SHOTS_NFS_EXPORT"],
@@ -54,6 +59,41 @@ enum ScreenshotSeed {
 
         appState.confirmFirstRunProfile()
         appState.finishThemeSelection()
+        #endif
+    }
+
+    /// Holds the player's transport bar open for a capture run.
+    ///
+    /// The transport is the part of the player worth photographing — title,
+    /// scrubber, elapsed/remaining, and the Info/Cast/subtitle affordances —
+    /// and it is also the part that is deliberately hard to catch: it appears
+    /// on input and hides a few seconds later, and a run driven by files rather
+    /// than by a remote never supplies that input. Every timing-based attempt to
+    /// catch it produced either a black frame (still buffering) or bare video
+    /// (already faded).
+    ///
+    /// So it is asked for directly. `controlsVisible` is re-asserted for a short
+    /// while rather than set once, because the auto-hide countdown is armed when
+    /// the playhead is confirmed advancing — which happens *after* the model is
+    /// built, and would otherwise clear a flag set here before playback began.
+    ///
+    /// DEBUG-only, and only when the capture environment asked for a seeded run,
+    /// so an ordinary session's controls behave exactly as they always have.
+    @MainActor
+    static func holdPlayerControlsIfRequested(_ viewModel: PlayerViewModel?) {
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["PLOZZ_SHOTS_NFS_HOST"] != nil,
+              environment["PLOZZ_SHOTS_HOLD_CONTROLS"] == "1",
+              let viewModel
+        else { return }
+
+        Task { @MainActor in
+            for _ in 0..<240 {
+                viewModel.controls.controlsVisible = true
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
         #endif
     }
 }

@@ -60,6 +60,24 @@ struct MainTabView: View {
         case home, search, music, settings
     }
 
+    /// Performs the capture rig's tab requests. See ``ScreenshotDirector``.
+    private struct ScreenshotTabRouter: View {
+        let director: ScreenshotDirector
+        let onSelect: (String) -> Void
+
+        var body: some View {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+                .task(id: director.tab) {
+                    guard let tab = director.tab else { return }
+                    director.tab = nil
+                    onSelect(tab)
+                    director.finish(.ok)
+                }
+        }
+    }
+
     let accounts: [ResolvedAccount]
     /// The detail-snapshot cache scoped to the active content identity (profile +
     /// accounts + Plex Home-user generation), injected from `RootView` so every
@@ -545,6 +563,19 @@ struct MainTabView: View {
             }
         }
         .plozzTabStyle(navigationStyle)
+        .background {
+            // Switching tabs is `MainTabView`'s job, so the capture rig's tab
+            // requests are consumed here rather than in the Home stack. A leaf
+            // for the usual reason: reading the request in this body would make
+            // the whole tab view a subscriber of it.
+            ScreenshotTabRouter(
+                director: homeRuntime.screenshotDirector,
+                onSelect: { name in
+                    guard let tab = MainTab(rawValue: name) else { return }
+                    selectedTabRaw = tab.rawValue
+                }
+            )
+        }
         .onChange(of: selectedTabRaw, initial: true) { _, tab in
             BrowseDiagnostics.event("screen tab=\(tab)")
             // Keeps person tracing alive across relaunches once it has been

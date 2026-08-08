@@ -25,5 +25,8 @@ struct HomeTabRuntime {
     /// A Top Shelf deep link awaiting routing. Carried by reference so no view
     /// in the tab tree becomes a subscriber of it.
     let pendingPlay: PendingPlayRequest
+    /// The capture rig's screen requests, carried by reference for the same
+    /// reason as ``pendingPlay``. Never populated outside DEBUG.
+    let screenshotDirector: ScreenshotDirector
 }
 #endif

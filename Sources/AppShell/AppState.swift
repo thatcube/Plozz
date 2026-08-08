@@ -66,6 +66,11 @@ public final class AppState {
     /// ``PendingPlayRequest/itemID`` takes the invalidation.
     public let pendingPlay = PendingPlayRequest()
 
+    /// Drives the app to a named screen for an automated capture run. Held by
+    /// reference for the same reason as ``pendingPlay``: only the leaf that
+    /// reads it should be invalidated when it changes. Inert outside DEBUG.
+    public let screenshotDirector = ScreenshotDirector()
+
     /// Per-profile settings facet. Owns the settings sub-models rebuilt when the
     /// active profile changes so switching profiles swaps the active
     /// theme/spoiler/caption/diagnostics state cleanly. Views depend on this
@@ -1322,6 +1327,10 @@ public final class AppState {
     /// Handles an incoming deep link. Recognised `plozz://item/<id>` links queue
     /// the item for playback once the user is signed in.
     public func handle(url: URL) {
+        // `plozz://shots/…` is the capture rig asking for a screen. Checked
+        // first because it shares the scheme; outside DEBUG this always
+        // declines, so a shipped build falls straight through to Top Shelf.
+        if screenshotDirector.handle(url: url) { return }
         if let id = TopShelf.itemID(from: url) {
             pendingPlay.itemID = id
         }

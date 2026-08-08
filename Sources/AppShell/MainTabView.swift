@@ -314,6 +314,14 @@ struct MainTabView: View {
     /// The libraries the rail offers. Seeded from the per-profile snapshot on
     /// appearance (instant chrome) and then refreshed from live discovery.
     @State private var railLibraries: [AggregatedLibrary] = []
+    /// Whether the rail's library list reflects a real answer yet (snapshot or
+    /// discovery), as opposed to the empty value it starts at.
+    ///
+    /// Load-bearing for persistence, not for display: before this is true, every
+    /// library selection prunes to Home simply because nothing is known yet, and
+    /// writing that back would destroy the viewer's remembered destination on
+    /// every cold launch.
+    @State private var railLibrariesLoaded = false
     /// A person page the in-player Cast card asked for, waiting to be pushed.
     ///
     /// Consumed by whichever tab is on screen — see `personRoute(for:)`. Held
@@ -672,11 +680,17 @@ struct MainTabView: View {
         )
         .environment(navigationChrome)
         .onChange(of: resolvedRailSelection) { _, resolved in
-            // Persist the pruning. Without this the stored value still names the
-            // vanished destination, so the moment its server answers again the
-            // viewer is thrown out of whatever they were looking at and back into
-            // a library they didn't pick.
-            guard resolved.storageValue != railSelectionRaw else { return }
+            // Persist the pruning, so a destination that has genuinely gone away
+            // stops being the stored one — otherwise the moment its server answers
+            // again the viewer is thrown out of whatever they were looking at and
+            // back into a library they never picked.
+            //
+            // Gated on the library list being known. At launch it is empty, so
+            // every library selection prunes to Home; writing THAT back would erase
+            // the viewer's remembered destination on every cold start. The rail
+            // still *displays* the pruned value throughout, so its highlight is
+            // never a lie — only the persistence waits.
+            guard railLibrariesLoaded, resolved.storageValue != railSelectionRaw else { return }
             railSelectionRaw = resolved.storageValue
         }
         .task(id: railLibrariesKey) {
@@ -687,6 +701,7 @@ struct MainTabView: View {
             let remembered = navigationLibrariesSnapshotStore.load()
             if railLibraries.isEmpty, !remembered.isEmpty {
                 railLibraries = remembered
+                railLibrariesLoaded = true
             }
         }
         .task(id: railLibrariesKey, priority: .utility) {
@@ -699,6 +714,7 @@ struct MainTabView: View {
             // the remembered set rather than blanking the chrome on a blip.
             guard !discovered.libraries.isEmpty || discovered.unreachableAccountIDs.isEmpty else { return }
             railLibraries = discovered.libraries
+            railLibrariesLoaded = true
             navigationLibrariesSnapshotStore.save(discovered.libraries)
         }
     }

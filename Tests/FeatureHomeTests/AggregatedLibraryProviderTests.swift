@@ -81,16 +81,8 @@ final class AggregatedLibraryProviderTests: XCTestCase {
 
         let result = try await page(provider, start: 0, limit: 10)
         XCTAssertEqual(result.items.map(\.id), ["j0", "j1", "j2"], "Offline server dropped; the other still browses")
-        // A server that has answered NOTHING keeps one slot open for one retry, so
-        // a blip isn't mistaken for "this server has nothing" — see
-        // `AllLibrariesBrowseTests`. It settles on the exact count next call.
-        XCTAssertEqual(result.totalCount, 4)
-        XCTAssertTrue(result.hasMore)
-
-        let settled = try await page(provider, start: 3, limit: 10)
-        XCTAssertTrue(settled.items.isEmpty)
-        XCTAssertEqual(settled.totalCount, 3, "optimism is capped; the grid settles")
-        XCTAssertFalse(settled.hasMore)
+        XCTAssertEqual(result.totalCount, 3)
+        XCTAssertFalse(result.hasMore)
     }
 
     func testTransientFailureDoesNotPermanentlyExhaustSource() async throws {

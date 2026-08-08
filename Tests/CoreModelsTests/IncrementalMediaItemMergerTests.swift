@@ -343,6 +343,32 @@ final class IncrementalMediaItemMergerTests: XCTestCase {
         XCTAssertEqual(after, ["s6", "ar", "s7"], "the contradicting title lands at the tail, still reachable")
     }
 
+    func testLaterCopiesJoinTheTailCardTheSplitCreatedRatherThanMultiplying() {
+        // Once a split has put "Scream 7" in its own tail cluster, a THIRD server's
+        // copy shares the same bad id and so still finds the "Scream 6" cluster
+        // first. It must fall through to the compatible tail cluster instead of
+        // opening another one — otherwise the grid grows one duplicate per server.
+        var merger = IncrementalMediaItemMerger()
+        merger.append([
+            item("s6", title: "Scream 6", year: 2023, account: "plex", ids: ["tmdb": "934433"])
+        ])
+        XCTAssertEqual(merger.slice(from: 0, limit: 20).map(\.id), ["s6"])
+
+        merger.append([
+            item("s7a", title: "Scream 7", year: 2026, account: "jelly", ids: ["tmdb": "934433"])
+        ])
+        merger.append([
+            item("s7b", title: "Scream 7", year: 2026, account: "share", ids: ["tmdb": "934433"])
+        ])
+
+        let result = merger.mergedItems()
+        XCTAssertEqual(result.map(\.id), ["s6", "s7a"], "the third copy folded into the tail card")
+        XCTAssertEqual(
+            Set(result[1].sources.map(\.accountID)), ["jelly", "share"],
+            "and contributed its server to it"
+        )
+    }
+
     func testBeforeExposureTheSplitGuardStillPartitionsExactlyLikeBatch() {
         // The append-only rule must not weaken the pre-exposure merge.
         let batches = [

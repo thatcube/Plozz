@@ -83,7 +83,7 @@ let package = Package(
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
         // See AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to the UPSTREAM release tag 6.15.2 -> c47db496b86e716f323417d4bb6996d04d112f2c.
+        // Pinned to the UPSTREAM release tag 6.16.0 -> 22d3b9723791cfad16f9a64f01afe63c904ad9cd.
         //
         // Plozz no longer carries an AetherEngine fork. Everything the old
         // `plozz-pin-*` stack existed for is upstream as of 5.23.2:
@@ -131,14 +131,27 @@ let package = Package(
         //     breaking change across the 84 releases in this range; no public
         //     symbol was removed or renamed.
         //
-        // Pinned to the 6.15.2 RELEASE rather than upstream HEAD. Same reasoning as
+        // Pinned to the 6.16.0 RELEASE rather than upstream HEAD. Same reasoning as
         // the exact-SHA pin: the playback path takes documented, released changes
-        // only. The SHA is the COMMIT the 6.15.2 tag points at, not the annotated
-        // tag object's own id — a `revision:` pin wants the commit.
+        // only. The SHA is the COMMIT the 6.16.0 tag points at (6.16.0 is a
+        // lightweight tag, so its ref sha already IS the commit); in general a
+        // `revision:` pin wants the commit, not an annotated tag object's own id.
         //
-        // Moved up from 6.6.0. Nine minor releases plus patches, every one of them
-        // documented drop-in with no consumer source change, no symbol removed or
-        // renamed. The ones that matter to shapes Plozz actually serves:
+        // Now at 6.16.0 (moved up from 6.15.2; 6.6.0 before that). Every release in
+        // this range is documented drop-in with no consumer source change, no
+        // symbol removed or renamed. The ones that matter to shapes Plozz actually
+        // serves:
+        //   - 6.16.0 the tvOS display-criteria settle gate finally observes the
+        //     `AVSharedDisplayManager` mode-switch notifications it had always
+        //     dropped (they post from the shared manager, not the per-window one
+        //     the observers filtered on). A dynamic-range/rate panel handshake is
+        //     now waited out on its observed end instead of released early into a
+        //     still-running switch — measured ~2.5 s of content played into a black
+        //     panel before this. Internal surface only; pre-flight and live keep
+        //     the previous 2 s cap.
+        //   - 6.15.3 fixed two measurement/labelling defects in that same gate
+        //     (a backwards `preGate` start label and load-stretched budgets);
+        //     drop-in from 6.15.2, internal surface only.
         //   - 6.15.2 the live `AVIOReader` stopped cycling its own healthy
         //     connections. The 16 MB high-water end had no live branch, so it was
         //     the only thing terminating a healthy live connection: each end
@@ -162,7 +175,7 @@ let package = Package(
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "c47db496b86e716f323417d4bb6996d04d112f2c"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "22d3b9723791cfad16f9a64f01afe63c904ad9cd"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

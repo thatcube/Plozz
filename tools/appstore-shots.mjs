@@ -30,7 +30,7 @@
  */
 
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -54,6 +54,17 @@ const CHROME =
  * The site's tokens, copied rather than imported because the site is a separate
  * repo that this must not depend on. If they drift, these are the ones to fix.
  */
+/**
+ * Manrope, the site's typeface, so a panel and the page that links to it are set
+ * in the same voice. Inlined as a data URL rather than linked: the panels are
+ * rendered from file://, where Chrome gives every file an opaque origin and
+ * refuses the cross-file font request, and a silently missing webfont would
+ * just fall back to the system face and look almost right.
+ */
+const FONT_DATA_URL = `data:font/woff2;base64,${readFileSync(
+  path.join(import.meta.dirname, 'assets', 'manrope-latin-var.woff2')
+).toString('base64')}`;
+
 const TOKENS = {
   bg: '#080809',
   text: '#f2f2f3',
@@ -185,6 +196,15 @@ function page({ width, height, orientation, image, caption, anchor, capture }) {
   return `<!doctype html>
 <meta charset="utf-8">
 <style>
+  @font-face {
+    font-family: 'Manrope';
+    font-style: normal;
+    font-weight: 400 700;
+    /* block, not swap: this is a one-shot render, and a panel captured
+       mid-swap would ship the fallback face to the App Store. */
+    font-display: block;
+    src: url('${FONT_DATA_URL}') format('woff2');
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     width: ${width}px;
@@ -200,7 +220,7 @@ function page({ width, height, orientation, image, caption, anchor, capture }) {
     justify-items: center;
     gap: ${gap}px;
     padding: ${pad}px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     color: ${TOKENS.text};
     /* Two off-canvas glows in the brand colours. They keep a page of otherwise
        near-black panels from reading as a column of dead rectangles in the
@@ -215,7 +235,9 @@ function page({ width, height, orientation, image, caption, anchor, capture }) {
   h1 {
     font-size: ${titleSize}px;
     line-height: 1.12;
-    letter-spacing: -0.022em;
+    /* Matches --track-heading on the site. Manrope wants less negative tracking
+       than the system face these panels used to be set in. */
+    letter-spacing: -0.025em;
     font-weight: 700;
     text-align: center;
     text-wrap: balance;

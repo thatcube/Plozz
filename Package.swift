@@ -83,7 +83,7 @@ let package = Package(
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
         // See AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to the UPSTREAM release tag 6.15.2 -> c47db496b86e716f323417d4bb6996d04d112f2c.
+        // Pinned to the UPSTREAM release tag 6.26.0 -> 73354ec8c6d20ca954b1874254b69fa19e2ffce5.
         //
         // Plozz no longer carries an AetherEngine fork. Everything the old
         // `plozz-pin-*` stack existed for is upstream as of 5.23.2:
@@ -131,9 +131,9 @@ let package = Package(
         //     breaking change across the 84 releases in this range; no public
         //     symbol was removed or renamed.
         //
-        // Pinned to the 6.15.2 RELEASE rather than upstream HEAD. Same reasoning as
+        // Pinned to the 6.26.0 RELEASE rather than upstream HEAD. Same reasoning as
         // the exact-SHA pin: the playback path takes documented, released changes
-        // only. The SHA is the COMMIT the 6.15.2 tag points at, not the annotated
+        // only. The SHA is the COMMIT the 6.26.0 tag points at, not the annotated
         // tag object's own id — a `revision:` pin wants the commit.
         //
         // Moved up from 6.6.0. Nine minor releases plus patches, every one of them
@@ -160,9 +160,22 @@ let package = Package(
         //     a seek — so it lifts a cover onto black. Plozz approximates this today
         //     with `awaitingFirstFrame`; worth revisiting that against this signal.
         //
+        // Moved up from 6.15.2 to 6.26.0. Eleven minor releases plus patches, all
+        // documented drop-in with no consumer source change, no public symbol
+        // removed or renamed. Highlights across the span:
+        //   - 6.26.0 the error string is treated as a payload, not a lookup key.
+        //   - 6.25.x source measurement over trust; timeshift archives on their own
+        //     axis; SEI preservation at the record door.
+        //   - 6.24.0 live playlists reach the header-carrying path.
+        //   - 6.21.0–6.23.x live HLS subtitle renditions, system caption requests
+        //     reaching the host, determinate startup-progress checkpoints.
+        //   - 6.20.x segment grid aligned to the source's own keyframes.
+        //   - 6.16.0–6.19.x AirPlay/first-frame settle-gate correctness, codec
+        //     routing defaults, and pgssub cue timing.
+        //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "c47db496b86e716f323417d4bb6996d04d112f2c"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "73354ec8c6d20ca954b1874254b69fa19e2ffce5"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

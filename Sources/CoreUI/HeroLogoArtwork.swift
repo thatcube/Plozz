@@ -253,7 +253,8 @@ private struct LoadedLogo<TextFallback: View>: View {
                 .frame(maxWidth: maxWidth, alignment: alignment)
                 .modifier(LogoLegibilityHalo(
                     isDark: haloStyle == .adaptive && processed.isDark,
-                    active: processed.needsHalo
+                    active: processed.needsHalo,
+                    scale: LogoLegibilityHalo.scale(forLogoHeight: fitted.height)
                 ))
         }
     }
@@ -706,30 +707,52 @@ actor HeroLogoPipeline {
 /// regardless of the artwork behind it. Two stacked shadows build a stronger,
 /// evenly-spread glow than one. `active == false` is a clean pass-through, so a
 /// logo that already contrasts with its background renders with no halo at all.
+///
+/// The radii are proportional to the logo, not absolute. They were calibrated
+/// against the hero's 200pt slot, and a shadow is a property of the thing casting
+/// it: reused unscaled on a card — where the logo is nearer 30pt — a 14pt blur is
+/// half the logo's height, and the "halo" closes over the glyphs instead of
+/// sitting behind them. On an iPad Continue Watching card that read as a layer of
+/// dirt on every logo: gold wordmarks came out brown, and the effect was most
+/// obvious on exactly the bright logos that needed no help.
 private struct LogoLegibilityHalo: ViewModifier {
     let isDark: Bool
     let active: Bool
+    /// 1 at hero size, proportionally smaller for a card-sized logo.
+    var scale: CGFloat = 1
 
     @Environment(\.colorScheme) private var colorScheme
+
+    /// The hero logo slot the radii below were tuned against.
+    private static let referenceHeight: CGFloat = 200
+
+    /// Halo scale for a logo of `height` points. Floored rather than left linear:
+    /// below about a quarter of hero size the shadow stops reading as depth and
+    /// starts disappearing entirely, and a small logo on busy artwork still needs
+    /// an edge.
+    static func scale(forLogoHeight height: CGFloat) -> CGFloat {
+        guard height > 0 else { return 1 }
+        return min(1, max(0.25, height / referenceHeight))
+    }
 
     func body(content: Content) -> some View {
         if !active {
             content
         } else if isDark {
             content
-                .shadow(color: .white.opacity(0.6), radius: 5)
-                .shadow(color: .white.opacity(0.35), radius: 14)
+                .shadow(color: .white.opacity(0.6), radius: 5 * scale)
+                .shadow(color: .white.opacity(0.35), radius: 14 * scale)
         } else if colorScheme == .light {
             // Softer, lighter dark glow in light mode: the light-mode hero is
             // already bright, so a heavy black halo reads as a hard smudge. Lower
             // opacity + a wider radius keeps the logo legible with a gentle lift.
             content
-                .shadow(color: .black.opacity(0.30), radius: 7)
-                .shadow(color: .black.opacity(0.22), radius: 18)
+                .shadow(color: .black.opacity(0.30), radius: 7 * scale)
+                .shadow(color: .black.opacity(0.22), radius: 18 * scale)
         } else {
             content
-                .shadow(color: .black.opacity(0.55), radius: 5)
-                .shadow(color: .black.opacity(0.45), radius: 14)
+                .shadow(color: .black.opacity(0.55), radius: 5 * scale)
+                .shadow(color: .black.opacity(0.45), radius: 14 * scale)
         }
     }
 }

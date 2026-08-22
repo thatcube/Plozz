@@ -1607,6 +1607,10 @@ private struct PlozziOSAppearanceSettingsView: View {
                         .tag(language)
                     }
                 }
+                // A menu rather than the default push: every release-ready
+                // language is offered, so the pushed variant is a screen of
+                // nearly forty rows reached by leaving this one.
+                .pickerStyle(.menu)
             } footer: {
                 Text("Applies to Plozz's own labels. Media titles keep the language your server provides, and system prompts follow the device.")
             }

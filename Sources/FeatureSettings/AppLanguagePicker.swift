@@ -58,31 +58,56 @@ struct AppLanguagePicker: View {
         return components?.url
     }
 
+    /// A native pop-up menu rather than an inline list.
+    ///
+    /// Every release-ready language is offered — 37 rows and counting — and as a
+    /// list that is a settings page you scroll for several screens to reach the
+    /// one control on it. The same call was already made one file over for the
+    /// audio-language preference ("too long for the inline pill picker"); this is
+    /// the same list, only longer.
+    ///
+    /// The menu collapses it to a single row showing the current choice, and the
+    /// platform gets to present the options the way it presents every other long
+    /// menu — which on tvOS is a scrollable overlay the remote is already good at.
+    @ViewBuilder
+    private var languageMenu: some View {
+        Menu {
+            Picker("Language", selection: $model.language) {
+                ForEach(languages) { language in
+                    label(for: language).tag(language)
+                }
+            }
+        } label: {
+            Label {
+                label(for: model.language)
+            } icon: {
+                Image(systemName: "globe")
+            }
+        }
+        .menuStyle(.button)
+    }
+
+    /// An endonym ("Español") is a proper noun and must read identically whatever
+    /// the UI language is, so it is verbatim. "System" is the one row that is
+    /// genuinely copy, so it stays a resource and re-resolves with the injected
+    /// locale.
+    ///
+    /// A DEBUG build offers languages that are still being translated, so say
+    /// which those are — otherwise a half-English screen reads as a bug rather
+    /// than as work in progress. Never shown in a release build.
+    private func label(for language: AppLanguage) -> Text {
+        guard let endonym = language.endonym else {
+            return Text(AppLanguage.systemOptionTitle)
+        }
+        if case let .explicit(code) = language, AppLanguage.isInProgress(code) {
+            return Text(verbatim: endonym) + Text(verbatim: "  ") + Text("(in progress)")
+        }
+        return Text(verbatim: endonym)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SettingsOptionList(
-                options: languages,
-                selection: $model.language,
-                title: { language in
-                    // An endonym ("Español") is a proper noun and must read
-                    // identically whatever the UI language is, so it is verbatim.
-                    // "System" is the one row that is genuinely copy, so it stays
-                    // a resource and re-resolves with the injected locale.
-                    if let endonym = language.endonym {
-                        // A DEBUG build offers languages that are still being
-                        // translated, so say which those are — otherwise a
-                        // half-English screen reads as a bug rather than as
-                        // work in progress. Never shown in a release build.
-                        if case let .explicit(code) = language, AppLanguage.isInProgress(code) {
-                            Text(verbatim: endonym) + Text(verbatim: "  ") + Text("(in progress)")
-                        } else {
-                            Text(verbatim: endonym)
-                        }
-                    } else {
-                        Text(AppLanguage.systemOptionTitle)
-                    }
-                }
-            )
+            languageMenu
 
             if languages.count == 1 {
                 Text("Plozz is only available in English for now. More languages are on the way.")

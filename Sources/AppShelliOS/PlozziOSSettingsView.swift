@@ -2057,6 +2057,9 @@ private struct PlozziOSPlaybackSettingsView: View {
 
             SettingsSectionGroup("Playback") {
                 Toggle("Seek without pausing", isOn: $model.settings.seekWithoutPausing)
+                // Autoplay first: whether the next episode starts at all, then
+                // whether the card announces it. Independent switches.
+                Toggle("Autoplay next episode", isOn: $model.settings.autoPlayNextEpisode)
                 Toggle("Show Up Next card", isOn: $model.settings.showUpNextCard)
                 if model.settings.showUpNextCard {
                     Picker("Up Next lead time", selection: $model.settings.upNextLeadSeconds) {

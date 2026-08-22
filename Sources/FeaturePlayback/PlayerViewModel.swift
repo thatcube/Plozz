@@ -677,13 +677,19 @@ public final class PlayerViewModel {
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
-    /// stream. Auto-advances to the next episode when one is queued, otherwise
-    /// dismisses so the player never freezes on the final frame: trailers/movies
-    /// return to detail, a season finale returns to the series page.
+    /// stream. Auto-advances to the next episode when one is queued and the
+    /// profile allows it, otherwise dismisses so the player never freezes on the
+    /// final frame: trailers/movies return to detail, a season finale returns to
+    /// the series page.
+    ///
+    /// This path used to advance unconditionally, which is what made "turn the Up
+    /// Next card off and the next episode still plays" (#22) — the card was the
+    /// only thing that looked like it governed advancing, and it never reached
+    /// here. Autoplay is its own setting now, and this is the path it governs.
     private func handlePlaybackEnded() {
-        PlaybackTrace.note("handlePlaybackEnded curr=\(String(format: "%.2f", engine.currentTime)) furthest=\(String(format: "%.2f", engine.furthestObservedPosition)) dur=\(String(format: "%.2f", engine.duration)) hasNext=\(nextEpisode != nil) isSeeking=\(controls.isSeeking) isScrubbing=\(controls.isScrubbing) intendsPlayback=\(intendsPlayback)")
+        PlaybackTrace.note("handlePlaybackEnded curr=\(String(format: "%.2f", engine.currentTime)) furthest=\(String(format: "%.2f", engine.furthestObservedPosition)) dur=\(String(format: "%.2f", engine.duration)) hasNext=\(nextEpisode != nil) autoPlay=\(playbackSettings.autoPlayNextEpisode) isSeeking=\(controls.isSeeking) isScrubbing=\(controls.isScrubbing) intendsPlayback=\(intendsPlayback)")
         didReachNaturalEnd = true
-        if let next = nextEpisode {
+        if let next = nextEpisode, playbackSettings.autoPlayNextEpisode {
             pendingNextEpisode = next
         } else {
             shouldDismiss = true
@@ -1311,6 +1317,10 @@ public final class PlayerViewModel {
     /// failures degrade silently to no markers (older/marker-less servers). Runs
     /// once per load.
     private func loadSkipSegmentsIfEnabled() {
+        // Mirrored before the marker guard, not after: it describes the profile,
+        // not the segments, and a viewer with both Skip Intros and the Up Next
+        // card off would otherwise leave the container reading a stale default.
+        controls.upNextCard.autoPlayEnabled = playbackSettings.autoPlayNextEpisode
         let wantsMarkers = playbackSettings.skipIntros.fetchesMarkers || playbackSettings.showUpNextCard
         guard wantsMarkers else { return }
         controls.skipMode = playbackSettings.skipIntros

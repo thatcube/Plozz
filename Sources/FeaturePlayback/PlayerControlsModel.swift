@@ -255,6 +255,14 @@ public final class UpNextModel {
     /// Set from the profile's `PlaybackSettings.upNextLeadSeconds`; default 30s.
     public var leadSeconds: TimeInterval = 30
 
+    /// The profile's autoplay switch, mirrored beside `leadSeconds` so the
+    /// container's Up Next policy can read it. Lives on this facet rather than on
+    /// `PlayerControlsModel` because that type is a god object under a
+    /// decreasing-only property budget (`tools/arch-guard.py`) — and this belongs
+    /// with the rest of the next-episode state anyway. Defaults true (the historic
+    /// behaviour), so any surface that never sets it advances as it always did.
+    public var autoPlayEnabled: Bool = true
+
     public init() {}
 }
 

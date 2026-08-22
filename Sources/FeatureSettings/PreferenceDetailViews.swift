@@ -609,8 +609,27 @@ struct PlaybackDetailView: View {
         ]
     }
 
+    /// Autoplay and the Up Next card, in that order: whether the next episode
+    /// starts, then whether you're told about it first. They're independent (see
+    /// ``PlaybackSettings/autoPlayNextEpisode``), so the card's own controls stay
+    /// available with autoplay off — the card is still a one-press shortcut.
     private var upNextRows: [SettingsSplitRow] {
         [
+            SettingsSplitRow(
+                id: "autoplay-next-episode",
+                title: "Autoplay",
+                description: "Play the next episode automatically.",
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Autoplay next episode", isOn: $playback.settings.autoPlayNextEpisode)
+                    Text(playback.settings.autoPlayNextEpisode
+                         ? "The next episode starts when one finishes."
+                         : "You'll go back to the series when an episode finishes.")
+                        .font(.callout)
+                        .plozzForeground(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            },
             SettingsSplitRow(
                 id: "show-up-next-card",
                 title: "Show Up Next card",

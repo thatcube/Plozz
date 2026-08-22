@@ -31,13 +31,19 @@ enum UpNextPresentationDecision {
 
     /// Decides the Up Next action. Callers evaluate this only once Up Next owns
     /// the shared slot for the current position.
+    ///
+    /// `autoPlayEnabled` is the profile's autoplay switch. With it off, the two
+    /// automatic modes degrade to the manual card rather than disappearing: the
+    /// viewer still gets the one-press "Play Next" they'd otherwise have to find
+    /// in the info panel, they just never get moved along without asking.
     static func action(
         skipMode: SkipIntrosMode,
         wasSeekEntered: Bool,
         presentingCard: Bool,
         focusIsSurface: Bool,
         isScrubbing: Bool,
-        autoDelayDeadlineReached: Bool
+        autoDelayDeadlineReached: Bool,
+        autoPlayEnabled: Bool = true
     ) -> Action {
         // A grace-window seek into credits presents the card passively: visible,
         // but the scrub surface keeps focus and nothing auto-advances.
@@ -46,7 +52,11 @@ enum UpNextPresentationDecision {
             return .presentPassive
         }
 
-        switch skipMode {
+        // Autoplay off collapses the auto modes onto the manual card. `.off`/`.on`
+        // already present manually, so this is the whole difference.
+        let effectiveMode: SkipIntrosMode = autoPlayEnabled ? skipMode : .on
+
+        switch effectiveMode {
         case .off, .on:
             guard !presentingCard, focusIsSurface, !isScrubbing else { return .none }
             return .presentManual

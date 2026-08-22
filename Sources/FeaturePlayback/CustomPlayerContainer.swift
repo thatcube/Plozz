@@ -718,7 +718,8 @@ final class PlayerInputViewController: UIViewController {
             presentingCard: presentingUpNext,
             focusIsSurface: focusContext == .surface,
             isScrubbing: model.isScrubbing,
-            autoDelayDeadlineReached: deadlineReached
+            autoDelayDeadlineReached: deadlineReached,
+            autoPlayEnabled: model.upNextCard.autoPlayEnabled
         ) {
         case .none:
             break

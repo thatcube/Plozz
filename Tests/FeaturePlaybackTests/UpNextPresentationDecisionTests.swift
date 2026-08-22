@@ -14,7 +14,8 @@ final class UpNextPresentationDecisionTests: XCTestCase {
         presentingCard: Bool = false,
         focusIsSurface: Bool = true,
         isScrubbing: Bool = false,
-        autoDelayDeadlineReached: Bool = false
+        autoDelayDeadlineReached: Bool = false,
+        autoPlayEnabled: Bool = true
     ) -> UpNextPresentationDecision.Action {
         UpNextPresentationDecision.action(
             skipMode: skipMode,
@@ -22,7 +23,8 @@ final class UpNextPresentationDecisionTests: XCTestCase {
             presentingCard: presentingCard,
             focusIsSurface: focusIsSurface,
             isScrubbing: isScrubbing,
-            autoDelayDeadlineReached: autoDelayDeadlineReached)
+            autoDelayDeadlineReached: autoDelayDeadlineReached,
+            autoPlayEnabled: autoPlayEnabled)
     }
 
     // MARK: Grace-window seek → passive present, never auto
@@ -86,6 +88,52 @@ final class UpNextPresentationDecisionTests: XCTestCase {
 
     func testAutoDelayArmDefersOffSurface() {
         XCTAssertEqual(decide(skipMode: .autoDelay, focusIsSurface: false), .none)
+    }
+    // MARK: Autoplay off (#22) — never advance on its own, still offer the card
+
+    /// The whole point of the setting: no mode may advance without being asked.
+    func testAutoPlayOffNeverAdvancesInAnyMode() {
+        for mode in SkipIntrosMode.allCases {
+            XCTAssertNotEqual(
+                decide(skipMode: mode, autoPlayEnabled: false), .advance,
+                "mode: \(mode)")
+            XCTAssertNotEqual(
+                decide(skipMode: mode, autoPlayEnabled: false), .beginAutoDelay,
+                "mode: \(mode)")
+        }
+    }
+
+    /// The auto modes degrade to the manual card rather than vanishing — the
+    /// viewer keeps the one-press shortcut, they just aren't moved along.
+    func testAutoPlayOffTurnsAutoModesIntoTheManualCard() {
+        XCTAssertEqual(decide(skipMode: .autoInstant, autoPlayEnabled: false), .presentManual)
+        XCTAssertEqual(decide(skipMode: .autoDelay, autoPlayEnabled: false), .presentManual)
+    }
+
+    /// Even with the card already up and its countdown elapsed, an autoplay-off
+    /// profile holds — the deadline is an automatic advance like any other.
+    func testAutoPlayOffIgnoresAnElapsedAutoDelayDeadline() {
+        XCTAssertEqual(
+            decide(
+                skipMode: .autoDelay,
+                presentingCard: true,
+                autoDelayDeadlineReached: true,
+                autoPlayEnabled: false),
+            .none)
+    }
+
+    /// Autoplay doesn't change the grace-window rule: a deliberate seek into
+    /// credits still presents passively and still steals nothing.
+    func testAutoPlayOffKeepsTheSeekGraceBehaviour() {
+        XCTAssertEqual(
+            decide(skipMode: .autoInstant, wasSeekEntered: true, autoPlayEnabled: false),
+            .presentPassive)
+    }
+
+    /// And with autoplay on, every existing behaviour is untouched.
+    func testAutoPlayOnLeavesTheAutoModesAlone() {
+        XCTAssertEqual(decide(skipMode: .autoInstant, autoPlayEnabled: true), .advance)
+        XCTAssertEqual(decide(skipMode: .autoDelay, autoPlayEnabled: true), .beginAutoDelay)
     }
 }
 #endif

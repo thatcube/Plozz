@@ -36,13 +36,13 @@ public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
         case .logoAndArtwork:
             return LocalizedStringResource(
                 "continueWatchingArtwork.logoAndArtwork.detail",
-                defaultValue: "Everything sits on the artwork.",
+                defaultValue: "Title and details on the artwork.",
                 comment: "One-line explanation of the Logo & Artwork option for Continue Watching cards."
             )
         case .thumbnail:
             return LocalizedStringResource(
                 "continueWatchingArtwork.thumbnailAndTitle.detail",
-                defaultValue: "The title and details sit below it.",
+                defaultValue: "Title and details below the artwork.",
                 comment: "One-line explanation of the Thumbnail & Title option for Continue Watching cards."
             )
         }

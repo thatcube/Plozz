@@ -24,6 +24,9 @@ struct PlozziOSHomeSkeletonRail: View {
     let style: PosterCardView.Style
     /// Enough cards to fill the widest supported screen; the rail clips the rest.
     var cardCount: Int = 8
+    /// Matches the caption-less Continue Watching card, so the placeholder is the
+    /// same height as the card replacing it.
+    var showsCaption: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -40,7 +43,10 @@ struct PlozziOSHomeSkeletonRail: View {
                 // opposite of what a "never show a blank row" placeholder is for.
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(0..<cardCount, id: \.self) { _ in
-                        SkeletonCardView(style: style == .landscape ? .landscape : .poster)
+                        SkeletonCardView(
+                            style: style == .landscape ? .landscape : .poster,
+                            showsCaption: showsCaption
+                        )
                             .frame(
                                 width: metrics.cardSlotWidth(
                                     for: style,

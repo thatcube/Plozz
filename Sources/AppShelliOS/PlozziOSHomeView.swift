@@ -1468,7 +1468,9 @@ private struct PlozziOSHomeRowView: View {
                 // page shifting.
                 PlozziOSHomeSkeletonRail(
                     title: Text(row.title),
-                    style: row.style == .landscape ? .landscape : .poster
+                    style: row.style == .landscape ? .landscape : .poster,
+                    showsCaption: !(row.kind == .continueWatching
+                        && appModel.settings.homeVisibility.continueWatchingShowsSeriesArtwork)
                 )
             } else {
                 PlozziOSHomeMediaRail(

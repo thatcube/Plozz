@@ -884,6 +884,17 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         return nil
     }
 
+    /// The episode's place in the run, spaced rather than dotted — `S4 E1`.
+    ///
+    /// A tighter sibling of ``subtitle`` for places that already join with `·`,
+    /// where the dotted form would produce "S4 · E1 · 22m" and read as three
+    /// separate facts instead of one designation and a duration. `nil` unless both
+    /// numbers are known — a half-built "S4" says nothing useful.
+    public var seasonEpisodeLabel: String? {  // l10n:content — "S"/"E" abbreviations are hand-built formatting, not copy
+        guard let season = seasonNumber, let episode = episodeNumber else { return nil }
+        return "S\(season) E\(episode)"
+    }
+
     /// On-screen / voice talent, in billing order (crew filtered out).
     public var cast: [MediaPerson] {
         people.filter(\.isCast)

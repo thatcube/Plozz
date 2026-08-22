@@ -27,6 +27,9 @@ struct HomeSkeletonView: View {
     /// launch: once Home has loaded once, `HomeContentStore` paints the real hero +
     /// rows instantly from cache and this loading state is skipped entirely.
     var heroActive: Bool = false
+    /// Mirrors the profile's Continue Watching artwork choice, so the placeholder
+    /// reserves a caption only when the real card will draw one.
+    var continueWatchingShowsSeriesArtwork: Bool = true
     /// How long loading must persist before the skeleton fades in.
     var appearDelay: Duration = .milliseconds(150)
 
@@ -88,7 +91,10 @@ struct HomeSkeletonView: View {
     private var rowsStack: some View {
         VStack(alignment: .leading, spacing: metrics.rowSpacing) {
             ForEach(rows, id: \.kind) { row in
-                HomeSkeletonRowView(row: row)
+                HomeSkeletonRowView(
+                    row: row,
+                    continueWatchingShowsSeriesArtwork: continueWatchingShowsSeriesArtwork
+                )
             }
         }
     }
@@ -99,6 +105,9 @@ struct HomeSkeletonView: View {
 /// live server data while the cached hero and stable rows are already visible.
 struct HomeSkeletonRowView: View {
     let row: HomeRowLayout
+    /// Whether Continue Watching is in its caption-less series-artwork mode, so
+    /// the placeholder matches the card that is about to replace it.
+    var continueWatchingShowsSeriesArtwork: Bool = true
 
     @State private var availableWidth: CGFloat = 0
     @Environment(\.plozzMetrics) private var metrics
@@ -139,8 +148,11 @@ struct HomeSkeletonRowView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: metrics.cardSpacing) {
                     ForEach(0..<cardCount(for: row), id: \.self) { _ in
-                        SkeletonCardView(style: cardStyle(for: kind))
-                            .frame(width: cardWidth(for: kind))
+                        SkeletonCardView(
+                            style: cardStyle(for: kind),
+                            showsCaption: showsCaption(for: kind)
+                        )
+                        .frame(width: cardWidth(for: kind))
                     }
                 }
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
@@ -161,6 +173,12 @@ struct HomeSkeletonRowView: View {
                     }
             }
         }
+    }
+
+    /// Continue Watching's series-artwork cards carry their text on the artwork
+    /// and draw no caption, so their placeholders must not reserve one either.
+    private func showsCaption(for kind: HomeRowKind) -> Bool {
+        !(kind == .continueWatching && continueWatchingShowsSeriesArtwork)
     }
 
     /// Continue Watching and the Libraries tiles use the wide landscape card;

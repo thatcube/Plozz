@@ -266,7 +266,7 @@ public struct HomeView: View {
             state: viewModel.state,
             emptyMessage: "Your libraries are empty. Add media on your media server to see it here.",
             onRetry: { Task { await viewModel.load() } },
-            loadingContent: { HomeSkeletonView(layout: viewModel.skeletonLayout, heroActive: heroSettings?.settings.isActive ?? false) }
+            loadingContent: { HomeSkeletonView(layout: viewModel.skeletonLayout, heroActive: heroSettings?.settings.isActive ?? false, continueWatchingShowsSeriesArtwork: visibility.continueWatchingShowsSeriesArtwork) }
         ) { content in
             // The screen is a data-driven list of rows. Both this loaded view and
             // the skeleton render from the same ordered `HomeRow`/`HomeRowKind`

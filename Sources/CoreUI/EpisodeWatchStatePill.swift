@@ -22,9 +22,18 @@ public struct EpisodeWatchStatePill: View {
     private let barWidth: CGFloat
     private let barHeight: CGFloat
     private let playGlyphHeight: CGFloat?
+    private let detailText: String?
+    private let showsPlayGlyphWhenIdle: Bool
 
     @Environment(\.plozzChromeIsFocused) private var isFocused
 
+    /// - Parameters:
+    ///   - detailText: a short qualifier shown immediately before the duration
+    ///     (e.g. `S4 E1`), joined with `·`. Continue Watching uses it so a card
+    ///     whose artwork is the *show* still says which episode you are on.
+    ///   - showsPlayGlyphWhenIdle: draws the play glyph on the not-started form
+    ///     too. An unstarted episode has no progress to draw, so the bar is
+    ///     omitted and the glyph alone carries "this resumes".
     public init(
         item: MediaItem,
         showsRuntimeWhenIdle: Bool = true,
@@ -32,7 +41,9 @@ public struct EpisodeWatchStatePill: View {
         showsBackground: Bool = true,
         barWidth: CGFloat = 54,
         barHeight: CGFloat = 5,
-        playGlyphHeight: CGFloat? = nil
+        playGlyphHeight: CGFloat? = nil,
+        detailText: String? = nil,
+        showsPlayGlyphWhenIdle: Bool = false
     ) {
         self.item = item
         self.showsRuntimeWhenIdle = showsRuntimeWhenIdle
@@ -41,6 +52,8 @@ public struct EpisodeWatchStatePill: View {
         self.barWidth = barWidth
         self.barHeight = barHeight
         self.playGlyphHeight = playGlyphHeight
+        self.detailText = detailText
+        self.showsPlayGlyphWhenIdle = showsPlayGlyphWhenIdle
     }
 
     private enum State {
@@ -51,7 +64,11 @@ public struct EpisodeWatchStatePill: View {
         /// items lost the whole chip and fell back to the plain full-width bar, so
         /// Continue Watching showed two different treatments side by side.
         case inProgress(fraction: Double, remaining: String?)
-        case runtime(String)
+        /// Not started. The duration is optional so a provider that reports no
+        /// runtime can still show a `detailText`-only chip — without it a Continue
+        /// Watching card, which has no caption to fall back on, would say nothing
+        /// at all about which episode it is.
+        case runtime(String?)
     }
 
     private var state: State? {
@@ -63,6 +80,9 @@ public struct EpisodeWatchStatePill: View {
         }
         if showsRuntimeWhenIdle, let runtime = item.runtime?.runtimeBadgeText {
             return .runtime(runtime)
+        }
+        if showsPlayGlyphWhenIdle, detailText?.isEmpty == false {
+            return .runtime(nil)
         }
         return nil
     }
@@ -97,7 +117,7 @@ public struct EpisodeWatchStatePill: View {
                     width: barWidth,
                     height: barHeight
                 )
-                if let remaining { Text(remaining) }
+                if let trailing = joined(remaining) { Text(verbatim: trailing) }
             }
             .accessibilityLabel(
                 remaining.map { Text("\($0) left") }
@@ -111,8 +131,28 @@ public struct EpisodeWatchStatePill: View {
                     )
             )
         case let .runtime(text):
-            Text(text)
+            // Nothing has been watched, so there is no progress to draw. Omitting
+            // the bar rather than drawing an empty one keeps the chip honest — an
+            // unstarted episode showing a 0% bar reads as a stalled download.
+            if let label = joined(text) {
+                if showsPlayGlyphWhenIdle {
+                    HStack(spacing: 8) {
+                        playGlyph
+                        Text(verbatim: label)
+                    }
+                } else {
+                    Text(verbatim: label)
+                }
+            }
         }
+    }
+
+    /// `detailText` and a duration as one dotted run — "S4 E1 · 22m" — dropping
+    /// either side when it is absent.
+    private func joined(_ duration: String?) -> String? {  // l10n:content — joins a hand-built S/E designation with a formatted duration
+        let parts = [detailText, duration].compactMap { $0 }.filter { !$0.isEmpty }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -156,6 +196,8 @@ public struct ResumeChipOverlay: View {
     private let item: MediaItem
     private let downloadState: MediaDownloadBadgeState?
     private let showsMenu: Bool
+    private let detailText: String?
+    private let showsPlayGlyphWhenIdle: Bool
 
     @Environment(\.plozzMetrics) private var metrics
 
@@ -165,14 +207,21 @@ public struct ResumeChipOverlay: View {
     ///   - showsMenu: draws the visible "…" actions menu. A press-and-hold menu is
     ///     discoverable on tvOS (cards focus before they're chosen) but hidden on a
     ///     touch card, so touch surfaces opt in.
+    ///   - detailText: a short qualifier shown before the duration (e.g. `S4 E1`).
+    ///   - showsPlayGlyphWhenIdle: give the not-started form a play glyph and no
+    ///     progress bar.
     public init(
         item: MediaItem,
         downloadState: MediaDownloadBadgeState? = nil,
-        showsMenu: Bool = false
+        showsMenu: Bool = false,
+        detailText: String? = nil,
+        showsPlayGlyphWhenIdle: Bool = false
     ) {
         self.item = item
         self.downloadState = downloadState
         self.showsMenu = showsMenu
+        self.detailText = detailText
+        self.showsPlayGlyphWhenIdle = showsPlayGlyphWhenIdle
     }
 
     public var body: some View {
@@ -201,14 +250,18 @@ public struct ResumeChipOverlay: View {
                         max(20, geometry.size.width * 0.42)
                     )
                     HStack(alignment: .center, spacing: metrics.resumeChipInset * 0.5) {
-                        if item.cardRuntimeText != nil || item.resumeProgressFraction != nil {
+                        if item.cardRuntimeText != nil
+                            || item.resumeProgressFraction != nil
+                            || (showsPlayGlyphWhenIdle && detailText?.isEmpty == false) {
                             EpisodeWatchStatePill(
                                 item: item,
                                 showsRuntimeWhenIdle: true,
                                 showsWatched: false,
                                 showsBackground: false,
                                 barWidth: barWidth,
-                                barHeight: metrics.resumeChipBarHeight
+                                barHeight: metrics.resumeChipBarHeight,
+                                detailText: detailText,
+                                showsPlayGlyphWhenIdle: showsPlayGlyphWhenIdle
                             )
                             .font(.system(size: metrics.resumeChipFontSize, weight: .semibold))
                             // Last-resort guard for a very narrow card with a long
@@ -240,7 +293,12 @@ public struct ResumeChipOverlay: View {
     /// Anything to draw along the bottom edge. Resume progress counts even with no
     /// runtime text — see `EpisodeWatchStatePill.State.inProgress`.
     private var hasBottomChrome: Bool {
-        item.cardRuntimeText != nil || item.resumeProgressFraction != nil || downloadState != nil
+        item.cardRuntimeText != nil
+            || item.resumeProgressFraction != nil
+            || downloadState != nil
+            // A designation alone is worth a chip: on a series-artwork card it is
+            // the only thing naming the episode.
+            || (showsPlayGlyphWhenIdle && detailText?.isEmpty == false)
     }
 
 }

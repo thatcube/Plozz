@@ -268,3 +268,45 @@ final class SpoilerSettingsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(SpoilerSettings.self, from: data), settings)
     }
 }
+
+/// `MediaItem.seasonEpisodeLabel` — the spaced designation Continue Watching
+/// draws inside its resume chip.
+final class SeasonEpisodeLabelTests: XCTestCase {
+    private func episode(season: Int?, number: Int?) -> MediaItem {
+        MediaItem(
+            id: "e",
+            title: "Pilot",
+            kind: .episode,
+            parentTitle: "The Show",
+            seasonNumber: season,
+            episodeNumber: number
+        )
+    }
+
+    /// Spaced, not dotted. The chip already joins with `·` to attach the
+    /// duration, so the dotted `subtitle` form would render "S4 · E1 · 22m" and
+    /// read as three unrelated facts.
+    func testUsesASpaceSoItReadsAsOneDesignation() {
+        XCTAssertEqual(episode(season: 4, number: 1).seasonEpisodeLabel, "S4 E1")
+        XCTAssertEqual(episode(season: 4, number: 1).subtitle, "S4 · E1", "subtitle keeps its dotted form")
+    }
+
+    /// A half-built "S4" says nothing useful, so both numbers are required.
+    func testRequiresBothNumbers() {
+        XCTAssertNil(episode(season: 4, number: nil).seasonEpisodeLabel)
+        XCTAssertNil(episode(season: nil, number: 1).seasonEpisodeLabel)
+        XCTAssertNil(episode(season: nil, number: nil).seasonEpisodeLabel)
+    }
+
+    /// Unlike `subtitle`, it never falls back to the series title — the artwork
+    /// is already showing that, and a duplicate would read as a stutter.
+    func testNeverFallsBackToTheSeriesTitle() {
+        let numberless = episode(season: nil, number: nil)
+        XCTAssertEqual(numberless.subtitle, "The Show")
+        XCTAssertNil(numberless.seasonEpisodeLabel)
+    }
+
+    func testMovieHasNoDesignation() {
+        XCTAssertNil(MediaItem(id: "m", title: "Film", kind: .movie, productionYear: 1999).seasonEpisodeLabel)
+    }
+}

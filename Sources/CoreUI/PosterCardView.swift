@@ -210,15 +210,22 @@ public struct PosterCardView: View {
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
-            VStack(alignment: .leading, spacing: 4) {
-                primaryText
-                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                    .foregroundStyle(titleColor)
-                    .lineLimit(1)
-                subtitleLine
+            // Series-artwork cards say everything on the artwork itself — the show
+            // as its logo, the episode and time in the chip — so there is no
+            // caption under them at all. A card that is purely its art is the
+            // point of the treatment; a reserved-but-empty caption slot would just
+            // read as a rendering bug.
+            if !showsSeriesArtwork {
+                VStack(alignment: .leading, spacing: 4) {
+                    primaryText
+                        .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                        .foregroundStyle(titleColor)
+                        .lineLimit(1)
+                    subtitleLine
+                }
+                .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
+                .frame(width: size.width, alignment: .leading)
             }
-            .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
-            .frame(width: size.width, alignment: .leading)
         }
         .plozzFramedMediaCard(
             innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
@@ -246,19 +253,23 @@ public struct PosterCardView: View {
     private var borderlessCard: some View {
         VStack(alignment: .leading, spacing: borderlessCaptionSpacing) {
             borderlessArtwork
-            BorderlessCardCaption(
-                title: primaryText,
-                subtitle: subtitleText,
-                horizontalInset: borderlessCaptionInset,
-                reservesSubtitleSpace: reservesSubtitleSpace
-            )
-            // Push the caption down on focus with a pure transform, never a layout
-            // change: the gap slot is always reserved at its focused size (see
-            // `borderlessCaptionSpacing`) and the caption rides *up* to the resting
-            // gap when unfocused, dropping back down on focus. Because it's an
-            // offset (like `scaleEffect`), the card's footprint is identical in both
-            // states, so focusing one card can't shift the row or the page.
-            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+            // See `landscapeCard`: a series-artwork card carries its text on the
+            // artwork, so it has no caption.
+            if !showsSeriesArtwork {
+                BorderlessCardCaption(
+                    title: primaryText,
+                    subtitle: subtitleText,
+                    horizontalInset: borderlessCaptionInset,
+                    reservesSubtitleSpace: reservesSubtitleSpace
+                )
+                // Push the caption down on focus with a pure transform, never a layout
+                // change: the gap slot is always reserved at its focused size (see
+                // `borderlessCaptionSpacing`) and the caption rides *up* to the resting
+                // gap when unfocused, dropping back down on focus. Because it's an
+                // offset (like `scaleEffect`), the card's footprint is identical in both
+                // states, so focusing one card can't shift the row or the page.
+                .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+            }
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: borderlessCornerRadius, action: action)
@@ -487,7 +498,12 @@ public struct PosterCardView: View {
             ResumeChipOverlay(
                 item: item,
                 downloadState: downloadState,
-                showsMenu: showsActionsMenu
+                showsMenu: showsActionsMenu,
+                // Series-artwork cards carry the episode designation *in* the chip
+                // rather than in a caption under the card, so one glance covers
+                // which show (the logo), which episode, and how much is left.
+                detailText: showsSeriesArtwork ? item.seasonEpisodeLabel : nil,
+                showsPlayGlyphWhenIdle: showsSeriesArtwork
             )
         }
     }

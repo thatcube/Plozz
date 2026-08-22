@@ -26,6 +26,11 @@ public struct SkeletonCardView: View {
     public enum Style { case poster, landscape }
 
     private let style: Style
+    /// Mirrors `PosterCardView`'s series-artwork mode, which draws no caption at
+    /// all. The skeleton is deliberately pixel-1:1 with the loaded card, so it has
+    /// to drop the caption too — otherwise Continue Watching visibly shrinks the
+    /// moment real cards replace the placeholders.
+    private let showsCaption: Bool
 
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.themePalette) private var palette
@@ -34,8 +39,9 @@ public struct SkeletonCardView: View {
     /// real cards will render in.
     @Environment(\.plozzCardStyle) private var cardStyle
 
-    public init(style: Style = .poster) {
+    public init(style: Style = .poster, showsCaption: Bool = true) {
         self.style = style
+        self.showsCaption = showsCaption
     }
 
     @ViewBuilder
@@ -68,9 +74,11 @@ public struct SkeletonCardView: View {
             // size-20 fonts. Reusing the same fonts (via hidden sizing text) keeps
             // the caption block the exact same height, so the row never shifts
             // vertically when real content swaps in.
-            textLines(contentWidth: metrics.posterWidth - 2 * metrics.posterCaptionInset, spacing: 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding([.horizontal, .bottom], metrics.posterCaptionInset)
+            if showsCaption {
+                textLines(contentWidth: metrics.posterWidth - 2 * metrics.posterCaptionInset, spacing: 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding([.horizontal, .bottom], metrics.posterCaptionInset)
+            }
         }
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: false)
@@ -87,9 +95,11 @@ public struct SkeletonCardView: View {
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             // PosterCardView's landscape caption uses VStack(spacing: 4).
-            textLines(contentWidth: metrics.landscapeWidth - 2 * metrics.landscapeCaptionInset, spacing: 4)
-                .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
-                .frame(width: metrics.landscapeWidth, alignment: .leading)
+            if showsCaption {
+                textLines(contentWidth: metrics.landscapeWidth - 2 * metrics.landscapeCaptionInset, spacing: 4)
+                    .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
+                    .frame(width: metrics.landscapeWidth, alignment: .leading)
+            }
         }
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: false)
@@ -110,12 +120,14 @@ public struct SkeletonCardView: View {
 
             // Match BorderlessCardCaption: VStack(spacing: 2), same fonts, held off
             // the rounded artwork edge by the shared caption inset.
-            textLines(contentWidth: borderlessCaptionContentWidth, spacing: 2)
-                .padding(.horizontal, borderlessCaptionInset)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                // The real caption rides up to the resting gap when unfocused (a pure
-                // offset, never a layout change); a skeleton is always at rest.
-                .offset(y: -metrics.focusCaptionPush)
+            if showsCaption {
+                textLines(contentWidth: borderlessCaptionContentWidth, spacing: 2)
+                    .padding(.horizontal, borderlessCaptionInset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // The real caption rides up to the resting gap when unfocused (a pure
+                    // offset, never a layout change); a skeleton is always at rest.
+                    .offset(y: -metrics.focusCaptionPush)
+            }
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .shimmering()

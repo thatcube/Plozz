@@ -6,43 +6,42 @@ import SwiftUI
 /// A two-way *choice*, not an on/off: both states put artwork on the card, so any
 /// switch label would imply that turning it off leaves the card blank.
 public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
-    /// The show's own wide art with its logo over it. Named for the logo because
-    /// that is what actually separates the two options — the alternative shows
-    /// artwork too, just the episode's own.
-    case showArtwork
-    /// The episode's thumbnail, masked to match the spoiler settings.
-    case episodeThumbnail
+    /// Artwork with the title laid over it as a logo, and nothing written below.
+    case logoAndArtwork
+    /// Plain artwork with the title written underneath, masked to match the
+    /// spoiler settings.
+    case thumbnail
 
     public var displayName: LocalizedStringResource {
         switch self {
-        case .showArtwork:
+        case .logoAndArtwork:
             return LocalizedStringResource(
                 "continueWatchingArtwork.logoAndArtwork",
                 defaultValue: "Logo & Artwork",
-                comment: "Continue Watching card style option in Settings: the show's artwork with its logo over it."
+                comment: "Continue Watching card style option in Settings: artwork with the title laid over it as a logo."
             )
-        case .episodeThumbnail:
+        case .thumbnail:
             return LocalizedStringResource(
-                "continueWatchingArtwork.episodeThumbnail",
-                defaultValue: "Episode Thumbnail",
-                comment: "Continue Watching card style option in Settings: the episode's own still image."
+                "continueWatchingArtwork.thumbnailAndTitle",
+                defaultValue: "Thumbnail & Title",
+                comment: "Continue Watching card style option in Settings: plain artwork with the title written underneath."
             )
         }
     }
 
     public var detail: LocalizedStringResource {
         switch self {
-        case .showArtwork:
+        case .logoAndArtwork:
             return LocalizedStringResource(
-                "continueWatchingArtwork.showArtwork.detail",
-                defaultValue: "Easy to tell apart",
-                comment: "Explains the Show Artwork option for Continue Watching cards."
+                "continueWatchingArtwork.logoAndArtwork.detail",
+                defaultValue: "Everything sits on the card.",
+                comment: "One-line explanation of the Logo & Artwork option for Continue Watching cards."
             )
-        case .episodeThumbnail:
+        case .thumbnail:
             return LocalizedStringResource(
-                "continueWatchingArtwork.episodeThumbnail.detail",
-                defaultValue: "Follows your spoiler settings",
-                comment: "Explains the Episode Thumbnail option for Continue Watching cards."
+                "continueWatchingArtwork.thumbnailAndTitle.detail",
+                defaultValue: "The title sits under the card.",
+                comment: "One-line explanation of the Thumbnail & Title option for Continue Watching cards."
             )
         }
     }
@@ -51,10 +50,9 @@ public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
 /// A picture of one Continue Watching card in each
 /// ``ContinueWatchingArtworkStyle``.
 ///
-/// Each leans on the one thing that actually tells them apart: the logo. Both
-/// options put artwork on the card, so the previews have to show *whose* — a
-/// show's own art with its wordmark set into it, or a frame out of the episode
-/// with the title written underneath because nothing on the artwork names it.
+/// Each leans on the one thing that actually tells them apart: where the title
+/// lives. Both options put artwork on the card, so the previews show the title
+/// set into the artwork as a wordmark, or written on a line beneath it.
 ///
 /// Fabricated throughout, like ``SpoilerModeSwatch`` — no media, network or theme.
 public struct ContinueWatchingArtworkSwatch: View {
@@ -89,7 +87,7 @@ public struct ContinueWatchingArtworkSwatch: View {
             VStack(spacing: gap) {
                 card(width: cardWidth, height: cardHeight)
                 caption(width: cardWidth, barHeight: barHeight, spacing: height * 0.025)
-                    .opacity(style == .episodeThumbnail ? 1 : 0)
+                    .opacity(style == .thumbnail ? 1 : 0)
             }
             .frame(width: width, height: height, alignment: .center)
         }
@@ -99,7 +97,7 @@ public struct ContinueWatchingArtworkSwatch: View {
         let radius = min(cornerRadius, width * 0.06)
         return ZStack {
             artwork(width: width, height: height)
-            if style == .showArtwork {
+            if style == .logoAndArtwork {
                 wordmark(width: width)
             }
             chip(width: width, height: height)
@@ -112,15 +110,14 @@ public struct ContinueWatchingArtworkSwatch: View {
         )
     }
 
-    /// The word itself, rather than an invented show name: a plausible title is
-    /// read as *that show's* logo and leaves you wondering which show it is,
-    /// where "LOGO" is instantly understood as "whatever your show's logo is".
-    /// Still lettering, which is the one unmistakable way to draw "a logo sits
-    /// here".
+    /// The word itself, rather than an invented title: a plausible one is read as
+    /// *that* title's logo and leaves you wondering what it is, where "LOGO" is
+    /// instantly understood as "whatever your logo is". Still lettering, which is
+    /// the one unmistakable way to draw "a logo sits here".
     private static let logoPlaceholder = LocalizedStringResource(
         "continueWatchingArtwork.logoPlaceholder",
         defaultValue: "LOGO",
-        comment: "Stand-in wordmark drawn inside the Continue Watching card preview, in place of a real show's logo."
+        comment: "Stand-in wordmark drawn inside the Continue Watching card preview, in place of a real title's logo."
     )
 
     private func wordmark(width: CGFloat) -> some View {
@@ -139,7 +136,7 @@ public struct ContinueWatchingArtworkSwatch: View {
     @ViewBuilder
     private func artwork(width: CGFloat, height: CGFloat) -> some View {
         switch style {
-        case .showArtwork:
+        case .logoAndArtwork:
             ZStack {
                 LinearGradient(
                     colors: [
@@ -157,11 +154,11 @@ public struct ContinueWatchingArtworkSwatch: View {
                     endRadius: width * 0.62
                 )
             }
-        case .episodeThumbnail:
+        case .thumbnail:
             ZStack {
                 // A dusk horizon. A landscape reads as a *photograph of
                 // somewhere* at any size, which is the whole point of this
-                // option — a frame out of the episode, not branding. A figure
+                // option — a frame out of what you're watching, not branding. A figure
                 // silhouette was tried first and turned into a restroom
                 // pictogram once it got this small.
                 LinearGradient(
@@ -231,7 +228,7 @@ public struct ContinueWatchingArtworkSwatch: View {
     }
 
     /// The title written under the card — only the thumbnail option has one. With
-    /// the show's logo on the artwork there is nothing left for a caption to say.
+    /// the logo on the artwork there is nothing left for a caption to say.
     private func caption(width: CGFloat, barHeight: CGFloat, spacing: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: spacing) {
             Capsule().fill(Color.primary.opacity(0.34))

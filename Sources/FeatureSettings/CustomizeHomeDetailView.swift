@@ -215,11 +215,11 @@ struct CustomizeHomeDetailView: View {
                     style: Binding(
                         get: {
                             homeVisibility.continueWatchingShowsSeriesArtwork
-                                ? .showArtwork
-                                : .episodeThumbnail
+                                ? .logoAndArtwork
+                                : .thumbnail
                         },
                         set: {
-                            homeVisibility.setContinueWatchingShowsSeriesArtwork($0 == .showArtwork)
+                            homeVisibility.setContinueWatchingShowsSeriesArtwork($0 == .logoAndArtwork)
                         }
                     )
                 )

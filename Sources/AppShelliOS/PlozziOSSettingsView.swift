@@ -1689,11 +1689,11 @@ private struct PlozziOSHomeSettingsView: View {
                         selection: Binding<ContinueWatchingArtworkStyle>(
                             get: {
                                 visibility.continueWatchingShowsSeriesArtwork
-                                    ? .showArtwork
-                                    : .episodeThumbnail
+                                    ? .logoAndArtwork
+                                    : .thumbnail
                             },
                             set: {
-                                visibility.setContinueWatchingShowsSeriesArtwork($0 == .showArtwork)
+                                visibility.setContinueWatchingShowsSeriesArtwork($0 == .logoAndArtwork)
                             }
                         )
                     ) {

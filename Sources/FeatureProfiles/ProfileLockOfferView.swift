@@ -89,16 +89,14 @@ public struct ProfileLockOfferView: View {
 
             HStack(spacing: 24) {
                 Button("No PIN", action: onSkip)
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .plozzActionButton(role: .secondary)
 
                 Button {
                     isChoosingPIN = true
                 } label: {
                     Text(ProfileLockCopy.create)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .plozzActionButton()
             }
             .frame(maxWidth: .infinity)
         }

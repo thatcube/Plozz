@@ -190,16 +190,14 @@ public struct ProfileSeerrSetupView: View {
     private var actionBar: some View {
         HStack(spacing: 20) {
             Button("Not Now", action: onContinue)
-                .buttonStyle(.bordered)
-                .controlSize(.large)
+                .plozzActionButton(role: .secondary)
             Button("Continue") {
                 guard hasSelection else { return }
                 let selected = users.value?.first { $0.id == selectedUserID }
                 onSelect(selected)
                 onContinue()
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .plozzActionButton()
             .disabled(!hasSelection)
         }
         .frame(maxWidth: .infinity)

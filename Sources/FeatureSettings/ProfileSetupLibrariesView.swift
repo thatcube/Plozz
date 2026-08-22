@@ -86,7 +86,7 @@ public struct ProfileSetupLibrariesView: View {
             Button(action: onDone) {
                 Text("Done").frame(minWidth: 220)
             }
-            .buttonStyle(.borderedProminent)
+            .plozzActionButton()
             Spacer()
         }
         .padding(.vertical, 24)

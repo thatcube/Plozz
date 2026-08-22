@@ -87,7 +87,7 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
                 .frame(maxWidth: 800)
             if showRetry {
                 Button("Try Again", action: onRetry)
-                    .buttonStyle(.borderedProminent)
+                    .plozzActionButton()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

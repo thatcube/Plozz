@@ -170,8 +170,7 @@ private struct PlozziOSFirstProfileView: View {
                     Button("Continue") {
                         appModel.confirmFirstRunProfile()
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .plozzActionButton()
                     .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: 520)
@@ -249,8 +248,7 @@ struct PlozziOSThemeWelcomeView: View {
                     }
 
                     Button("Continue", action: onContinue)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .plozzActionButton()
                     .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: 720)

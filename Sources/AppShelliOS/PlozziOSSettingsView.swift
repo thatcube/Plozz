@@ -1680,15 +1680,27 @@ private struct PlozziOSHomeSettingsView: View {
                     )
                 }
                 // Nested under the row it belongs to, and only while that row is
-                // on — a preference for a hidden row is noise.
+                // on — a preference for a hidden row is noise. A picker rather
+                // than a switch: both options put artwork on the card, so an
+                // on/off label would imply that "off" leaves it blank.
                 if visibility.isGlobalRowEnabled(.continueWatching) {
-                    Toggle(
-                        "Display logo and artwork",
-                        isOn: Binding(
-                            get: { visibility.continueWatchingShowsSeriesArtwork },
-                            set: { visibility.setContinueWatchingShowsSeriesArtwork($0) }
+                    Picker(
+                        "Continue Watching",
+                        selection: Binding<ContinueWatchingArtworkStyle>(
+                            get: {
+                                visibility.continueWatchingShowsSeriesArtwork
+                                    ? .showArtwork
+                                    : .episodeThumbnail
+                            },
+                            set: {
+                                visibility.setContinueWatchingShowsSeriesArtwork($0 == .showArtwork)
+                            }
                         )
-                    )
+                    ) {
+                        ForEach(ContinueWatchingArtworkStyle.allCases, id: \.self) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
                 }
                 Toggle(
                     "Merge libraries",

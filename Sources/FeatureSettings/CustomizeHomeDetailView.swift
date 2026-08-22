@@ -54,7 +54,7 @@ struct CustomizeHomeDetailView: View {
     }
 
     private var rows: [SettingsSplitRow] {
-        homeRowsRows + heroRows
+        homeRowsRows + continueWatchingRows + heroRows
     }
 
     // MARK: - Rows on Home (one entry, grouped detail — leads with the Combine switch)
@@ -96,13 +96,6 @@ struct CustomizeHomeDetailView: View {
                         homeVisibility.setGlobalRowEnabled(!homeVisibility.isGlobalRowEnabled(opt.row), for: opt.row)
                     }
                 )
-
-                // Continue Watching's own display choice, nested under the row it
-                // belongs to and only while that row is on — a preference for a
-                // row you've hidden is noise.
-                if homeVisibility.isGlobalRowEnabled(.continueWatching) {
-                    continueWatchingArtworkToggle
-                }
             }
 
             // The per-library add-on. Framed as ADDITIVE ("show each library's own
@@ -206,30 +199,51 @@ struct CustomizeHomeDetailView: View {
         var id: String { row.rawValue }
     }
 
-    /// Continue Watching's artwork treatment.
-    ///
-    /// On (the default), each card is the show's artwork with its logo over it,
-    /// which is what makes a row of half-finished shows tell itself apart — and is
-    /// spoiler-safe in its own right, so the row never blurs. Off restores the
-    /// episode thumbnail and hands the row back to the spoiler settings.
-    @ViewBuilder private var continueWatchingArtworkToggle: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle(isOn: Binding(
-                get: { homeVisibility.continueWatchingShowsSeriesArtwork },
-                set: { homeVisibility.setContinueWatchingShowsSeriesArtwork($0) }
-            )) {
-                Text("Display logo and artwork")
-            }
-            .toggleStyle(SettingsSwitchToggleStyle())
+    // MARK: - Continue Watching (its own entry — a row's LOOK, not its presence)
 
-            Text(homeVisibility.continueWatchingShowsSeriesArtwork
-                 ? "Continue Watching shows each show's artwork and logo, so you can tell your shows apart at a glance."
-                 : "Continue Watching shows the episode thumbnail, hidden or blurred to match your spoiler settings.")
+    /// Continue Watching's card style gets its own pane rather than riding in the
+    /// "Rows on Home" checklist.
+    ///
+    /// That checklist answers one question — which rows appear — and every control
+    /// in it is a checkmark against a row name. A switch about how one of those
+    /// rows *looks* had nothing to attach itself to there: it sat under the list
+    /// reading as though it applied to all three rows, or to none. It is also not
+    /// an on/off at all (see ``ContinueWatchingArtworkStyle``), which is why it
+    /// resisted a good switch label.
+    private var continueWatchingRows: [SettingsSplitRow] {
+        [
+            SettingsSplitRow(
+                id: "continue-watching",
+                title: "Continue Watching",
+                description: "Choose what the cards in your Continue Watching row show.",
+            ) {
+                continueWatchingDetail
+            }
+        ]
+    }
+
+    @ViewBuilder private var continueWatchingDetail: some View {
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+            SettingsDetailGroup(title: "Card artwork") {
+                ContinueWatchingArtworkPicker(
+                    style: Binding(
+                        get: {
+                            homeVisibility.continueWatchingShowsSeriesArtwork
+                                ? .showArtwork
+                                : .episodeThumbnail
+                        },
+                        set: {
+                            homeVisibility.setContinueWatchingShowsSeriesArtwork($0 == .showArtwork)
+                        }
+                    )
+                )
+            }
+
+            Text("Show Artwork puts each show's own art and logo on the card, so a row of shows you're part-way through is easy to tell apart — and there's no episode still on it to hide, so it never blurs. Episode Thumbnail shows the episode's own image instead, blurred or replaced to match your spoiler settings.")
                 .font(.callout)
                 .plozzForeground(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.top, 12)
     }
 
     // MARK: - Hero (a single feature row: the whole hero form in one pane)

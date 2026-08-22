@@ -822,7 +822,14 @@ public struct PosterCardView: View {
                     asyncFallbackURL: seriesLogoFallback,
                     maxWidth: width * 0.66,
                     maxHeight: height * 0.34,
-                    alignment: .center
+                    alignment: .center,
+                    // No background sample is taken per card (that would be an
+                    // image analysis per card while scrolling), so the halo is
+                    // always drawn — and an adaptive one put a white glow behind
+                    // every mid-to-dark logo. Down, always: it reads as depth
+                    // rather than as an effect, and the scrim above already
+                    // darkens the artwork under the logo.
+                    haloStyle: .alwaysDark
                 ) {
                     seriesLogoTextFallback(width: width)
                 }

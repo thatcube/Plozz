@@ -63,6 +63,25 @@ public enum HeroLogoPresentationPolicy: Sendable, Equatable {
 /// opt into `.center`. By default it crossfades over the readable title once
 /// decoded; arrival-sensitive callers can suppress a late replacement.
 /// Unlike poster art there is no aspect-ratio guard — logos are legitimately wide.
+/// Which contrast halo a logo gets.
+public enum HeroLogoHaloStyle: Sendable {
+    /// Pick per logo: a light glow behind dark logos, a dark shadow behind light
+    /// ones. Right for the hero, which samples the artwork behind the logo and so
+    /// knows what it is actually competing with.
+    case adaptive
+    /// Always a dark shadow.
+    ///
+    /// For surfaces that render a logo without sampling the artwork behind it —
+    /// a rail of cards, where per-card sampling would mean one image analysis per
+    /// card while scrolling. Without a sample the halo can't be reasoned about, so
+    /// it is always drawn, and `adaptive` then put a white glow behind every
+    /// mid-to-dark logo. On an orange Oppenheimer wordmark over its own orange
+    /// artwork that glow was the most conspicuous thing on the card. A dark
+    /// shadow reads as depth rather than as an effect, and these surfaces darken
+    /// the artwork under the logo anyway, so down is the direction that matches.
+    case alwaysDark
+}
+
 public struct HeroLogoArtwork<TextFallback: View>: View {
     private let references: [ArtworkReference]
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
@@ -71,6 +90,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
     private let maxHeight: CGFloat
     private let presentationPolicy: HeroLogoPresentationPolicy
     private let alignment: Alignment
+    private let haloStyle: HeroLogoHaloStyle
     private let textFallback: () -> TextFallback
 
     public init(
@@ -81,6 +101,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         maxHeight: CGFloat = 200,
         presentationPolicy: HeroLogoPresentationPolicy = .whenReady,
         alignment: Alignment = .leading,
+        haloStyle: HeroLogoHaloStyle = .adaptive,
         @ViewBuilder textFallback: @escaping () -> TextFallback
     ) {
         self.references = primaryURL.map { [.remote($0)] } ?? []
@@ -90,6 +111,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         self.maxHeight = maxHeight
         self.presentationPolicy = presentationPolicy
         self.alignment = alignment
+        self.haloStyle = haloStyle
         self.textFallback = textFallback
     }
 
@@ -104,6 +126,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         maxHeight: CGFloat = 200,
         presentationPolicy: HeroLogoPresentationPolicy = .whenReady,
         alignment: Alignment = .leading,
+        haloStyle: HeroLogoHaloStyle = .adaptive,
         @ViewBuilder textFallback: @escaping () -> TextFallback
     ) {
         self.references = references
@@ -113,6 +136,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         self.maxHeight = maxHeight
         self.presentationPolicy = presentationPolicy
         self.alignment = alignment
+        self.haloStyle = haloStyle
         self.textFallback = textFallback
     }
 
@@ -126,6 +150,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
             maxHeight: maxHeight,
             presentationPolicy: presentationPolicy,
             alignment: alignment,
+            haloStyle: haloStyle,
             textFallback: textFallback
         )
         #else
@@ -143,6 +168,7 @@ private struct LoadedLogo<TextFallback: View>: View {
     let maxHeight: CGFloat
     let presentationPolicy: HeroLogoPresentationPolicy
     let alignment: Alignment
+    let haloStyle: HeroLogoHaloStyle
     let textFallback: () -> TextFallback
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -190,11 +216,13 @@ private struct LoadedLogo<TextFallback: View>: View {
         )
     }
 
-    /// Renders the resolved logo. Most logos draw as-is with an adaptive contrast
-    /// halo, applied *only* to logos that need it (`needsHalo`): a soft light glow
-    /// behind dark logos, a soft dark shadow behind light ones — used only when the
-    /// measured logo/background contrast is low, so logos that already stand out
-    /// stay clean.
+    /// Renders the resolved logo. Most logos draw as-is with a contrast halo,
+    /// applied *only* to logos that need it (`needsHalo`). Under
+    /// ``HeroLogoHaloStyle/adaptive`` that's a soft light glow behind dark logos
+    /// and a soft dark shadow behind light ones, used only when the measured
+    /// logo/background contrast is low, so logos that already stand out stay
+    /// clean; under ``HeroLogoHaloStyle/alwaysDark`` it is always the dark
+    /// shadow.
     ///
     /// A *monochrome* logo (a single near-grayscale tone, e.g. an all-black or
     /// all-white wordmark) is instead recoloured to the foreground tone of the
@@ -223,7 +251,10 @@ private struct LoadedLogo<TextFallback: View>: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: fitted.width, height: fitted.height)
                 .frame(maxWidth: maxWidth, alignment: alignment)
-                .modifier(LogoLegibilityHalo(isDark: processed.isDark, active: processed.needsHalo))
+                .modifier(LogoLegibilityHalo(
+                    isDark: haloStyle == .adaptive && processed.isDark,
+                    active: processed.needsHalo
+                ))
         }
     }
 

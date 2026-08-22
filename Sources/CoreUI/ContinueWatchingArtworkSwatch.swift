@@ -6,9 +6,11 @@ import SwiftUI
 /// A two-way *choice*, not an on/off: both states put artwork on the card, so any
 /// switch label would imply that turning it off leaves the card blank.
 public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
-    /// Artwork with the title laid over it as a logo, and nothing written below.
+    /// Artwork with the title laid over it as a logo, and nothing written below:
+    /// the episode or year rides in the resume chip, on the artwork.
     case logoAndArtwork
-    /// Plain artwork with the title written underneath, masked to match the
+    /// Plain artwork, with the title *and* its details — the episode designation,
+    /// or a movie's year — written on two lines underneath. Masked to match the
     /// spoiler settings.
     case thumbnail
 
@@ -34,13 +36,13 @@ public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
         case .logoAndArtwork:
             return LocalizedStringResource(
                 "continueWatchingArtwork.logoAndArtwork.detail",
-                defaultValue: "Everything sits on the card.",
+                defaultValue: "Everything sits on the artwork.",
                 comment: "One-line explanation of the Logo & Artwork option for Continue Watching cards."
             )
         case .thumbnail:
             return LocalizedStringResource(
                 "continueWatchingArtwork.thumbnailAndTitle.detail",
-                defaultValue: "The title sits under the card.",
+                defaultValue: "The title and details sit below it.",
                 comment: "One-line explanation of the Thumbnail & Title option for Continue Watching cards."
             )
         }
@@ -227,8 +229,9 @@ public struct ContinueWatchingArtworkSwatch: View {
         }
     }
 
-    /// The title written under the card — only the thumbnail option has one. With
-    /// the logo on the artwork there is nothing left for a caption to say.
+    /// The two caption lines under the card — the title, then its details — which
+    /// only the thumbnail option has. With the logo on the artwork there is
+    /// nothing left for a caption to say.
     private func caption(width: CGFloat, barHeight: CGFloat, spacing: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: spacing) {
             Capsule().fill(Color.primary.opacity(0.34))

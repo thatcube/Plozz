@@ -6,7 +6,9 @@ import SwiftUI
 /// A two-way *choice*, not an on/off: both states put artwork on the card, so any
 /// switch label would imply that turning it off leaves the card blank.
 public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
-    /// The show's own wide art with its logo over it.
+    /// The show's own wide art with its logo over it. Named for the logo because
+    /// that is what actually separates the two options — the alternative shows
+    /// artwork too, just the episode's own.
     case showArtwork
     /// The episode's thumbnail, masked to match the spoiler settings.
     case episodeThumbnail
@@ -15,9 +17,9 @@ public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
         switch self {
         case .showArtwork:
             return LocalizedStringResource(
-                "continueWatchingArtwork.showArtwork",
-                defaultValue: "Show Artwork",
-                comment: "Continue Watching card style option in Settings: the show's artwork and logo."
+                "continueWatchingArtwork.logoAndArtwork",
+                defaultValue: "Logo & Artwork",
+                comment: "Continue Watching card style option in Settings: the show's artwork with its logo over it."
             )
         case .episodeThumbnail:
             return LocalizedStringResource(
@@ -49,11 +51,10 @@ public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
 /// A picture of one Continue Watching card in each
 /// ``ContinueWatchingArtworkStyle``.
 ///
-/// Each leans on the one thing that actually tells them apart. Show Artwork sets
-/// a **wordmark** into flat branded art — an abstract plate stands in for a logo
-/// about as well as a blank bar does, which left the option's whole point
-/// invisible. Episode Thumbnail is a photograph of a place, with the title
-/// written *underneath* because nothing on the artwork is naming it.
+/// Each leans on the one thing that actually tells them apart: the logo. Both
+/// options put artwork on the card, so the previews have to show *whose* — a
+/// show's own art with its wordmark set into it, or a frame out of the episode
+/// with the title written underneath because nothing on the artwork names it.
 ///
 /// Fabricated throughout, like ``SpoilerModeSwatch`` — no media, network or theme.
 public struct ContinueWatchingArtworkSwatch: View {
@@ -69,15 +70,25 @@ public struct ContinueWatchingArtworkSwatch: View {
         GeometryReader { geo in
             let width = geo.size.width
             let height = geo.size.height
-            // Reserve the caption strip in BOTH options so the two cards are the
-            // same size — otherwise the thumbnail card renders smaller and the
-            // pair looks like a scale difference rather than a content one.
-            let captionStrip = height * 0.20
-            let cardWidth = min(width * 0.86, (height - captionStrip) * 16.0 / 9.0)
-            let cardHeight = cardWidth * 9.0 / 16.0
-            VStack(spacing: cardHeight * 0.11) {
+            // Lay the caption out FIRST and give the card what's left, so the two
+            // never overflow the slot. Both options reserve the caption strip even
+            // though only one draws into it — otherwise the thumbnail card renders
+            // smaller and the pair reads as a scale difference rather than a
+            // content one.
+            let barHeight = max(3, height * 0.03)
+            let captionHeight = barHeight * 2 + height * 0.025
+            let gap = height * 0.09
+            // A little air under the caption so the last bar isn't flush with the
+            // slot's edge.
+            let bottomInset = height * 0.04
+            let cardHeight = min(
+                height - captionHeight - gap - bottomInset,
+                width * 0.94 * 9.0 / 16.0
+            )
+            let cardWidth = cardHeight * 16.0 / 9.0
+            VStack(spacing: gap) {
                 card(width: cardWidth, height: cardHeight)
-                caption(width: cardWidth)
+                caption(width: cardWidth, barHeight: barHeight, spacing: height * 0.025)
                     .opacity(style == .episodeThumbnail ? 1 : 0)
             }
             .frame(width: width, height: height, alignment: .center)
@@ -101,12 +112,19 @@ public struct ContinueWatchingArtworkSwatch: View {
         )
     }
 
-    /// A stand-in show logo. Deliberately *lettering* — the one unmistakable way
-    /// to say "a logo sits here". Invented, so it can't be mistaken for a real
-    /// title, and drawn rather than translated: it is a picture of a logo, not
-    /// copy.
+    /// The word itself, rather than an invented show name: a plausible title is
+    /// read as *that show's* logo and leaves you wondering which show it is,
+    /// where "LOGO" is instantly understood as "whatever your show's logo is".
+    /// Still lettering, which is the one unmistakable way to draw "a logo sits
+    /// here".
+    private static let logoPlaceholder = LocalizedStringResource(
+        "continueWatchingArtwork.logoPlaceholder",
+        defaultValue: "LOGO",
+        comment: "Stand-in wordmark drawn inside the Continue Watching card preview, in place of a real show's logo."
+    )
+
     private func wordmark(width: CGFloat) -> some View {
-        Text(verbatim: "AURORA")
+        Text(Self.logoPlaceholder)
             .font(.system(size: width * 0.10, weight: .black, design: .rounded))
             .tracking(width * 0.012)
             .foregroundStyle(.white)
@@ -214,10 +232,12 @@ public struct ContinueWatchingArtworkSwatch: View {
 
     /// The title written under the card — only the thumbnail option has one. With
     /// the show's logo on the artwork there is nothing left for a caption to say.
-    private func caption(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Capsule().fill(Color.primary.opacity(0.34)).frame(width: width * 0.58, height: 6)
-            Capsule().fill(Color.primary.opacity(0.17)).frame(width: width * 0.34, height: 6)
+    private func caption(width: CGFloat, barHeight: CGFloat, spacing: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            Capsule().fill(Color.primary.opacity(0.34))
+                .frame(width: width * 0.58, height: barHeight)
+            Capsule().fill(Color.primary.opacity(0.17))
+                .frame(width: width * 0.34, height: barHeight)
         }
         .frame(width: width, alignment: .leading)
     }

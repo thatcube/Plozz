@@ -81,6 +81,20 @@ final class UniversalWatchlistMembershipCache {
         self.revision = revision
         cached = ids
     }
+
+    /// Forget the memo outright.
+    ///
+    /// The revision key is a hash of COUNTS, so it cannot see a transition that
+    /// leaves every count where it was — and a local removal is exactly that when
+    /// the title's presence came from a destination's own list rather than from a
+    /// local intent: the tombstone lands, `activeAliasIDs` never held the alias to
+    /// begin with, and nothing the key hashes moves. The set is then served from
+    /// this memo forever and the bookmark stays filled on a title that really did
+    /// come off the list. Anything that mutates the watchlist locally calls this.
+    func invalidate() {
+        revision = nil
+        cached = []
+    }
 }
 
 @MainActor
@@ -307,6 +321,13 @@ public extension UniversalWatchlistHost {
         hasher.combine(aliases.recordsByID.count)
         hasher.combine(aliases.activeRecordCount)
         hasher.combine(universalWatchlist.activeSnapshot.activeAliasIDs.count)
+        // Tombstones, not just active ids. Removing a title whose presence came
+        // from a DESTINATION's list rather than from a local intent adds an
+        // `.absent` intent without ever decrementing the active count — every
+        // other input here is untouched too, so without this the revision is
+        // identical before and after the removal and the memoized membership set
+        // is reused: the write reached the server, and the bookmark stayed filled.
+        hasher.combine(universalWatchlist.activeSnapshot.tombstoneCount)
         // The native side moves independently of the ledger: a server switched
         // off, or a refresh that returns a different list, changes what the
         // viewer sees without touching a single intent. Counting destinations
@@ -429,10 +450,7 @@ public extension UniversalWatchlistHost {
                     presentation: evidence.presentation
                 )
             }
-            NotificationCenter.default.post(
-                name: .universalWatchlistDidChange,
-                object: nil
-            )
+            announceUniversalWatchlistDidChange()
             scheduleCloudPublish()
             return true
         } catch {
@@ -695,10 +713,7 @@ public extension UniversalWatchlistHost {
         view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
         persistUniversalWatchlistNativeView(view)
 
-        NotificationCenter.default.post(
-            name: .universalWatchlistDidChange,
-            object: nil
-        )
+        announceUniversalWatchlistDidChange()
         _ = await reconciler.drain(profileID: profileID)
         await universalWatchlistRetryScheduler?.reschedule()
         // The aliases a native read just created have no provider bindings yet,
@@ -928,10 +943,7 @@ public extension UniversalWatchlistHost {
         // owned copy findable, but nothing was announcing it, so Home kept the
         // items it had resolved at t=0 and every title stayed "request it" until
         // something else happened to rebuild the row.
-        NotificationCenter.default.post(
-            name: .universalWatchlistDidChange,
-            object: nil
-        )
+        announceUniversalWatchlistDidChange()
         let indexSnapshot = identityIndex.identitySnapshot
         let reconcileLine = "watchlist.identity considered=\(aliasIDs.count) intents=\(intents.count) enriched=\(enrichments.count) fanOut=\(changes.count) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count)"
         PlozzLog.app.info("Watchlist \(reconcileLine)")
@@ -1083,6 +1095,23 @@ public extension UniversalWatchlistHost {
         _ = try? await reconciler.resumeAuthentication()
         _ = await reconciler.drain(profileID: profiles.activeProfileID)
         await universalWatchlistRetryScheduler?.reschedule()
+    }
+
+    /// Tell every surface the watchlist moved, and drop the memoized membership
+    /// set first.
+    ///
+    /// Both halves, always, in this order. Announcing without invalidating is what
+    /// made a removal appear to do nothing: the shells rebuilt promptly, asked
+    /// membership again, and were served the pre-removal set out of
+    /// ``UniversalWatchlistMembershipCache`` because its O(1) revision key could
+    /// not see the change. Anything that mutates the watchlist announces here
+    /// rather than posting the notification itself.
+    func announceUniversalWatchlistDidChange() {
+        UniversalWatchlistMembershipCache.shared.invalidate()
+        NotificationCenter.default.post(
+            name: .universalWatchlistDidChange,
+            object: nil
+        )
     }
 
     func universalWatchlistEvidence(

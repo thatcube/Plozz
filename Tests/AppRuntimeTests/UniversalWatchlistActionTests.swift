@@ -1,4 +1,4 @@
-import AppRuntime
+@testable import AppRuntime
 import CoreModels
 import XCTest
 
@@ -399,4 +399,23 @@ final class UniversalWatchlistActionTests: XCTestCase {
         XCTAssertEqual(asked, ["plex", "jellyfin"])
     }
 
+    /// The process-wide membership memo has to be droppable, not just re-keyed.
+    ///
+    /// Its key is a hash of COUNTS, and a removal of a title whose presence came
+    /// from a destination's own list moves none of them — only a tombstone lands.
+    /// Without an explicit drop the pre-removal set is served back under the same
+    /// key and the bookmark keeps rendering "on the watchlist". Every local
+    /// mutation calls `invalidate()` through `announceUniversalWatchlistDidChange`.
+    func testMembershipMemoCanBeDroppedUnderAnUnchangedRevision() {
+        let cache = UniversalWatchlistMembershipCache.shared
+        let series = MediaAliasID()
+        let revision: UInt64 = 4_242
+
+        cache.store([series], revision: revision)
+        XCTAssertEqual(cache.ids(for: revision), [series])
+
+        cache.invalidate()
+
+        XCTAssertNil(cache.ids(for: revision))
+    }
 }

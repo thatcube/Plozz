@@ -924,10 +924,10 @@ extension AppState {
             )
         }
         if appliedWatchlistCount > 0 {
-            NotificationCenter.default.post(
-                name: .universalWatchlistDidChange,
-                object: nil
-            )
+            // Through the host, so the memoized membership set is dropped with
+            // it: a remote removal that leaves the active count where it was is
+            // otherwise invisible to that memo's revision key.
+            announceUniversalWatchlistDidChange()
         }
     }
 }

@@ -711,6 +711,52 @@ final class WatchlistModelTests: XCTestCase {
         )
         XCTAssertTrue(deletedReport.rejectedRecordNames.isEmpty)
     }
+
+    /// Removing a title whose presence came from a DESTINATION's own list — a
+    /// show added on Plex rather than in Plozz — has to be visible to a caller
+    /// that memoizes membership against O(1) counts.
+    ///
+    /// It is the one removal that leaves the active count alone: there was no
+    /// local `.present` intent to retire, so the removal only writes a
+    /// tombstone. A revision built from active ids alone was byte-identical
+    /// before and after, the memoized membership set was served again, and the
+    /// bookmark on the page kept rendering "on the watchlist" for a title that
+    /// had really come off it.
+    func testRemovingNativeOnlyTitleIsVisibleToCountBasedMembershipCaching() throws {
+        let model = WatchlistModel()
+        let series = MediaAliasID()
+        let destination = WatchlistDestinationID(rawValue: "plex-discover")!
+        try model.activate(profileID: "p")
+
+        var view = NativeWatchlistView()
+        view.applySuccess(
+            destinationID: destination,
+            entries: [NativeWatchlistEntry(aliasID: series, kind: .series, index: 0)!]
+        )
+        func membership() -> WatchlistUnion {
+            model.union(
+                profileID: "p",
+                nativeView: view,
+                aliasSnapshot: .empty,
+                enabledDestinationIDs: [destination]
+            )
+        }
+
+        XCTAssertTrue(membership().activeAliasIDs.contains(series))
+        let before = model.activeSnapshot
+
+        try model.remove(profileID: "p", aliasID: series, kind: .series)
+
+        let after = model.activeSnapshot
+        XCTAssertFalse(membership().activeAliasIDs.contains(series))
+        // The blind spot itself: the count every other watchlist input is
+        // derived from does not move here…
+        XCTAssertEqual(before.activeAliasIDs.count, after.activeAliasIDs.count)
+        // …and the tombstone is the only signal that anything happened, so any
+        // membership revision has to include it.
+        XCTAssertEqual(before.tombstoneCount, 0)
+        XCTAssertEqual(after.tombstoneCount, 1)
+    }
 }
 
 private final class CountingWatchlistIntentStore:

@@ -804,7 +804,15 @@ public enum MediaArtworkPrefetchPolicy {
     ) -> [URL] {
         if spoilerSettings.mode == .placeholder,
            spoilerSettings.shouldHideThumbnail(for: item) {
-            return [item.fallbackArtworkURL].compactMap { $0 }
+            // Mirrors `PosterCardView.placeholderArtworkReferences`: series-level
+            // art only, ordered for the card's shape. Kept in step with that
+            // ladder so the image warmed here is the one the card actually paints
+            // — warming only `fallbackArtworkURL` meant Plex and direct-share
+            // cards prefetched nothing at all, since neither ever set it.
+            let candidates = style == .poster
+                ? [item.seriesPosterURL, item.fallbackArtworkURL]
+                : [item.fallbackArtworkURL, item.seriesPosterURL]
+            return candidates.compactMap { $0 }
         }
         return item.artworkCandidates(for: style)
     }

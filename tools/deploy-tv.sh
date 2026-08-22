@@ -142,8 +142,12 @@ else
   generate_args=(--bake-only)
 fi
 if [[ -x tools/generate-project.sh ]]; then
+  # `${arr[@]+"${arr[@]}"}` guards the empty-array case: macOS ships bash 3.2,
+  # where `set -u` treats `"${arr[@]}"` on an empty array as an unbound variable.
+  # That only bites on the FIRST build in a fresh worktree — the branch above
+  # leaves `generate_args` empty exactly when no project.pbxproj exists yet.
   "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project/version generation" -- \
-    tools/generate-project.sh "${generate_args[@]}"
+    tools/generate-project.sh ${generate_args[@]+"${generate_args[@]}"}
 else
   "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "XcodeGen" -- xcodegen generate
 fi

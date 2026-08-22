@@ -569,7 +569,10 @@ public struct PosterCardView: View {
     /// a guaranteed non-blank fallback for episode cards. Carries the episode's
     /// normalized provider IDs, title, genres and tags so anime detection and
     /// cross-provider lookups stay accurate at the series level.
-    private static func seriesArtworkItem(for episode: MediaItem) -> MediaItem {
+    ///
+    /// Internal rather than private so `EpisodeColumnCard` can resolve spoiler-safe
+    /// series art through the same synthesized item.
+    static func seriesArtworkItem(for episode: MediaItem) -> MediaItem {
         MediaItem(
             id: episode.seriesID ?? episode.id,
             title: episode.parentTitle ?? episode.title,
@@ -625,14 +628,65 @@ public struct PosterCardView: View {
         }
     }
 
-    /// Spoiler-safe art for `.placeholder` mode: only ever the series fallback
-    /// artwork (never the real episode frame), then a neutral placeholder.
+    /// Spoiler-safe art for `.placeholder` mode: only ever **series-level** art,
+    /// never the real episode frame.
+    ///
+    /// This deliberately mirrors `realArtwork`'s shape — server art first, then an
+    /// `ArtworkRouter` last resort — because for a long time it did not. It read a
+    /// single URL and fell straight through to a grey box, which made
+    /// `.placeholder` strictly worse than `.blur` for art coverage. Worse,
+    /// `fallbackArtworkURL` was only ever populated by Jellyfin, so on Plex and
+    /// direct shares that grey box was *every* hidden episode.
+    ///
+    /// Nothing here may reach for `posterURL`/`backdropURL`: on Jellyfin those are
+    /// the episode's own primary and backdrop images — exactly what this mode
+    /// exists to hide. Only fields documented as parent/series-scoped qualify.
     private var placeholderArtwork: some View {
         FallbackAsyncImage(
-            urls: [item.fallbackArtworkURL].compactMap { $0 },
-            variant: artworkVariant
+            references: placeholderArtworkReferences,
+            maxAspectRatio: posterAspectGuard,
+            variant: artworkVariant,
+            asyncFallbackURL: placeholderArtworkFallback
         ) {
             neutralPlaceholder
+        }
+    }
+
+    /// Server-supplied series art, ordered for this card's shape: a poster card
+    /// wants the show's vertical poster, a landscape card its wide backdrop. Each
+    /// keeps the other as a last resort — a cropped poster still identifies the
+    /// show, and a blank card does not.
+    private var placeholderArtworkReferences: [ArtworkReference] {
+        // Direct-share local artwork, but only the explicitly series-scoped
+        // selection. Going through `artworkReferences(for: .seriesPoster)` would
+        // append that placement's legacy ladder, which ends in the episode's own
+        // `posterURL`.
+        let localSeriesArt = item.artworkSelections
+            .first(where: { $0.placement == .seriesPoster })?
+            .references ?? []
+        let remote: [URL?] = style == .poster
+            ? [item.seriesPosterURL, item.fallbackArtworkURL]
+            : [item.fallbackArtworkURL, item.seriesPosterURL]
+        let ordered = style == .poster
+            ? localSeriesArt + remote.compactMap { $0.map(ArtworkReference.remote) }
+            : remote.compactMap { $0.map(ArtworkReference.remote) } + localSeriesArt
+        var seen = Set<ArtworkReference>()
+        return ordered.filter { seen.insert($0).inserted }
+    }
+
+    /// Last-resort series art from the metadata router, so a show whose server
+    /// carries no art at all still gets a recognisable card. Asks only for
+    /// **series-scoped** kinds against a synthesized series item — never
+    /// `.thumbnail`, which resolves the episode's own still.
+    private var placeholderArtworkFallback: (@Sendable () async -> URL?)? {
+        guard enablesAsyncArtworkFallback else { return nil }
+        let seriesItem = Self.seriesArtworkItem(for: item)
+        let kind: ArtworkKind = style == .poster ? .poster : .hero
+        return {
+            await ArtworkSession.artworkResolveLimiter.run {
+                if Task.isCancelled { return nil }
+                return await ArtworkRouter.shared.artworkURL(kind, for: seriesItem)
+            }
         }
     }
 

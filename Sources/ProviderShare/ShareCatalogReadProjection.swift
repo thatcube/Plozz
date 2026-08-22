@@ -384,6 +384,15 @@ enum ShareCatalogReadProjection {
                 adopt(.posterURL)
             }
             copy.posterURL = item.posterURL // keep episode's own (none yet) — series art via fallback field
+            // …and actually populate that fallback field. `rec` is the SERIES'
+            // enrichment record, so its backdrop is series-level and safe to show
+            // for an unwatched episode. This was the missing half of the line
+            // above: spoiler `.placeholder` mode reads only `fallbackArtworkURL`,
+            // so without it every hidden episode on a share rendered blank.
+            if copy.fallbackArtworkURL == nil, let backdrop = rec.backdropURL {
+                copy.fallbackArtworkURL = backdrop
+                adopt(.backdropURL)
+            }
         }
         return copy
     }

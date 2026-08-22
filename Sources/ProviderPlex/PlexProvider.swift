@@ -1188,6 +1188,17 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             seriesPosterURL: isEpisode ? client.imageURL(path: dto.grandparentThumb, maxWidth: 500) : nil,
             backdropURL: client.imageURL(path: dto.art, maxWidth: 1280),
             heroBackdropURL: client.imageURL(path: dto.art, maxWidth: 3840),
+            // Spoiler-safe parent art, mirroring the series backdrop Jellyfin puts
+            // in this field. Plex propagates the SHOW's `art` down onto episode
+            // nodes — an episode's own image is `thumb` (mapped into `posterURL`
+            // above) — so `art` is already series-level here and never the
+            // episode's own frame. Episodes only: for a movie or series `art` is
+            // the item's own backdrop, which already rides on `backdropURL`.
+            //
+            // Without this, spoiler `.placeholder` mode had no art to fall back to
+            // on Plex at all and rendered a blank placeholder for every hidden
+            // episode.
+            fallbackArtworkURL: isEpisode ? client.imageURL(path: dto.art, maxWidth: 1280) : nil,
             logoURL: logoURL(from: dto),
             ratings: Self.ratings(from: dto),
             providerIDs: Self.providerIDs(from: dto),

@@ -109,6 +109,42 @@ final class ShareCatalogDecompositionTests: XCTestCase {
         XCTAssertNil(out.posterURL, "Series art is a fallback field, not the episode's own poster")
     }
 
+    /// The "fallback field" the test above names must actually be populated.
+    ///
+    /// It never was: `fallbackArtworkURL` was only ever set by Jellyfin, and
+    /// spoiler `.placeholder` mode reads exactly that field — so every hidden
+    /// episode on a direct share rendered a blank grey placeholder instead of the
+    /// show's art.
+    func testApplyEnrichmentEpisodePopulatesSpoilerSafeFallbackArtwork() {
+        var episode = MediaItem(id: "f:s01e01.mkv", title: "Pilot", kind: .episode)
+        episode.seriesID = "series:x"
+        var rec = EnrichmentRecord()
+        rec.backdropURL = URL(string: "https://img/show-backdrop.jpg")
+
+        let out = ShareCatalogReadProjection.applyEnrichment(episode, rec)
+        XCTAssertEqual(
+            out.fallbackArtworkURL,
+            URL(string: "https://img/show-backdrop.jpg"),
+            "an episode must carry the SERIES backdrop as spoiler-safe fallback art"
+        )
+    }
+
+    /// `rec` is the series' record, so nothing it contributes is episode-specific.
+    /// Guards the contract `fallbackArtworkURL` documents: never the episode's own
+    /// frame.
+    func testApplyEnrichmentNeverPutsEpisodeOwnArtInTheFallbackField() {
+        var episode = MediaItem(id: "f:s01e01.mkv", title: "Pilot", kind: .episode)
+        episode.seriesID = "series:x"
+        episode.posterURL = URL(string: "https://img/episode-still.jpg")
+        var rec = EnrichmentRecord()
+        rec.backdropURL = URL(string: "https://img/show-backdrop.jpg")
+
+        let out = ShareCatalogReadProjection.applyEnrichment(episode, rec)
+        XCTAssertNotEqual(out.fallbackArtworkURL, URL(string: "https://img/episode-still.jpg"))
+        XCTAssertEqual(out.posterURL, URL(string: "https://img/episode-still.jpg"),
+                       "the episode's own still stays where it was")
+    }
+
     // MARK: - ShareCatalogReadProjection.applyLocalMetadata
 
     private func localRow(_ source: MetadataSource, _ json: String) -> ShareCatalogReadProjection.LocalFieldRow {

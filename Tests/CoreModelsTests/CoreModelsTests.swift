@@ -283,11 +283,12 @@ final class SeasonEpisodeLabelTests: XCTestCase {
         )
     }
 
-    /// Spaced, not dotted. The chip already joins with `·` to attach the
+    /// Comma-separated, not dotted. The chip already joins with `·` to attach the
     /// duration, so the dotted `subtitle` form would render "S4 · E1 · 22m" and
-    /// read as three unrelated facts.
-    func testUsesASpaceSoItReadsAsOneDesignation() {
-        XCTAssertEqual(episode(season: 4, number: 1).seasonEpisodeLabel, "S4 E1")
+    /// read as three unrelated facts — while a bare space runs the two numbers
+    /// together as "S4 E1 · 22m".
+    func testPairsTheNumbersWithACommaSoTheyReadAsOneDesignation() {
+        XCTAssertEqual(episode(season: 4, number: 1).seasonEpisodeLabel, "S4, E1")
         XCTAssertEqual(episode(season: 4, number: 1).subtitle, "S4 · E1", "subtitle keeps its dotted form")
     }
 

@@ -43,10 +43,13 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// Whether finishing an episode automatically starts the next one.
     ///
     /// ON by default — that is what the player has always done, and it is what
-    /// most people want from a series. OFF stops **every** automatic advance and
-    /// returns you to the series page at the end instead; the Up Next card's Play
-    /// Next button, and the next-episode control in the info panel, still work,
-    /// because those are you asking rather than the player deciding.
+    /// most people want from a series. OFF stops **every** automatic advance: the
+    /// player simply closes at the end of an episode, returning you to whatever
+    /// you launched it from (Home, a series page, search — the player is a
+    /// full-screen cover over that screen, not a destination of its own). The Up
+    /// Next card's Play Next button, and the next-episode control in the info
+    /// panel, still work, because those are you asking rather than the player
+    /// deciding.
     ///
     /// Independent of ``showUpNextCard`` on purpose. The two were tangled before:
     /// the card was the only visible thing about advancing, so turning it off read

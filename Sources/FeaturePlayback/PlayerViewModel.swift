@@ -679,8 +679,9 @@ public final class PlayerViewModel {
     /// Called when the active engine reports a clean playthrough to the end of the
     /// stream. Auto-advances to the next episode when one is queued and the
     /// profile allows it, otherwise dismisses so the player never freezes on the
-    /// final frame: trailers/movies return to detail, a season finale returns to
-    /// the series page.
+    /// final frame — closing the full-screen cover back onto whatever presented
+    /// it (a detail page, Home, search), which is where "returns to detail" in the
+    /// older note here actually came from.
     ///
     /// This path used to advance unconditionally, which is what made "turn the Up
     /// Next card off and the next episode still plays" (#22) — the card was the

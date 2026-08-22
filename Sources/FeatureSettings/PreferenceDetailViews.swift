@@ -624,7 +624,7 @@ struct PlaybackDetailView: View {
                     Toggle("Autoplay next episode", isOn: $playback.settings.autoPlayNextEpisode)
                     Text(playback.settings.autoPlayNextEpisode
                          ? "The next episode starts when one finishes."
-                         : "You'll go back to the series when an episode finishes.")
+                         : "The player closes when an episode finishes.")
                         .font(.callout)
                         .plozzForeground(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

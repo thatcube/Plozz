@@ -78,6 +78,19 @@ public final class HomeLibraryVisibilityModel {
         store.save(visibility)
     }
 
+    /// Whether Continue Watching identifies cards by show artwork + logo (default
+    /// on) rather than by the episode thumbnail.
+    public var continueWatchingShowsSeriesArtwork: Bool {
+        visibility.continueWatchingShowsSeriesArtwork
+    }
+
+    /// Sets the Continue Watching artwork treatment and persists.
+    public func setContinueWatchingShowsSeriesArtwork(_ showsSeriesArtwork: Bool) {
+        guard visibility.continueWatchingShowsSeriesArtwork != showsSeriesArtwork else { return }
+        visibility.continueWatchingShowsSeriesArtwork = showsSeriesArtwork
+        store.save(visibility)
+    }
+
     // MARK: - Per-library Home rows (unmerged, opt-in)
 
     /// Whether a per-library row is opted in to Home (default off).

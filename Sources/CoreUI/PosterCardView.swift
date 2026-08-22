@@ -18,6 +18,11 @@ public struct PosterCardView: View {
     private let item: MediaItem
     private let style: Style
     private let spoilerSettings: SpoilerSettings
+    /// Identify the card by its **show** — the show's wide artwork with its logo
+    /// laid over it — instead of by the item's own thumbnail. Used by Continue
+    /// Watching, where the row is one entry per show and telling the shows apart
+    /// at a glance is the whole job of the card.
+    private let showsSeriesArtwork: Bool
     private let enablesAsyncArtworkFallback: Bool
     private let reservesSubtitleSpace: Bool
     /// Optional caller-owned context cue. It occupies the artwork's top-leading
@@ -55,6 +60,7 @@ public struct PosterCardView: View {
         item: MediaItem,
         style: Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
+        showsSeriesArtwork: Bool = false,
         enablesAsyncArtworkFallback: Bool = true,
         reservesSubtitleSpace: Bool = true,
         statusCue: LocalizedStringResource? = nil,
@@ -67,6 +73,7 @@ public struct PosterCardView: View {
         self.item = item
         self.style = style
         self.spoilerSettings = spoilerSettings
+        self.showsSeriesArtwork = showsSeriesArtwork
         self.enablesAsyncArtworkFallback = enablesAsyncArtworkFallback
         self.reservesSubtitleSpace = reservesSubtitleSpace
         self.statusCueText = statusCue
@@ -77,7 +84,12 @@ public struct PosterCardView: View {
         self.action = action
     }
 
-    private var hideThumbnail: Bool { spoilerSettings.shouldHideThumbnail(for: item) }
+    /// Spoiler masking never applies in series-artwork mode: the card carries the
+    /// show's own art and its logo, so there is no episode frame on it to hide.
+    /// Blurring or replacing it would only obscure the show's identity.
+    private var hideThumbnail: Bool {
+        !showsSeriesArtwork && spoilerSettings.shouldHideThumbnail(for: item)
+    }
     private var hideText: Bool { spoilerSettings.shouldHideText(for: item) }
 
     /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
@@ -382,6 +394,11 @@ public struct PosterCardView: View {
     /// (content) media titles rendered verbatim — mixing them into one `String`
     /// first would hide the copy from the catalog.
     private var primaryText: Text {
+        // In series-artwork mode the artwork already carries the show's name — as
+        // its logo, or as the styled text that stands in for one — so repeating it
+        // here would say the same thing twice and leave the card silent about the
+        // thing it hasn't said yet: which episode this is.
+        if showsSeriesArtwork { return seriesArtworkCaption }
         if item.kind == .episode, let series = item.parentTitle, !series.isEmpty {
             return Text(verbatim: series)
         }
@@ -389,12 +406,41 @@ public struct PosterCardView: View {
         return Text(verbatim: item.title)
     }
 
+    /// The caption line for a card whose artwork carries the title.
+    ///
+    /// For an episode that is its place in the run — "S2 · E5". Note the guard on
+    /// both numbers: `MediaItem.subtitle` falls back to the *series* title when it
+    /// can't build a designation, which is exactly the string the logo is already
+    /// showing, so we drop to the episode's own title instead (masked when spoiler
+    /// protection is hiding episode text).
+    private var seriesArtworkCaption: Text {
+        if item.kind == .episode {
+            if item.seasonNumber != nil,
+               item.episodeNumber != nil,
+               let designation = item.subtitle, !designation.isEmpty {
+                return Text(verbatim: designation)
+            }
+            if hideText { return Text(spoilerSettings.maskedTitle(for: item)) }
+            return Text(verbatim: item.title)
+        }
+        // A movie or series is the show, so its own title is on the artwork; the
+        // caption carries the qualifier (a year) instead.
+        guard let subtitle = item.subtitle, !subtitle.isEmpty else {
+            return Text(verbatim: "")
+        }
+        return Text(verbatim: subtitle)
+    }
+
     /// Secondary line — subtitle facts plus card runtime/remaining when available.
     /// The runtime/"… left" is dropped when the resume chip is shown, since the
     /// chip already carries the time on the artwork (no need to repeat it here).
     private var subtitleText: String? {  // l10n:content — composes CoreModels content (subtitle/runtime) with a "left" qualifier word; joined plain-String pipeline (see comment below), not a Text-rendered LSR
         var parts: [String] = []
-        if let subtitle = item.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
+        // Skipped in series-artwork mode: `subtitle` has been promoted to the
+        // primary line there (see `primaryText`), and printing it in both places
+        // would read as a stutter.
+        if !showsSeriesArtwork,
+           let subtitle = item.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
             parts.append(subtitle)
         }
         if !showsResumeChip,
@@ -477,6 +523,8 @@ public struct PosterCardView: View {
                 isFocused: isFocused,
                 iconSize: PosterCardPresentation.folderIconSize(for: style)
             )
+        } else if showsSeriesArtwork {
+            seriesArtwork
         } else if hideThumbnail {
             switch spoilerSettings.mode {
             case .blur:
@@ -697,6 +745,125 @@ public struct PosterCardView: View {
         MediaArtworkPlaceholder(tint: subtitleColor)
     }
 
+    // MARK: Series-identified artwork (Continue Watching)
+
+    /// The show's own wide art with its logo laid over it.
+    ///
+    /// Continue Watching is one entry per show, so what the card has to answer
+    /// first is "which show is this" — and a row of episode stills from shows the
+    /// viewer is part-way through answers that poorly, because mid-episode frames
+    /// from different shows look alike. The show's art plus its logo is the same
+    /// thing a shelf of DVD spines does.
+    private var seriesArtwork: some View {
+        FallbackAsyncImage(
+            references: seriesArtworkReferences,
+            maxAspectRatio: posterAspectGuard,
+            variant: artworkVariant,
+            asyncFallbackURL: seriesArtworkFallback
+        ) {
+            neutralPlaceholder
+        }
+        .overlay { seriesLogo }
+        // The show's name moved onto the artwork (as a logo, which carries no text
+        // for VoiceOver), and out of the caption — which now reads "S2 · E5". Name
+        // the artwork so the card still announces WHAT it is, not just where in it
+        // you are.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(seriesDisplayTitle)
+    }
+
+    /// For an episode this is the spoiler-safe series ladder (never the episode's
+    /// own frame). A movie or series already *is* the show, so it keeps its own
+    /// art.
+    private var seriesArtworkReferences: [ArtworkReference] {
+        item.kind == .episode ? placeholderArtworkReferences : artworkReferences
+    }
+
+    private var seriesArtworkFallback: (@Sendable () async -> URL?)? {
+        item.kind == .episode ? placeholderArtworkFallback : asyncArtworkFallback
+    }
+
+    /// The show's logo, centred so it clears the resume chip along the bottom and
+    /// the watch-state badge in the top corners.
+    ///
+    /// `HeroLogoArtwork` always renders *something* — it shows the styled title
+    /// while the logo resolves and keeps it when none is ever found — so the card
+    /// carries the show's identity whether or not a logo exists. That matters
+    /// here: logos come from the provider or from TMDb/Wikidata, and TMDb is off
+    /// unless the user supplies a token, so a good share of libraries will have
+    /// none. The text path is the design, not an error state.
+    private var seriesLogo: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let height = geo.size.height
+            ZStack {
+                // Keeps a pale or busy backdrop from swallowing the logo. Kept
+                // light: the bottom chrome already lays down its own scrim, and
+                // stacking two reads as a muddy card.
+                Color.black.opacity(0.22)
+                HeroLogoArtwork(
+                    references: item.artworkReferences(for: .logo),
+                    asyncFallbackURL: seriesLogoFallback,
+                    maxWidth: width * 0.66,
+                    maxHeight: height * 0.34,
+                    alignment: .center
+                ) {
+                    seriesLogoTextFallback(width: width)
+                }
+            }
+            .frame(width: width, height: height)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// The readable stand-in shown while the logo resolves, and kept when there
+    /// isn't one. Sized off the card so it holds up at any display density.
+    private func seriesLogoTextFallback(width: CGFloat) -> some View {
+        seriesDisplayTitle
+            .font(.system(size: max(17, width * 0.082), weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.6)
+            .shadow(color: .black.opacity(0.65), radius: 6, y: 2)
+            .padding(.horizontal, width * 0.08)
+    }
+
+    /// The show's name: an episode's owning series, otherwise the item's own.
+    ///
+    /// `Text` rather than `String`: the masked case is our own copy, and the other
+    /// two are media titles rendered verbatim. The choice itself is
+    /// ``PosterCardPresentation/seriesArtworkTitleSource(kind:hasSeriesTitle:hidesText:)``
+    /// so the spoiler rule is unit-tested without rendering.
+    private var seriesDisplayTitle: Text {
+        switch PosterCardPresentation.seriesArtworkTitleSource(
+            kind: item.kind,
+            hasSeriesTitle: !(item.parentTitle ?? "").isEmpty,
+            hidesText: hideText
+        ) {
+        case .seriesTitle:
+            return Text(verbatim: item.parentTitle ?? item.title)
+        case .maskedEpisode:
+            return Text(spoilerSettings.maskedTitle(for: item))
+        case .ownTitle:
+            return Text(verbatim: item.title)
+        }
+    }
+
+    /// Router-resolved logo, for the many libraries whose server carries none.
+    /// Bounded by the shared resolve limiter so a scrolling row can't fire one
+    /// lookup per card at once.
+    private var seriesLogoFallback: (@Sendable () async -> URL?)? {
+        guard enablesAsyncArtworkFallback else { return nil }
+        let target = item.kind == .episode ? Self.seriesArtworkItem(for: item) : item
+        return {
+            await ArtworkSession.artworkResolveLimiter.run {
+                if Task.isCancelled { return nil }
+                return await ArtworkRouter.shared.artworkURL(.logo, for: target)
+            }
+        }
+    }
+
     // MARK: Progress
 
     @ViewBuilder
@@ -720,6 +887,34 @@ public struct PosterCardView: View {
 /// SwiftUI. Folders retain the shared poster footprint/focus mechanics but never
 /// look like playable, unwatched media.
 enum PosterCardPresentation {
+    /// Which title a series-artwork card draws over its artwork.
+    enum SeriesArtworkTitleSource: Equatable {
+        /// The owning series' name (`parentTitle`).
+        case seriesTitle
+        /// The item's own title — correct for a movie or series, which *is* the
+        /// show.
+        case ownTitle
+        /// A spoiler-safe stand-in ("Episode 5").
+        case maskedEpisode
+    }
+
+    /// Picks the title a series-artwork card may draw.
+    ///
+    /// The episode branch is the load-bearing one. An episode that arrives with no
+    /// `parentTitle` has no show name to fall back to, and its own `title` is the
+    /// *episode's* title — precisely what spoiler protection exists to keep off
+    /// the screen. Drawing it here, in the largest type on the card, would be a
+    /// worse leak than the thumbnail this mode replaced, so it masks instead.
+    static func seriesArtworkTitleSource(
+        kind: MediaItemKind,
+        hasSeriesTitle: Bool,
+        hidesText: Bool
+    ) -> SeriesArtworkTitleSource {
+        guard kind == .episode else { return .ownTitle }
+        if hasSeriesTitle { return .seriesTitle }
+        return hidesText ? .maskedEpisode : .ownTitle
+    }
+
     static func usesFolderArtwork(for kind: MediaItemKind) -> Bool {
         kind == .folder
     }

@@ -40,6 +40,43 @@ final class HomeLibraryVisibilityTests: XCTestCase {
         XCTAssertTrue(decoded.isVisible("a:3"))
     }
 
+    // MARK: - Continue Watching artwork treatment
+
+    func testContinueWatchingShowsSeriesArtworkDefaultsOn() {
+        XCTAssertTrue(HomeLibraryVisibility.default.continueWatchingShowsSeriesArtwork)
+    }
+
+    func testContinueWatchingArtworkChoiceSurvivesARoundTrip() throws {
+        var visibility = HomeLibraryVisibility.default
+        visibility.continueWatchingShowsSeriesArtwork = false
+
+        let decoded = try JSONDecoder().decode(
+            HomeLibraryVisibility.self,
+            from: try JSONEncoder().encode(visibility)
+        )
+        XCTAssertFalse(
+            decoded.continueWatchingShowsSeriesArtwork,
+            "turning it off must persist — otherwise the setting silently reverts on relaunch"
+        )
+    }
+
+    /// A blob written before this field existed has no key for it. Unlike the
+    /// conservative "change nothing on upgrade" fields, this one defaults ON: the
+    /// old behaviour is the reported problem, so an upgrading user gets the better
+    /// row and can switch back.
+    func testUpgradingInstallWithoutTheKeyDefaultsOn() throws {
+        let legacy = """
+        {"mergeLibrariesOnHome":true,"disabledKeys":[],"disabledGlobalHomeRows":[],
+         "enabledLibraryHomeRows":[],"hasSeededLibraryRows":true}
+        """
+        let decoded = try JSONDecoder().decode(
+            HomeLibraryVisibility.self,
+            from: Data(legacy.utf8)
+        )
+        XCTAssertTrue(decoded.continueWatchingShowsSeriesArtwork)
+        XCTAssertTrue(decoded.mergeLibrariesOnHome, "unrelated fields still decode")
+    }
+
     // MARK: - Single on/off axis (the Home-only opt-out was retired)
 
     func testDefaultsMergeOnNothingDisabled() {

@@ -96,6 +96,13 @@ struct CustomizeHomeDetailView: View {
                         homeVisibility.setGlobalRowEnabled(!homeVisibility.isGlobalRowEnabled(opt.row), for: opt.row)
                     }
                 )
+
+                // Continue Watching's own display choice, nested under the row it
+                // belongs to and only while that row is on — a preference for a
+                // row you've hidden is noise.
+                if homeVisibility.isGlobalRowEnabled(.continueWatching) {
+                    continueWatchingArtworkToggle
+                }
             }
 
             // The per-library add-on. Framed as ADDITIVE ("show each library's own
@@ -197,6 +204,32 @@ struct CustomizeHomeDetailView: View {
     private struct GlobalRowOption: Identifiable, Hashable {
         let row: HomeGlobalRow
         var id: String { row.rawValue }
+    }
+
+    /// Continue Watching's artwork treatment.
+    ///
+    /// On (the default), each card is the show's artwork with its logo over it,
+    /// which is what makes a row of half-finished shows tell itself apart — and is
+    /// spoiler-safe in its own right, so the row never blurs. Off restores the
+    /// episode thumbnail and hands the row back to the spoiler settings.
+    @ViewBuilder private var continueWatchingArtworkToggle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: Binding(
+                get: { homeVisibility.continueWatchingShowsSeriesArtwork },
+                set: { homeVisibility.setContinueWatchingShowsSeriesArtwork($0) }
+            )) {
+                Text("Display logo and artwork")
+            }
+            .toggleStyle(SettingsSwitchToggleStyle())
+
+            Text(homeVisibility.continueWatchingShowsSeriesArtwork
+                 ? "Continue Watching shows each show's artwork and logo, so you can tell your shows apart at a glance."
+                 : "Continue Watching shows the episode thumbnail, hidden or blurred to match your spoiler settings.")
+                .font(.callout)
+                .plozzForeground(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.top, 12)
     }
 
     // MARK: - Hero (a single feature row: the whole hero form in one pane)

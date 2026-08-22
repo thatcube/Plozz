@@ -49,6 +49,9 @@ public struct MediaRowView: View {
     private let items: [MediaItem]
     private let presentation: Presentation
     private let spoilerSettings: SpoilerSettings
+    /// Identify each card by its show — the show's artwork with its logo over it
+    /// — rather than by the item's own thumbnail. Continue Watching opts in.
+    private let showsSeriesArtwork: Bool
     /// When set, the row scrolls to and moves focus onto the matching item the
     /// first time it appears (used by series/season detail to surface the
     /// "next up" episode). `nil` keeps the platform's default focus behaviour.
@@ -149,6 +152,7 @@ public struct MediaRowView: View {
         items: [MediaItem],
         style: PosterCardView.Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
+        showsSeriesArtwork: Bool = false,
         initialFocusID: String? = nil,
         initialScrollID: String? = nil,
         defaultFocusID: String? = nil,
@@ -167,6 +171,7 @@ public struct MediaRowView: View {
             items: items,
             presentation: style == .poster ? .poster : .landscape,
             spoilerSettings: spoilerSettings,
+            showsSeriesArtwork: showsSeriesArtwork,
             initialFocusID: initialFocusID,
             initialScrollID: initialScrollID,
             defaultFocusID: defaultFocusID,
@@ -187,6 +192,7 @@ public struct MediaRowView: View {
         items: [MediaItem],
         presentation: Presentation,
         spoilerSettings: SpoilerSettings = .default,
+        showsSeriesArtwork: Bool = false,
         initialFocusID: String? = nil,
         initialScrollID: String? = nil,
         defaultFocusID: String? = nil,
@@ -204,6 +210,7 @@ public struct MediaRowView: View {
         self.items = Self.uniqued(items)
         self.presentation = presentation
         self.spoilerSettings = spoilerSettings
+        self.showsSeriesArtwork = showsSeriesArtwork
         self.initialFocusID = initialFocusID
         self.initialScrollID = initialScrollID
         self.defaultFocusID = defaultFocusID
@@ -478,6 +485,7 @@ public struct MediaRowView: View {
                     item: item,
                     style: .poster,
                     spoilerSettings: spoilerSettings,
+                    showsSeriesArtwork: showsSeriesArtwork,
                     statusCue: statusCue?(item),
                     playsOnSelect: playsOnSelect
                 ) { onSelect(item) },
@@ -489,6 +497,7 @@ public struct MediaRowView: View {
                     item: item,
                     style: .landscape,
                     spoilerSettings: spoilerSettings,
+                    showsSeriesArtwork: showsSeriesArtwork,
                     statusCue: statusCue?(item),
                     playsOnSelect: playsOnSelect
                 ) { onSelect(item) },
@@ -587,7 +596,8 @@ public struct MediaRowView: View {
             for url in MediaArtworkPrefetchPolicy.candidates(
                 for: candidate,
                 style: artworkStyle,
-                spoilerSettings: spoilerSettings
+                spoilerSettings: spoilerSettings,
+                showsSeriesArtwork: showsSeriesArtwork
             ).prefix(2) {
                 ArtworkImageCache.shared.prefetch(url, variant: variant)
             }
@@ -800,8 +810,16 @@ public enum MediaArtworkPrefetchPolicy {
     public static func candidates(
         for item: MediaItem,
         style: PosterCardView.Style,
-        spoilerSettings: SpoilerSettings
+        spoilerSettings: SpoilerSettings,
+        showsSeriesArtwork: Bool = false
     ) -> [URL] {
+        // Series-artwork mode paints show art on every card regardless of watch
+        // state, so warm that rather than a thumbnail the card will never draw.
+        // Movies and series keep their own art — they already *are* the show.
+        if showsSeriesArtwork {
+            guard item.kind == .episode else { return item.artworkCandidates(for: style) }
+            return seriesArtworkCandidates(for: item, style: style)
+        }
         if spoilerSettings.mode == .placeholder,
            spoilerSettings.shouldHideThumbnail(for: item) {
             // Mirrors `PosterCardView.placeholderArtworkReferences`: series-level
@@ -809,12 +827,22 @@ public enum MediaArtworkPrefetchPolicy {
             // ladder so the image warmed here is the one the card actually paints
             // — warming only `fallbackArtworkURL` meant Plex and direct-share
             // cards prefetched nothing at all, since neither ever set it.
-            let candidates = style == .poster
-                ? [item.seriesPosterURL, item.fallbackArtworkURL]
-                : [item.fallbackArtworkURL, item.seriesPosterURL]
-            return candidates.compactMap { $0 }
+            return seriesArtworkCandidates(for: item, style: style)
         }
         return item.artworkCandidates(for: style)
+    }
+
+    /// Spoiler-safe show art for an episode, ordered for the card's shape: a wide
+    /// card wants the show's backdrop, a poster card its vertical poster, each
+    /// keeping the other as a last resort.
+    private static func seriesArtworkCandidates(
+        for item: MediaItem,
+        style: PosterCardView.Style
+    ) -> [URL] {
+        let candidates = style == .poster
+            ? [item.seriesPosterURL, item.fallbackArtworkURL]
+            : [item.fallbackArtworkURL, item.seriesPosterURL]
+        return candidates.compactMap { $0 }
     }
 }
 

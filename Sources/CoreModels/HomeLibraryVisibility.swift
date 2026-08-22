@@ -53,18 +53,34 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
     /// across a later merge on→off re-toggle instead of being re-seeded.
     public var hasSeededLibraryRows: Bool
 
+    /// Whether the Continue Watching row identifies each card by its **show** —
+    /// the show's wide artwork with its logo laid over it — rather than by the
+    /// episode's own thumbnail. On by default.
+    ///
+    /// The row is one entry per show, so show-level art is what makes the cards
+    /// tell each other apart at a glance; a grid of episode stills from shows you
+    /// are mid-way through mostly reads as a row of similar rectangles. It is also
+    /// spoiler-safe by construction — there is no episode frame on the card to
+    /// hide — so with this on the row never masks and never blurs.
+    ///
+    /// Turning it **off** restores the episode thumbnail and hands the row back to
+    /// the spoiler settings, which blur or replace it as configured.
+    public var continueWatchingShowsSeriesArtwork: Bool
+
     public init(
         mergeLibrariesOnHome: Bool = true,
         disabledKeys: Set<String> = [],
         disabledGlobalHomeRows: Set<String> = [],
         enabledLibraryHomeRows: Set<String> = [],
-        hasSeededLibraryRows: Bool = false
+        hasSeededLibraryRows: Bool = false,
+        continueWatchingShowsSeriesArtwork: Bool = true
     ) {
         self.mergeLibrariesOnHome = mergeLibrariesOnHome
         self.disabledKeys = disabledKeys
         self.disabledGlobalHomeRows = disabledGlobalHomeRows
         self.enabledLibraryHomeRows = enabledLibraryHomeRows
         self.hasSeededLibraryRows = hasSeededLibraryRows
+        self.continueWatchingShowsSeriesArtwork = continueWatchingShowsSeriesArtwork
     }
 
     /// The default: merge on, nothing disabled/hidden, every global row on, no
@@ -171,6 +187,7 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         case disabledGlobalHomeRows
         case enabledLibraryHomeRows
         case hasSeededLibraryRows
+        case continueWatchingShowsSeriesArtwork
     }
 
     /// Decodes leniently so a pre-existing blob still loads: missing fields fall
@@ -191,6 +208,15 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         // post-upgrade merge re-toggle would re-seed over its customization.
         self.hasSeededLibraryRows = (try container.decodeIfPresent(Bool.self, forKey: .hasSeededLibraryRows) ?? false)
             || !self.enabledLibraryHomeRows.isEmpty
+        // Defaults ON for upgrading installs too. This one is deliberately *not*
+        // treated like the conservative "change nothing on upgrade" fields above:
+        // the old behaviour is the reported problem (a Continue Watching row that
+        // is mostly blurred rectangles once spoiler protection is on), so an
+        // upgrading user should get the better row and can switch back.
+        self.continueWatchingShowsSeriesArtwork = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .continueWatchingShowsSeriesArtwork
+        ) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -200,6 +226,7 @@ public struct HomeLibraryVisibility: Codable, Equatable, Sendable {
         try container.encode(disabledGlobalHomeRows, forKey: .disabledGlobalHomeRows)
         try container.encode(enabledLibraryHomeRows, forKey: .enabledLibraryHomeRows)
         try container.encode(hasSeededLibraryRows, forKey: .hasSeededLibraryRows)
+        try container.encode(continueWatchingShowsSeriesArtwork, forKey: .continueWatchingShowsSeriesArtwork)
     }
 }
 

@@ -65,5 +65,63 @@ final class PosterCardPresentationTests: XCTestCase {
             )
         )
     }
+    // MARK: - Series-artwork title (Continue Watching)
+
+    /// A card that draws the show's name over its artwork must never reach for an
+    /// episode's own title to do it. When the series name is missing and spoiler
+    /// text is hidden, the episode title is exactly the string being protected —
+    /// and this mode would print it in the largest type on the card.
+    func testSeriesArtworkNeverDrawsAnEpisodeTitleWhileTextIsHidden() {
+        XCTAssertEqual(
+            PosterCardPresentation.seriesArtworkTitleSource(
+                kind: .episode,
+                hasSeriesTitle: false,
+                hidesText: true
+            ),
+            .maskedEpisode
+        )
+    }
+
+    func testSeriesArtworkPrefersTheSeriesTitleWhenKnown() {
+        for hidesText in [false, true] {
+            XCTAssertEqual(
+                PosterCardPresentation.seriesArtworkTitleSource(
+                    kind: .episode,
+                    hasSeriesTitle: true,
+                    hidesText: hidesText
+                ),
+                .seriesTitle,
+                "the series name is spoiler-safe either way (hidesText: \(hidesText))"
+            )
+        }
+    }
+
+    /// With protection off there is nothing to protect, so a nameless episode may
+    /// fall back to its own title rather than showing a bare "Episode 5".
+    func testSeriesArtworkFallsBackToTheOwnTitleWhenNothingIsHidden() {
+        XCTAssertEqual(
+            PosterCardPresentation.seriesArtworkTitleSource(
+                kind: .episode,
+                hasSeriesTitle: false,
+                hidesText: false
+            ),
+            .ownTitle
+        )
+    }
+
+    /// A movie or series IS the show, so its own title is the right one.
+    func testSeriesArtworkUsesTheOwnTitleForNonEpisodes() {
+        for kind in [MediaItemKind.movie, .series, .season] {
+            XCTAssertEqual(
+                PosterCardPresentation.seriesArtworkTitleSource(
+                    kind: kind,
+                    hasSeriesTitle: false,
+                    hidesText: true
+                ),
+                .ownTitle,
+                "kind: \(kind)"
+            )
+        }
+    }
 }
 #endif

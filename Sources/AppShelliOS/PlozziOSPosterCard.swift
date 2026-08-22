@@ -6,6 +6,13 @@ import SwiftUI
 struct PlozziOSPosterCard: View {
     let item: MediaItem?
     var style: PosterCardView.Style = .poster
+    /// Identify the card by its show — artwork plus logo — instead of by the
+    /// item's own thumbnail. Continue Watching opts in.
+    var showsSeriesArtwork: Bool = false
+    /// Spoiler protection for the card's artwork and text. Defaulted so the many
+    /// callers that show already-watched or non-episode content stay unchanged;
+    /// surfaces that can show unwatched episodes pass the profile's real settings.
+    var spoilerSettings: SpoilerSettings = .default
     /// Draws the resume chip (play glyph + progress + time remaining) over the
     /// artwork, with an optional download badge — the same treatment tvOS uses.
     var showsResumeChip: Bool = false
@@ -20,6 +27,8 @@ struct PlozziOSPosterCard: View {
         PosterCardView(
             item: item ?? placeholderItem,
             style: style,
+            spoilerSettings: spoilerSettings,
+            showsSeriesArtwork: showsSeriesArtwork,
             reservesSubtitleSpace: false,
             statusCue: statusCue,
             showsResumeChip: showsResumeChip,

@@ -113,6 +113,47 @@ final class MediaRowPolicyTests: XCTestCase {
         )
     }
 
+    /// Series-artwork mode paints show art on every card whatever the watch state,
+    /// so the prefetcher must warm that rather than a thumbnail the card will
+    /// never draw — including for a watched episode, which no spoiler rule hides.
+    func testSeriesArtworkModePrefetchesShowArtRegardlessOfWatchState() {
+        let artwork = artworkURLs()
+        for isPlayed in [false, true] {
+            let candidates = MediaArtworkPrefetchPolicy.candidates(
+                for: episode(artwork: artwork, isPlayed: isPlayed, seriesPoster: artwork.seriesPoster),
+                style: .landscape,
+                spoilerSettings: SpoilerSettings(isEnabled: false),
+                showsSeriesArtwork: true
+            )
+            XCTAssertEqual(candidates, [artwork.fallback, artwork.seriesPoster])
+            XCTAssertFalse(candidates.contains(artwork.still), "isPlayed: \(isPlayed)")
+        }
+    }
+
+    /// A movie in Continue Watching already *is* the show, so it keeps its own
+    /// art rather than being routed down the series ladder.
+    func testSeriesArtworkModeLeavesNonEpisodesOnTheirOwnArtwork() {
+        let backdrop = URL(string: "https://example.com/movie-backdrop.jpg")!
+        let poster = URL(string: "https://example.com/movie-poster.jpg")!
+        let movie = MediaItem(
+            id: "movie-1",
+            title: "A Movie",
+            kind: .movie,
+            posterURL: poster,
+            backdropURL: backdrop
+        )
+
+        XCTAssertEqual(
+            MediaArtworkPrefetchPolicy.candidates(
+                for: movie,
+                style: .landscape,
+                spoilerSettings: SpoilerSettings(isEnabled: true, mode: .placeholder),
+                showsSeriesArtwork: true
+            ),
+            [backdrop, poster]
+        )
+    }
+
     private typealias ArtworkURLs = (still: URL, backdrop: URL, fallback: URL, seriesPoster: URL)
 
     private func artworkURLs() -> ArtworkURLs {

@@ -1479,7 +1479,11 @@ private struct PlozziOSHomeRowView: View {
                     // Continue Watching is a resume affordance: pressing it should
                     // carry on watching, which is what tvOS already did. The
                     // context menu still reaches the detail page.
-                    interaction: row.kind == .continueWatching ? .play : .openDetail
+                    interaction: row.kind == .continueWatching ? .play : .openDetail,
+                    // Continue Watching identifies cards by show art + logo unless
+                    // the user has turned that off in Customize Home.
+                    showsSeriesArtwork: row.kind == .continueWatching
+                        && appModel.settings.homeVisibility.continueWatchingShowsSeriesArtwork
                 )
             }
         }
@@ -1539,6 +1543,9 @@ private struct PlozziOSHomeMediaRail: View {
     /// from the card's shape — a landscape rail is a presentation choice, not a
     /// promise that the row is Continue Watching.
     var interaction: PlozziOSRailInteraction = .openDetail
+    /// Identify each card by its show — artwork plus logo — instead of by the
+    /// item's own thumbnail.
+    var showsSeriesArtwork: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1556,6 +1563,7 @@ private struct PlozziOSHomeMediaRail: View {
                             item: item,
                             isLandscape: style == .landscape,
                             interaction: interaction,
+                            showsSeriesArtwork: showsSeriesArtwork,
                             provider: provider(for: item)
                         )
                         .frame(
@@ -1590,6 +1598,7 @@ private struct PlozziOSHomeMediaCard: View {
     let item: MediaItem
     let isLandscape: Bool
     var interaction: PlozziOSRailInteraction = .openDetail
+    var showsSeriesArtwork: Bool = false
     let provider: (any MediaProvider)?
     @State private var downloadRecord: DownloadedMediaRecord?
     @Environment(\.plozziOSRailPlay) private var railPlay
@@ -1633,6 +1642,16 @@ private struct PlozziOSHomeMediaCard: View {
         PlozziOSPosterCard(
             item: item,
             style: isLandscape ? .landscape : .poster,
+            showsSeriesArtwork: showsSeriesArtwork,
+            // Home rails can surface unwatched episodes (Continue Watching's
+            // next-up entries, Recently Added), so they have to honour spoiler
+            // protection. They were passing nothing at all, which meant the
+            // defaulted `.default` — protection off — no matter what the profile
+            // had chosen. That went unnoticed while every rail showed the episode
+            // thumbnail regardless; it stops being invisible the moment the
+            // artwork toggle below is turned off and the row hands itself back to
+            // these settings.
+            spoilerSettings: appModel.settings.spoilers.settings,
             // The chip is requested explicitly rather than riding an implicit
             // "landscape means playable" rule, so presentation and behaviour stay
             // independently controlled.

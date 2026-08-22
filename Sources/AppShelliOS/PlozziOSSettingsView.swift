@@ -1679,6 +1679,17 @@ private struct PlozziOSHomeSettingsView: View {
                         )
                     )
                 }
+                // Nested under the row it belongs to, and only while that row is
+                // on — a preference for a hidden row is noise.
+                if visibility.isGlobalRowEnabled(.continueWatching) {
+                    Toggle(
+                        "Display logo and artwork",
+                        isOn: Binding(
+                            get: { visibility.continueWatchingShowsSeriesArtwork },
+                            set: { visibility.setContinueWatchingShowsSeriesArtwork($0) }
+                        )
+                    )
+                }
                 Toggle(
                     "Merge libraries",
                     isOn: Binding(

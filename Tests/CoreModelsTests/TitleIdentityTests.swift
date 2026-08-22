@@ -368,6 +368,77 @@ final class TitleIdentityTests: XCTestCase {
         }
     }
 
+    /// Regression — the Plex "removed from watchlist but it's still there" bug.
+    ///
+    /// A series page fronts its hero on the episode Play would run, so the bookmark
+    /// acts on the show *promoted* from that episode: a bare `id` + `title` stub,
+    /// with no provider ids and no year. The filled bookmark resolved that stub
+    /// correctly because membership widens an item's evidence with its component's
+    /// canonical evidence — but the WRITE path built evidence from the item alone,
+    /// where the stub yields no strong id and no weak title/year at all. It
+    /// therefore matched nothing, minted a fresh alias, and wrote the removal onto
+    /// a row nothing else referenced. Movies never hit this: a movie hero already
+    /// IS the movie, ids and all.
+    ///
+    /// The invariant: the two must agree on the alias for the same subject.
+    func testPromotedSeriesSubjectResolvesToItsShowsAlias() {
+        let show = item(
+            "local-show",
+            title: "Andor",
+            year: 2022,
+            kind: .series,
+            providerIDs: ["Tvdb": "371980"],
+            account: "plex-account"
+        )
+        // What a series page actually hands the watchlist button.
+        let promoted = item(
+            "local-show",
+            title: "Andor",
+            year: nil,
+            kind: .series,
+            account: "plex-account"
+        )
+
+        // The ingredient of the bug: on its own, the stub is evidence-free.
+        let bare = MediaAliasEvidence(item: promoted)
+        XCTAssertEqual(bare?.strong, [])
+        XCTAssertNil(bare?.weak)
+
+        let index = snapshot([
+            (
+                .external(source: "tvdb", value: "371980"),
+                [indexed("plex-account", "local-show", title: "Andor", year: 2022, kind: .series)]
+            )
+        ])
+        let record = MediaAliasRecord(
+            kind: .series,
+            strongEvidence: [
+                MediaAliasStrongEvidence(kind: .series, namespace: .tvdb, value: "371980")!
+            ]
+        )!
+        let aliases = MediaAliasSnapshot(records: [record])
+        let resolver = TitleIdentityResolver(index: index, aliases: aliases)
+
+        // What the button reads.
+        XCTAssertEqual(resolver.aliasID(for: promoted), record.id)
+
+        // What the mutation must write: the same alias, once evidence is widened
+        // the same way rather than built from the stub alone.
+        let widened = MediaAliasEvidence(
+            item: promoted,
+            canonicalEvidence: index.canonicalEvidence(for: promoted)
+        )
+        XCTAssertEqual(
+            widened?.strong,
+            [MediaAliasStrongEvidence(kind: .series, namespace: .tvdb, value: "371980")!]
+        )
+        let writeAliasID = widened.flatMap {
+            MediaAliasResolver.lookup(evidence: $0, in: aliases)
+        }
+        XCTAssertEqual(writeAliasID, record.id)
+        XCTAssertEqual(resolver.aliasID(for: show), record.id)
+    }
+
     /// Resolving identity for browsing must never mint a durable record. The ledger
     /// is user intent, not a cache of everything the viewer scrolled past — it was
     /// already 6.7 MB at 10k records, and unbounded growth is a release blocker.

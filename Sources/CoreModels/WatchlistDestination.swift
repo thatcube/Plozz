@@ -229,6 +229,15 @@ public struct WatchlistMutationTarget: Codable, Hashable, Sendable {
             case .aniList, .seriesAniList: namespace = .aniList
             case .myAnimeList, .seriesMal: namespace = .myAnimeList
             case .aniDB, .seriesAniDB: namespace = .aniDB
+            // The ledger records `plexGuid` deliberately (see `MediaAliasEvidence`)
+            // because it is the ONLY strong id a Plex Discover / Watchlist row
+            // carries, and `PlexWatchlistDestination.resolve` addresses the
+            // account-level list by exactly that guid. Dropping it here meant a
+            // target assembled from the ledger — which is all a promoted series
+            // subject has — could only be resolved through a validated binding,
+            // so a show whose binding had not been observed yet resolved to
+            // nothing and its removal was silently discarded as unsupported.
+            case .plexGuid: namespace = .plex
             default: return nil
             }
             return WatchlistExternalID(namespace: namespace, value: evidence.value)

@@ -412,7 +412,7 @@ public extension UniversalWatchlistHost {
             let aliasID = try await mediaAliasLedger.resolveOrCreate(
                 profileID: profileID,
                 evidence: evidence,
-                preferredAliasID: item.watchlistAliasID
+                preferredAliasID: universalWatchlistPreferredAliasID(for: item)
             )
             if adding {
                 try universalWatchlist.add(
@@ -449,7 +449,7 @@ public extension UniversalWatchlistHost {
         guard let evidence = universalWatchlistEvidence(for: item),
               let aliasID = MediaAliasResolver.lookup(
                 evidence: evidence,
-                preferredAliasID: item.watchlistAliasID,
+                preferredAliasID: universalWatchlistPreferredAliasID(for: item),
                 in: mediaAliasLedger.activeSnapshot
               ),
               let target = universalMutationTarget(
@@ -1125,9 +1125,27 @@ public extension UniversalWatchlistHost {
         }
         return MediaAliasEvidence(
             item: item,
+            // The SAME widening `TitleIdentityResolver` applies when it answers
+            // `universalWatchlistMembership`. Without it the read and the write
+            // resolved identity differently, and a target that carries no ids of
+            // its own — the show a series page promotes its episode hero to, which
+            // is a bare `id` + `title` stub — produced evidence with no strong id
+            // and no year at all. `resolveOrCreate` then minted a FRESH alias and
+            // the removal tombstone landed on a row nothing else referenced: the
+            // toast said "Removed from Watchlist" while the filled bookmark, which
+            // reads through the index, kept answering about the real alias. Movies
+            // were unaffected only because a movie hero is already the movie.
+            canonicalEvidence: identityIndex.identitySnapshot.canonicalEvidence(for: item),
             bindingHints: hints,
             locallyValidatedBindings: Set(bindings)
         )
+    }
+
+    /// The alias a watchlist mutation must address: whichever one
+    /// ``universalWatchlistMembership`` answered from, so the write can never
+    /// target a different row than the button the viewer just pressed.
+    func universalWatchlistPreferredAliasID(for item: MediaItem) -> MediaAliasID? {
+        item.watchlistAliasID ?? titleIdentityResolver.aliasID(for: item)
     }
 
 

@@ -1198,7 +1198,7 @@ private struct PlozziOSDetailHeroForeground: View {
         // episode is not watchlistable — so the button did not act on the wrong
         // thing, it vanished. `watchlistSubject` promotes it to its show, the
         // same way the tvOS heroes already do.
-        for target in [item, item.watchlistSubject, rootItem] {
+        for target in [item, watchlistSubject, rootItem] {
             for action in actionHandler.actions(for: target, context: .none)
                 where offersAction(action) && seen.insert(action).inserted {
                 entries.append(ActionEntry(action: action, target: target))
@@ -1207,7 +1207,19 @@ private struct PlozziOSDetailHeroForeground: View {
         return entries
     }
 
-    /// Navigation is dropped from a hero menu except when it leaves for a parent
+    /// The show an episode hero's watchlist gesture acts on.
+    ///
+    /// ``MediaItem/watchlistSubject`` can only synthesize a bare `id` + `title`
+    /// stub, because an episode payload carries the episode's own external ids and
+    /// not its show's. On a SERIES page the real, fully-identified show is already
+    /// in hand as `rootItem`, so it is used instead — a mutation carrying provider
+    /// ids resolves on its own rather than depending on a warm identity index.
+    private var watchlistSubject: MediaItem {
+        let subject = item.watchlistSubject
+        guard subject.id != item.id, subject.id == rootItem.id else { return subject }
+        return rootItem
+    }
+
     /// this page can't otherwise reach, and only when something can route it.
     private func offersAction(_ action: MediaItemAction) -> Bool {
         guard action.isNavigation else { return true }

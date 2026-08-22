@@ -324,6 +324,127 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertNotNil(reboundResolution)
     }
 
+    /// Regression — the reported bug: **removing a TV SHOW from the Plex
+    /// watchlist did nothing while removing a movie worked.**
+    ///
+    /// A series page fronts its hero on the episode Play would run, so the
+    /// bookmark's subject is the show *promoted* from that episode — an item that
+    /// carries no ids of its own. Everything downstream of that promotion has to
+    /// keep working on a show exactly as it does on a film: the show's global
+    /// `plex://show/<id>` guid is the account-level list's key, and a removal must
+    /// address `removeFromWatchlist` with it. A movie was never affected because a
+    /// movie hero already IS the movie.
+    func testUniversalDestinationRemovesSeriesUsingShowGuid() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/actions/removeFromWatchlist", json: "{}")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+        let destination = try XCTUnwrap(
+            PlexWatchlistDestination(provider: provider)
+        )
+        var show = MediaItem(id: "local-show", title: "Andor", kind: .series)
+        show.providerIDs["PlexGuid"] = "plex://show/5d9c0874"
+
+        let resolved = try await destination.resolve(
+            WatchlistMutationTarget(aliasID: MediaAliasID(), item: show)!
+        )
+        let binding = try XCTUnwrap(resolved)
+        XCTAssertEqual(binding.opaqueValue, "5d9c0874")
+        try await destination.apply(.absent, to: binding)
+
+        XCTAssertEqual(
+            stub.method(forPathSuffix: "/actions/removeFromWatchlist"),
+            .put
+        )
+        let query = stub.queryItems(forPathSuffix: "/actions/removeFromWatchlist") ?? []
+        XCTAssertTrue(query.contains { $0.name == "ratingKey" && $0.value == "5d9c0874" })
+        XCTAssertEqual(
+            stub.baseURL(forPathSuffix: "/actions/removeFromWatchlist")?.host,
+            "discover.provider.plex.tv"
+        )
+    }
+
+    /// Regression: a mutation target assembled from the **ledger record** — all a
+    /// promoted series subject has, since it carries no provider ids itself — must
+    /// keep the `plexGuid`. It was dropped on the way out of the record, so such a
+    /// target resolved to nothing on Plex and its removal was discarded as an
+    /// unsupported identity: the confirmation appeared, the show stayed.
+    func testMutationTargetKeepsPlexGuidFromAliasRecord() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/actions/removeFromWatchlist", json: "{}")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+        let destination = try XCTUnwrap(
+            PlexWatchlistDestination(provider: provider)
+        )
+        let record = try XCTUnwrap(
+            MediaAliasRecord(
+                kind: .series,
+                strongEvidence: [
+                    MediaAliasStrongEvidence(
+                        kind: .series,
+                        namespace: .plexGuid,
+                        value: "plex://show/5d9c0874"
+                    )!
+                ]
+            )
+        )
+        let target = try XCTUnwrap(
+            WatchlistMutationTarget(aliasID: record.id, aliasRecord: record)
+        )
+        XCTAssertTrue(target.externalIDs.contains {
+            $0.namespace == .plex && $0.value == "plex://show/5d9c0874"
+        })
+
+        let resolved = try await destination.resolve(target)
+        let binding = try XCTUnwrap(resolved)
+        XCTAssertEqual(binding.opaqueValue, "5d9c0874")
+        try await destination.apply(.absent, to: binding)
+
+        let query = stub.queryItems(forPathSuffix: "/actions/removeFromWatchlist") ?? []
+        XCTAssertTrue(query.contains { $0.name == "ratingKey" && $0.value == "5d9c0874" })
+    }
+
+    /// A show only ever seen through the watchlist READ has no guid of its own on
+    /// the target — just the binding the import corroborated. Removal must still
+    /// address the Discover id, not fall through to "unsupported identity".
+    func testUniversalDestinationRemovesSeriesFromCorroboratedBinding() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"5d9c0874","type":"show","title":"Andor","year":2022,
+           "guid":"plex://show/5d9c0874","Guid":[{"id":"tvdb://371980"}]}
+        ]}}
+        """)
+        stub.stub(pathSuffix: "/actions/removeFromWatchlist", json: "{}")
+        let provider = PlexProvider(
+            session: makeSession(),
+            accountID: "plex-account",
+            http: stub
+        )
+        let destination = try XCTUnwrap(
+            PlexWatchlistDestination(provider: provider)
+        )
+
+        let entries = try await destination.fetchEntries()
+        let entry = try XCTUnwrap(entries.first)
+        XCTAssertEqual(entry.kind, .series)
+        let evidence = try XCTUnwrap(entry.mediaAliasEvidence)
+        let target = try XCTUnwrap(
+            WatchlistMutationTarget(
+                aliasID: MediaAliasID(),
+                kind: .series,
+                validatedBindings: Array(evidence.locallyValidatedBindings)
+            )
+        )
+
+        let resolvedBinding = try await destination.resolve(target)
+        let binding = try XCTUnwrap(resolvedBinding)
+        XCTAssertEqual(binding.opaqueValue, "5d9c0874")
+        try await destination.apply(.absent, to: binding)
+
+        let query = stub.queryItems(forPathSuffix: "/actions/removeFromWatchlist") ?? []
+        XCTAssertTrue(query.contains { $0.name == "ratingKey" && $0.value == "5d9c0874" })
+    }
+
     func testDiscoverDetailRemainsUnownedDespiteAccountOrigin() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/abc123", json: """

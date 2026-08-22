@@ -202,29 +202,15 @@ struct CustomizeHomeDetailView: View {
     // MARK: - Continue Watching (its own entry — a row's LOOK, not its presence)
 
     /// Continue Watching's card style gets its own pane rather than riding in the
-    /// "Rows on Home" checklist.
-    ///
-    /// That checklist answers one question — which rows appear — and every control
-    /// in it is a checkmark against a row name. A switch about how one of those
-    /// rows *looks* had nothing to attach itself to there: it sat under the list
-    /// reading as though it applied to all three rows, or to none. It is also not
-    /// an on/off at all (see ``ContinueWatchingArtworkStyle``), which is why it
-    /// resisted a good switch label.
+    /// "Rows on Home" checklist, which answers a different question — which rows
+    /// appear — and whose every control is a checkmark against a row name.
     private var continueWatchingRows: [SettingsSplitRow] {
         [
             SettingsSplitRow(
                 id: "continue-watching",
                 title: "Continue Watching",
-                description: "Choose what the cards in your Continue Watching row show.",
+                description: "What the cards in this row show.",
             ) {
-                continueWatchingDetail
-            }
-        ]
-    }
-
-    @ViewBuilder private var continueWatchingDetail: some View {
-        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
-            SettingsDetailGroup(title: "Card artwork") {
                 ContinueWatchingArtworkPicker(
                     style: Binding(
                         get: {
@@ -238,12 +224,7 @@ struct CustomizeHomeDetailView: View {
                     )
                 )
             }
-
-            Text("Show Artwork puts each show's own art and logo on the card, so a row of shows you're part-way through is easy to tell apart — and there's no episode still on it to hide, so it never blurs. Episode Thumbnail shows the episode's own image instead, blurred or replaced to match your spoiler settings.")
-                .font(.callout)
-                .plozzForeground(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        ]
     }
 
     // MARK: - Hero (a single feature row: the whole hero form in one pane)

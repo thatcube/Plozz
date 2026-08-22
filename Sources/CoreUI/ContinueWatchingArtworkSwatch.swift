@@ -3,10 +3,8 @@ import SwiftUI
 
 /// How a Continue Watching card identifies itself.
 ///
-/// Deliberately a two-way *choice* rather than an on/off. Both states show
-/// artwork — the question is only *which* artwork — so a switch would have to be
-/// labelled something like "display artwork", which reads as though turning it
-/// off leaves the card blank.
+/// A two-way *choice*, not an on/off: both states put artwork on the card, so any
+/// switch label would imply that turning it off leaves the card blank.
 public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
     /// The show's own wide art with its logo over it.
     case showArtwork
@@ -35,7 +33,7 @@ public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
         case .showArtwork:
             return LocalizedStringResource(
                 "continueWatchingArtwork.showArtwork.detail",
-                defaultValue: "Tell your shows apart at a glance",
+                defaultValue: "Easy to tell apart",
                 comment: "Explains the Show Artwork option for Continue Watching cards."
             )
         case .episodeThumbnail:
@@ -48,13 +46,16 @@ public enum ContinueWatchingArtworkStyle: String, CaseIterable, Sendable {
     }
 }
 
-/// A picture of a single Continue Watching card in each
-/// ``ContinueWatchingArtworkStyle`` — the show's art with its logo laid over it,
-/// or the episode's own frame with the title captioned underneath.
+/// A picture of one Continue Watching card in each
+/// ``ContinueWatchingArtworkStyle``.
 ///
-/// Fabricated graphic (no real media, network or theme needed), like
-/// ``SpoilerModeSwatch`` — the point is the *shape* of each option: where the
-/// title sits, and whether anything is written under the card.
+/// Each leans on the one thing that actually tells them apart. Show Artwork sets
+/// a **wordmark** into flat branded art — an abstract plate stands in for a logo
+/// about as well as a blank bar does, which left the option's whole point
+/// invisible. Episode Thumbnail is a photograph of a place, with the title
+/// written *underneath* because nothing on the artwork is naming it.
+///
+/// Fabricated throughout, like ``SpoilerModeSwatch`` — no media, network or theme.
 public struct ContinueWatchingArtworkSwatch: View {
     private let style: ContinueWatchingArtworkStyle
     private let cornerRadius: CGFloat
@@ -68,42 +69,55 @@ public struct ContinueWatchingArtworkSwatch: View {
         GeometryReader { geo in
             let width = geo.size.width
             let height = geo.size.height
-            // One card, as wide as fits, 16:9 — the shape of the real row.
-            let cardWidth = min(width * 0.82, height * 1.55)
+            // Reserve the caption strip in BOTH options so the two cards are the
+            // same size — otherwise the thumbnail card renders smaller and the
+            // pair looks like a scale difference rather than a content one.
+            let captionStrip = height * 0.20
+            let cardWidth = min(width * 0.86, (height - captionStrip) * 16.0 / 9.0)
             let cardHeight = cardWidth * 9.0 / 16.0
-            VStack(spacing: cardHeight * 0.10) {
+            VStack(spacing: cardHeight * 0.11) {
                 card(width: cardWidth, height: cardHeight)
-                if style == .episodeThumbnail {
-                    caption(width: cardWidth)
-                }
+                caption(width: cardWidth)
+                    .opacity(style == .episodeThumbnail ? 1 : 0)
             }
             .frame(width: width, height: height, alignment: .center)
         }
     }
 
     private func card(width: CGFloat, height: CGFloat) -> some View {
-        ZStack {
+        let radius = min(cornerRadius, width * 0.06)
+        return ZStack {
             artwork(width: width, height: height)
             if style == .showArtwork {
-                // The logo stand-in: a wordmark-shaped plate, centred, the way the
-                // real card composites a show's logo.
-                Capsule(style: .continuous)
-                    .fill(.white.opacity(0.92))
-                    .frame(width: width * 0.46, height: height * 0.13)
-                    .shadow(color: .black.opacity(0.35), radius: height * 0.03, y: height * 0.012)
+                wordmark(width: width)
             }
             chip(width: width, height: height)
         }
         .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: min(cornerRadius, width * 0.07), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: min(cornerRadius, width * 0.07), style: .continuous)
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(Color(white: 0.5).opacity(0.3), lineWidth: 1)
         )
     }
 
-    /// Two clearly different pictures, so the options don't look like the same
-    /// card twice: broad show fan-art versus a tighter, warmer episode frame.
+    /// A stand-in show logo. Deliberately *lettering* — the one unmistakable way
+    /// to say "a logo sits here". Invented, so it can't be mistaken for a real
+    /// title, and drawn rather than translated: it is a picture of a logo, not
+    /// copy.
+    private func wordmark(width: CGFloat) -> some View {
+        Text(verbatim: "AURORA")
+            .font(.system(size: width * 0.10, weight: .black, design: .rounded))
+            .tracking(width * 0.012)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .shadow(color: .black.opacity(0.55), radius: width * 0.02, y: width * 0.006)
+            .padding(.horizontal, width * 0.08)
+    }
+
+    /// Two pictures that read as different *kinds* of image: flat branded fan-art
+    /// with the title set into it, versus a photograph of a moment.
     @ViewBuilder
     private func artwork(width: CGFloat, height: CGFloat) -> some View {
         switch style {
@@ -111,85 +125,99 @@ public struct ContinueWatchingArtworkSwatch: View {
             ZStack {
                 LinearGradient(
                     colors: [
-                        Color(red: 0.16, green: 0.28, blue: 0.55),
-                        Color(red: 0.42, green: 0.20, blue: 0.52)
+                        Color(red: 0.10, green: 0.20, blue: 0.46),
+                        Color(red: 0.38, green: 0.16, blue: 0.48)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // A wide, even glow — poster lighting, not a photograph.
                 RadialGradient(
-                    colors: [Color.white.opacity(0.30), .clear],
-                    center: .init(x: 0.24, y: 0.22),
+                    colors: [Color(red: 0.45, green: 0.72, blue: 1.0).opacity(0.38), .clear],
+                    center: .init(x: 0.5, y: 0.42),
                     startRadius: 0,
-                    endRadius: width * 0.55
+                    endRadius: width * 0.62
                 )
             }
         case .episodeThumbnail:
             ZStack {
+                // A dusk horizon. A landscape reads as a *photograph of
+                // somewhere* at any size, which is the whole point of this
+                // option — a frame out of the episode, not branding. A figure
+                // silhouette was tried first and turned into a restroom
+                // pictogram once it got this small.
                 LinearGradient(
                     colors: [
-                        Color(red: 0.55, green: 0.32, blue: 0.18),
-                        Color(red: 0.24, green: 0.18, blue: 0.30)
+                        Color(red: 0.13, green: 0.17, blue: 0.38),
+                        Color(red: 0.52, green: 0.32, blue: 0.42),
+                        Color(red: 0.96, green: 0.60, blue: 0.28)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                // A suggestion of a figure in frame, so it reads as a photograph
-                // of a moment rather than as cover art.
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color(red: 1.0, green: 0.97, blue: 0.82), Color(red: 1.0, green: 0.80, blue: 0.42)],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: width * 0.06
+                        )
+                    )
+                    .frame(width: width * 0.11, height: width * 0.11)
+                    .offset(x: -width * 0.14, y: -height * 0.02)
                 Ellipse()
-                    .fill(Color.black.opacity(0.28))
-                    .frame(width: width * 0.26, height: height * 0.52)
-                    .offset(x: -width * 0.16, y: height * 0.16)
-                RadialGradient(
-                    colors: [Color(red: 1.0, green: 0.85, blue: 0.55).opacity(0.55), .clear],
-                    center: .init(x: 0.74, y: 0.30),
-                    startRadius: 0,
-                    endRadius: width * 0.40
-                )
+                    .fill(Color(red: 0.16, green: 0.10, blue: 0.20))
+                    .frame(width: width * 0.95, height: height * 0.55)
+                    .offset(x: -width * 0.28, y: height * 0.42)
+                Ellipse()
+                    .fill(Color(red: 0.08, green: 0.05, blue: 0.12))
+                    .frame(width: width * 1.0, height: height * 0.48)
+                    .offset(x: width * 0.34, y: height * 0.50)
             }
         }
     }
 
-    /// The resume chip along the bottom: play glyph, progress, and a text run.
-    /// Present in both options — it isn't what the choice is about.
+    /// The resume chip along the bottom — present in both, since it isn't what
+    /// the choice is about.
     private func chip(width: CGFloat, height: CGFloat) -> some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
             LinearGradient(
-                colors: [.clear, .black.opacity(0.55)],
+                colors: [.clear, .black.opacity(0.6)],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: height * 0.42)
+            .frame(height: height * 0.40)
             .overlay(alignment: .bottomLeading) {
                 HStack(spacing: width * 0.022) {
-                    Triangle()
+                    PlayGlyph()
                         .fill(.white)
                         .frame(width: height * 0.10, height: height * 0.12)
                     Capsule()
-                        .fill(.white.opacity(0.55))
-                        .frame(width: width * 0.20, height: height * 0.045)
+                        .fill(.white.opacity(0.45))
+                        .frame(width: width * 0.19, height: height * 0.045)
                         .overlay(alignment: .leading) {
                             Capsule()
                                 .fill(.white)
-                                .frame(width: width * 0.20 * 0.45, height: height * 0.045)
+                                .frame(width: width * 0.19 * 0.42, height: height * 0.045)
                         }
                     Capsule()
-                        .fill(.white.opacity(0.85))
-                        .frame(width: width * 0.22, height: height * 0.055)
+                        .fill(.white.opacity(0.9))
+                        .frame(width: width * 0.20, height: height * 0.05)
                 }
                 .padding(.leading, width * 0.05)
-                .padding(.bottom, height * 0.07)
+                .padding(.bottom, height * 0.075)
             }
         }
     }
 
-    /// The title written under the card. Only the thumbnail option has one: with
+    /// The title written under the card — only the thumbnail option has one. With
     /// the show's logo on the artwork there is nothing left for a caption to say.
     private func caption(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Capsule().fill(Color.primary.opacity(0.30)).frame(width: width * 0.62, height: 5)
-            Capsule().fill(Color.primary.opacity(0.16)).frame(width: width * 0.38, height: 5)
+        VStack(alignment: .leading, spacing: 5) {
+            Capsule().fill(Color.primary.opacity(0.34)).frame(width: width * 0.58, height: 6)
+            Capsule().fill(Color.primary.opacity(0.17)).frame(width: width * 0.34, height: 6)
         }
         .frame(width: width, alignment: .leading)
     }
@@ -197,7 +225,7 @@ public struct ContinueWatchingArtworkSwatch: View {
 
 /// A right-pointing play glyph, drawn rather than set in SF Symbols so it keeps
 /// its proportions at swatch scale.
-private struct Triangle: Shape {
+private struct PlayGlyph: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))

@@ -83,7 +83,7 @@ let package = Package(
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
         // See AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // Pinned to the UPSTREAM release tag 6.34.1 -> f4bebc0fd3c66f656ef18d2c7c0b3243df3ac86d.
+        // Pinned to the UPSTREAM release tag 6.35.0 -> 8c7049455fdaed0334b0ad8e74422cddc863a068.
         //
         // Plozz no longer carries an AetherEngine fork. Everything the old
         // `plozz-pin-*` stack existed for is upstream as of 5.23.2:
@@ -131,10 +131,15 @@ let package = Package(
         //     breaking change across the 84 releases in this range; no public
         //     symbol was removed or renamed.
         //
-        // Pinned to the 6.34.1 RELEASE rather than upstream HEAD. Same reasoning as
+        // Pinned to the 6.35.0 RELEASE rather than upstream HEAD. Same reasoning as
         // the exact-SHA pin: the playback path takes documented, released changes
-        // only. The SHA is the COMMIT the 6.34.1 tag points at, not the annotated
+        // only. The SHA is the COMMIT the 6.35.0 tag points at, not the annotated
         // tag object's own id — a `revision:` pin wants the commit.
+        //
+        // Moved up from 6.34.1. Upstream 6.35.0 is a documented drop-in: additive
+        // API only (two published fields — `sourceVideoCodecName` and
+        // `sourceContainerFormat` — plus a `SOURCE` readout in `aetherctl play`),
+        // no consumer source change and no symbol removed or renamed.
         //
         // Moved up from 6.15.2. Nineteen minors plus patches, every one documented
         // drop-in with no consumer source change and no symbol removed or renamed.
@@ -164,7 +169,7 @@ let package = Package(
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "f4bebc0fd3c66f656ef18d2c7c0b3243df3ac86d"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "8c7049455fdaed0334b0ad8e74422cddc863a068"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

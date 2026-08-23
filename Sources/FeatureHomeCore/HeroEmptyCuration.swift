@@ -27,7 +27,8 @@ public enum HeroEmptyCuration {
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
         recentlyAdded: [MediaItem],
-        randomLibraries: [HeroRandomLibrary]
+        randomLibraries: [HeroRandomLibrary],
+        seerConnected: Bool
     ) -> Bool {
         guard settings.isActive else { return true }
         for source in settings.sources {
@@ -41,12 +42,14 @@ public enum HeroEmptyCuration {
             case .randomFromLibrary:
                 if !randomLibraries.isEmpty { return false }
             case .featured:
-                // Seerr has no pool to inspect from here, and an empty answer from
-                // it is ambiguous — unconfigured, offline, or genuinely nothing.
-                // It is never on its own grounds to clear the carousel, but it is
-                // also not a reason to keep one alive when every local source has
-                // gone quiet, so it abstains.
-                continue
+                // A connected Seerr answering nothing is ambiguous — it may be
+                // reachable and empty, or failing — so it blocks authority rather
+                // than granting it. That distinction is load-bearing for a
+                // Featured-only hero, where featured is the ONLY vote: treating it
+                // as authoritative would let a Seerr outage blank the carousel.
+                // With no Seerr configured there is genuinely no pool, so it
+                // abstains and the other sources decide.
+                if seerConnected { return false }
             }
         }
         return true

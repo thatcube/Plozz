@@ -35,7 +35,8 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [item("a")],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
     }
@@ -48,7 +49,8 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [item("a")],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
         XCTAssertFalse(
@@ -57,7 +59,8 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [],
                 watchlist: [item("a")],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
     }
@@ -69,7 +72,8 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: [library]
+                randomLibraries: [library],
+                seerConnected: false
             )
         )
         XCTAssertTrue(
@@ -78,22 +82,48 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
     }
 
-    func testFeaturedAbstainsRatherThanVoting() {
-        // Seerr answering nothing is ambiguous — unconfigured, offline, or
-        // genuinely empty — so it neither keeps a dead carousel alive nor clears
-        // a live one on its own.
+    func testAConnectedSeerrBlocksAuthorityRatherThanGrantingIt() {
+        // A Featured-only hero makes Seerr the ONLY vote, so treating its empty
+        // answer as authoritative would let an outage blank the carousel.
+        XCTAssertFalse(
+            HeroEmptyCuration.isAuthoritative(
+                settings: settings([.featured]),
+                continueWatching: [],
+                watchlist: [],
+                recentlyAdded: [],
+                randomLibraries: [],
+                seerConnected: true
+            )
+        )
+        XCTAssertFalse(
+            HeroEmptyCuration.isAuthoritative(
+                settings: settings(HeroSourceKind.allCases),
+                continueWatching: [],
+                watchlist: [],
+                recentlyAdded: [],
+                randomLibraries: [],
+                seerConnected: true
+            )
+        )
+    }
+
+    func testAnUnconfiguredSeerrAbstainsSoTheOtherSourcesDecide() {
+        // With no Seerr there is genuinely no pool, so it must not keep a hero
+        // alive that every local source has stopped feeding.
         XCTAssertTrue(
             HeroEmptyCuration.isAuthoritative(
                 settings: settings([.featured]),
                 continueWatching: [],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
         XCTAssertFalse(
@@ -102,7 +132,8 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [item("a")],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
     }
@@ -114,7 +145,8 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
     }
@@ -126,7 +158,8 @@ final class HeroEmptyCurationTests: XCTestCase {
                 continueWatching: [item("a")],
                 watchlist: [],
                 recentlyAdded: [],
-                randomLibraries: []
+                randomLibraries: [],
+                seerConnected: false
             )
         )
     }

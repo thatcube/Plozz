@@ -29,6 +29,10 @@ public final class HomeHeroRuntimeState {
     /// titles already on screen instead of re-shuffling every library on every
     /// connected server. See ``HeroRandomRollStore``.
     @ObservationIgnored let randomRolls = HeroRandomRollStore()
+    /// Which profile/server scope the hero is currently built for. Part of the
+    /// random draw's key, so a scope change can't be raced by the curation it
+    /// triggers — the old draw simply stops matching.
+    @ObservationIgnored private(set) var scopeRevision = 0
     /// The slides on screen: the fronted one, plus whatever a committed swipe is
     /// landing on. Written by `HomeHeroView` as it pages, and read only when
     /// folding a fresh curation in, so a slide the viewer is looking at is never
@@ -62,8 +66,7 @@ public final class HomeHeroRuntimeState {
         pinnedItemIDs = []
         retainedMisses = [:]
         externalRefreshRevision &+= 1
-        let rolls = randomRolls
-        Task { await rolls.invalidate() }
+        scopeRevision &+= 1
     }
 
     /// Records a live watched/unwatched intent for hero replay, collapsing any
@@ -787,7 +790,8 @@ public struct HomeView: View {
         let rollKey = HeroRandomRollStore.Key(
             libraries: randomLibraries,
             limit: settings.maxItems,
-            hideWatched: settings.hideWatched
+            hideWatched: settings.hideWatched,
+            scope: String(heroRuntime.scopeRevision)
         )
         let retainedRandomProvider = heroRandomProvider
         let result = await HomePerfDiagnostics.measureCurate {
@@ -820,12 +824,24 @@ public struct HomeView: View {
             return
         }
         let cacheKey = HeroConfigurationKey(settings: settings)
+        let freshIsAuthoritative = HeroEmptyCuration.isAuthoritative(
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: content.watchlist,
+            recentlyAdded: content.latest,
+            randomLibraries: randomLibraries,
+            seerConnected: heroSeerConnected
+        )
         if items.isEmpty,
+           !freshIsAuthoritative,
            heroRuntime.cachedKey == cacheKey,
            !heroRuntime.cachedItems.isEmpty {
             // Featured/Random are network sources. A transient empty refresh must
             // not tear down a good launch snapshot; retain it for this session and
-            // try again on the next cold launch.
+            // try again on the next cold launch. Gated on the emptiness being
+            // inconclusive: when every enabled source genuinely has nothing left,
+            // the snapshot is wrong and keeping it would repaint titles the viewer
+            // no longer has, on this launch and every one after it.
             heroRuntime.completedKey = key
             let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
             PlozzLog.boot("HomeHero.curate KEEP-CACHED ms=\(elapsedMS)")
@@ -868,13 +884,7 @@ public struct HomeView: View {
             limit: settings.maxItems,
             pinnedItemIDs: heroRuntime.pinnedItemIDs,
             misses: foldsIntoLoadedSet ? heroRuntime.retainedMisses : [:],
-            freshIsAuthoritative: HeroEmptyCuration.isAuthoritative(
-                settings: settings,
-                continueWatching: content.continueWatching,
-                watchlist: content.watchlist,
-                recentlyAdded: content.latest,
-                randomLibraries: randomLibraries
-            )
+            freshIsAuthoritative: freshIsAuthoritative
         )
         heroRuntime.retainedMisses = merge.misses
         if merge.items != heroRuntime.items { heroRuntime.items = merge.items }
@@ -888,8 +898,17 @@ public struct HomeView: View {
             stableItems.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let enrichedDurable = result.durableItems.map { enrichedByID[$0.id] ?? $0 }
-        viewModel.cacheHeroItems(enrichedDurable, for: settings)
+        let enrichedDurable = HeroDurableSnapshot.filter(
+            result.durableItems.map { enrichedByID[$0.id] ?? $0 }
+        )
+        if enrichedDurable.isEmpty, freshIsAuthoritative {
+            // Nothing durable left to promise the next launch. Saying so takes an
+            // explicit clear: `cacheHeroItems` refuses to write an empty set, so
+            // that a failed refresh can never erase a good snapshot.
+            viewModel.clearCachedHeroItems()
+        } else {
+            viewModel.cacheHeroItems(enrichedDurable, for: settings)
+        }
         let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
         PlozzLog.boot(
             "HomeHero.curate DONE ms=\(elapsedMS) items=\(merge.items.count)"

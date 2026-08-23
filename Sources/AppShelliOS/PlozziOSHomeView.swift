@@ -280,7 +280,14 @@ struct PlozziOSHomeView: View {
             // per-card laziness that actually matters (artwork loading) lives in
             // the inner LazyHStacks, which are untouched.
             VStack(alignment: .leading, spacing: 30) {
-                if heroItems.isEmpty {
+                // Retire a carousel the viewer's own settings just invalidated
+                // WITHOUT waiting for the async re-curation, exactly as tvOS's
+                // `HomeHeroDisplayResolver` does. Otherwise sources they just
+                // switched off keep rendering for the whole refresh.
+                let heroConfiguration = HeroConfigurationKey(
+                    settings: appModel.settings.hero.settings
+                )
+                if heroItems.isEmpty || heroCuratedConfiguration != heroConfiguration {
                     // Reserve the hero's height while it resolves, so the rows
                     // below don't get shoved down when it lands (tvOS has had
                     // HomeHeroSkeletonView for this).
@@ -699,7 +706,11 @@ struct PlozziOSHomeView: View {
         let rollKey = HeroRandomRollStore.Key(
             libraries: randomLibraries,
             limit: settings.maxItems,
-            hideWatched: settings.hideWatched
+            hideWatched: settings.hideWatched,
+            // The draw belongs to one profile's servers. Without this, switching
+            // profile could keep serving the previous one's titles for the rest of
+            // the lifetime whenever the resolved library set happened to match.
+            scope: appModel.profiles.activeNamespace ?? ""
         )
         let curator = HeroCurator()
         let result = await curator.curateResult(
@@ -746,14 +757,21 @@ struct PlozziOSHomeView: View {
                 continueWatching: content.continueWatching,
                 watchlist: content.watchlist,
                 recentlyAdded: content.latest,
-                randomLibraries: randomLibraries
+                randomLibraries: randomLibraries,
+                seerConnected: appModel.seerService.isConfigured
             )
         )
         heroCuratedConfiguration = configuration
         heroRetainedMisses = merge.misses
         if merge.items != heroItems { heroItems = merge.items }
-        // What the next launch may repaint instead of a skeleton.
-        viewModel.cacheHeroItems(result.durableItems, for: settings)
+        // What the next launch may repaint instead of a skeleton, re-checked
+        // against the final payload (see `HeroDurableSnapshot`).
+        let durable = HeroDurableSnapshot.filter(result.durableItems)
+        if durable.isEmpty, merge.items.isEmpty {
+            viewModel.clearCachedHeroItems()
+        } else {
+            viewModel.cacheHeroItems(durable, for: settings)
+        }
     }
 }
 

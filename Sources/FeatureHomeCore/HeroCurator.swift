@@ -26,13 +26,10 @@ public struct HeroCurationResult: Sendable, Equatable {
     /// The curated set with the volatile Continue Watching slides removed, in the
     /// order they were composed.
     ///
-    /// This is what a launch may safely repaint. A resume position goes stale the
-    /// moment the viewer watches anything anywhere, so a Continue Watching slide
-    /// restored from disk can offer to resume a finished episode — which is why
-    /// Home also refuses to repaint its cached Continue Watching row. Every other
-    /// source describes a title rather than a position, so last session's
-    /// selection is still a true answer and can be shown instantly while the fresh
-    /// curation folds in behind it.
+    /// This is the candidate for a launch snapshot; ``HeroDurableSnapshot`` states
+    /// the rule and must be applied again to the FINAL payload, since a title
+    /// gains per-server detail — including other servers' resume positions — on
+    /// its way to being persisted.
     public var durableItems: [MediaItem]
 
     public init(
@@ -178,9 +175,9 @@ public struct HeroCurator: Sendable {
         return HeroCurationResult(
             items: items,
             featuredItems: strategy.compose(featuredBuckets, limit: limit),
-            durableItems: items.filter {
-                !continueWatchingIDs.contains($0.id) && $0.resumePosition == nil
-            }
+            durableItems: HeroDurableSnapshot.filter(
+                items.filter { !continueWatchingIDs.contains($0.id) }
+            )
         )
     }
 

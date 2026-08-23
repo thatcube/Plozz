@@ -46,6 +46,18 @@ public enum HeroLiveMerge {
     /// asked for.
     public static let retentionGrace = 3
 
+    /// How many further curations a slide the viewer is looking at may hold a slot
+    /// the fold wants to change, before it is changed anyway.
+    ///
+    /// Deferring while pinned is what stops the backdrop wiping under someone's
+    /// eyes, but it cannot be absolute, because pinning does not always rotate:
+    /// a one-slide carousel (`maxItems` goes down to 1) pins its only slot
+    /// forever, and with auto-advance switched off the fronted slide never moves
+    /// on its own. An absolute exemption freezes those heroes for the whole
+    /// session — they would keep showing last launch's snapshot and never take a
+    /// freshly curated title. Past this ceiling the change lands regardless.
+    public static let pinnedDeferralLimit = 2
+
     public struct Outcome: Equatable, Sendable {
         /// The set to display.
         public var items: [MediaItem]
@@ -115,6 +127,14 @@ public enum HeroLiveMerge {
             return Outcome(items: [], retired: showing.map(\.id))
         }
 
+        // A slide only holds its slot against the fold for so long — see
+        // `pinnedDeferralLimit`. Past the ceiling it stops counting as pinned, so
+        // a carousel that never rotates still updates.
+        let deferralCeiling = retentionGrace + pinnedDeferralLimit
+        let effectivePinned = pinnedItemIDs.filter {
+            (misses[$0] ?? 0) < deferralCeiling
+        }
+
         let freshTokens = fresh.map { HeroDedupe.tokens(for: $0) }
         var claimed = [Bool](repeating: false, count: fresh.count)
 
@@ -134,8 +154,16 @@ public enum HeroLiveMerge {
             // the same backdrop twice — dropping the copy the viewer is NOT
             // looking at.
             if let duplicate = placed.firstIndex(where: { !$0.isDisjoint(with: tokens) }) {
-                guard pinnedItemIDs.contains(item.id) else {
+                guard effectivePinned.contains(item.id) else {
                     retired.append(item.id)
+                    continue
+                }
+                // Both copies on screen at once is an iOS swipe mid-flight. Taking
+                // either one out from under it strands the transition, so the
+                // collapse waits for the swipe to finish.
+                guard !effectivePinned.contains(merged[duplicate].id) else {
+                    placed.append(tokens)
+                    merged.append(item)
                     continue
                 }
                 retired.append(merged[duplicate].id)
@@ -154,14 +182,17 @@ public enum HeroLiveMerge {
                 let upgraded = refreshed(
                     item,
                     from: fresh[match],
-                    isPinned: pinnedItemIDs.contains(item.id)
+                    isPinned: effectivePinned.contains(item.id)
                 )
                 placed.append(HeroDedupe.tokens(for: upgraded))
                 merged.append(upgraded)
                 continue
             }
             let missCount = (misses[item.id] ?? 0) + 1
-            guard missCount < retentionGrace || pinnedItemIDs.contains(item.id) else {
+            let ceiling = pinnedItemIDs.contains(item.id)
+                ? deferralCeiling
+                : retentionGrace
+            guard missCount < ceiling else {
                 retired.append(item.id)
                 continue
             }
@@ -185,8 +216,11 @@ public enum HeroLiveMerge {
 
         // 3b. Then over retained-only slots, oldest first, so new media surfaces
         //     soon rather than after everything the viewer has already seen.
+        //     Slots the cap is about to truncate are skipped: writing an arrival
+        //     into one would report it admitted and then silently drop it.
         for slot in stalestFirst where !pending.isEmpty {
-            guard !pinnedItemIDs.contains(merged[slot].id) else { continue }
+            guard slot < limit else { continue }
+            guard !effectivePinned.contains(merged[slot].id) else { continue }
             guard let arrival = pending.first else { break }
             retired.append(merged[slot].id)
             nextMisses[merged[slot].id] = nil

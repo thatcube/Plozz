@@ -366,10 +366,10 @@ final class HeroLiveMergeTests: XCTestCase {
         XCTAssertEqual(recovered.items.map(\.id), ["a", "flaky"])
     }
 
-    func testTheSlideTheViewerIsLookingAtOutlivesItsGrace() {
+    func testTheSlideTheViewerIsLookingAtOutlivesTheOrdinaryGrace() {
         var showing = [item("watching"), item("a")]
         var misses: [String: Int] = [:]
-        for _ in 0...(HeroLiveMerge.retentionGrace + 2) {
+        for _ in 0..<HeroLiveMerge.retentionGrace {
             let merged = HeroLiveMerge.merge(
                 showing: showing,
                 fresh: [item("a")],
@@ -382,6 +382,82 @@ final class HeroLiveMergeTests: XCTestCase {
         }
 
         XCTAssertEqual(showing.map(\.id), ["watching", "a"])
+    }
+
+    func testEvenTheFrontedSlideEventuallyGoes() {
+        // Pinning cannot be an absolute exemption: a one-slide carousel is always
+        // pinned, and with auto-advance off the fronted slide never rotates on its
+        // own — so an absolute pin freezes those heroes for the whole session.
+        var showing = [item("watching"), item("a")]
+        var misses: [String: Int] = [:]
+        for _ in 0...(HeroLiveMerge.retentionGrace + HeroLiveMerge.pinnedDeferralLimit) {
+            let merged = HeroLiveMerge.merge(
+                showing: showing,
+                fresh: [item("a")],
+                limit: 8,
+                pinnedItemIDs: ["watching"],
+                misses: misses
+            )
+            showing = merged.items
+            misses = merged.misses
+        }
+
+        XCTAssertEqual(showing.map(\.id), ["a"])
+    }
+
+    func testAOneSlideCarouselStillTakesFreshTitles() {
+        // `maxItems` goes down to 1, and that single slot is always the fronted
+        // one. It must not pin itself into permanence.
+        var showing = [item("stale")]
+        var misses: [String: Int] = [:]
+        for _ in 0...(HeroLiveMerge.retentionGrace + HeroLiveMerge.pinnedDeferralLimit) {
+            let merged = HeroLiveMerge.merge(
+                showing: showing,
+                fresh: [item("fresh")],
+                limit: 1,
+                pinnedItemIDs: Set(showing.map(\.id)),
+                misses: misses
+            )
+            showing = merged.items
+            misses = merged.misses
+        }
+
+        XCTAssertEqual(showing.map(\.id), ["fresh"])
+    }
+
+    func testASwipeInFlightKeepsBothOfItsSlides() {
+        // iOS pins the outgoing slide and the one a committed swipe is landing on.
+        // Collapsing either into the other strands the transition.
+        var episode = item("ep-1", title: "Chapter One", kind: .episode)
+        episode.seriesID = "show-9"
+        episode.parentTitle = "The Show"
+        let series = item("show-9", title: "The Show", kind: .series)
+
+        let merged = HeroLiveMerge.merge(
+            showing: [series, episode],
+            fresh: [series],
+            limit: 8,
+            pinnedItemIDs: ["show-9", "ep-1"]
+        )
+
+        XCTAssertEqual(merged.items.map(\.id), ["show-9", "ep-1"])
+        XCTAssertTrue(merged.retired.isEmpty)
+    }
+
+    func testALoweredCapNeverAdmitsATitleItIsAboutToDrop() {
+        // Writing an arrival into a slot the cap then truncates would report it
+        // admitted and retired at once, and silently lose the new title.
+        let showing = ["a", "b", "c", "d", "e"].map { item($0) }
+        let fresh = [item("a"), item("b"), item("c"), item("x")]
+
+        let merged = HeroLiveMerge.merge(showing: showing, fresh: fresh, limit: 3)
+
+        XCTAssertEqual(merged.items.map(\.id), ["a", "b", "c"])
+        XCTAssertTrue(
+            Set(merged.admitted).isDisjoint(with: Set(merged.retired)),
+            "an id cannot be both admitted and retired"
+        )
+        XCTAssertTrue(merged.admitted.isEmpty)
     }
 
     // MARK: - Bounds

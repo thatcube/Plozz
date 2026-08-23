@@ -121,4 +121,5 @@ private final class UniversalWatchlistHomeStore:
     }
     func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? { nil }
     func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {}
+    func clearHero() {}
 }

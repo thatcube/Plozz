@@ -86,6 +86,7 @@ final class HeroCuratorTests: XCTestCase {
             ["ep", "resuming", "saved", "new"]
         )
         XCTAssertEqual(Set(result.durableItems.map(\.id)), ["saved", "new"])
+        XCTAssertTrue(result.durableItems.allSatisfy(HeroDurableSnapshot.isDurable))
     }
 
     func testDurableSnapshotKeepsTheOrderTheViewerSaw() async {

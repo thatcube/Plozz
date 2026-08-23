@@ -28,15 +28,23 @@ public actor HeroRandomRollStore {
         /// The Random provider filters out finished titles itself, so a draw made
         /// under one setting is not a valid answer under the other.
         public var hideWatched: Bool
+        /// Whose servers the draw came from — the active profile. Part of the key
+        /// rather than something callers must remember to invalidate: a scope
+        /// change that happened to leave the resolved library list unchanged would
+        /// otherwise keep serving the previous profile's titles, and an
+        /// invalidation raced against the curation it triggers can lose.
+        public var scope: String
 
         public init(
             libraries: [HeroRandomLibrary],
             limit: Int,
-            hideWatched: Bool
+            hideWatched: Bool,
+            scope: String = ""
         ) {
             self.libraries = libraries
             self.limit = limit
             self.hideWatched = hideWatched
+            self.scope = scope
         }
     }
 
@@ -60,10 +68,11 @@ public actor HeroRandomRollStore {
     /// slower/older one must not overwrite the newer one's answer.
     private var requestSeq = 0
     private var latestSeq = 0
-    /// The draw currently being fetched, so overlapping curations share one
-    /// multi-server fan-out instead of each paying for their own.
-    private var inFlight: Task<[MediaItem], Never>?
-    private var inFlightKey: Key?
+    /// Draws currently being fetched, keyed so overlapping curations share one
+    /// multi-server fan-out per key instead of each paying for their own. Keyed
+    /// rather than single-slot: an A→B→A sequence would otherwise start a second
+    /// A roll because B had replaced the only handle.
+    private var inFlight: [Key: Task<[MediaItem], Never>] = [:]
 
     public init(lifetime: TimeInterval = HeroRandomRollStore.defaultLifetime) {
         self.lifetime = lifetime
@@ -79,20 +88,24 @@ public actor HeroRandomRollStore {
         roll: @escaping @Sendable () async -> [MediaItem]
     ) async -> [MediaItem] {
         if let current = reusable(for: key, now: now) { return current }
-        if let inFlight, inFlightKey == key { return await inFlight.value }
+        if let existing = inFlight[key] { return await existing.value }
 
         let startedGeneration = generation
         requestSeq &+= 1
         let startedSeq = requestSeq
         latestSeq = startedSeq
         let task = Task { await roll() }
-        inFlight = task
-        inFlightKey = key
-        let rolled = await task.value
-        if inFlight == task {
-            inFlight = nil
-            inFlightKey = nil
+        inFlight[key] = task
+        // `Task {}` does not inherit cancellation, and the draw is a fan-out across
+        // every visible library on every connected server. Without this, tearing
+        // down a curation left that work running to completion — the caller's own
+        // `Task.isCancelled` checks can't run until it returns.
+        let rolled = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
         }
+        if inFlight[key] == task { inFlight[key] = nil }
         guard !rolled.isEmpty,
               generation == startedGeneration,
               latestSeq == startedSeq else { return rolled }
@@ -109,8 +122,8 @@ public actor HeroRandomRollStore {
         items = []
         rolledAt = .distantPast
         generation &+= 1
-        inFlight = nil
-        inFlightKey = nil
+        for task in inFlight.values { task.cancel() }
+        inFlight.removeAll()
     }
 
     private func reusable(for key: Key, now: Date) -> [MediaItem]? {

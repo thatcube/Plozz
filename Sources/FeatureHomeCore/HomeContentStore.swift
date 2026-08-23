@@ -37,6 +37,13 @@ public protocol HomeContentStoring: Sendable {
     /// sources and are not part of ``HomeViewModel/Content``.
     func loadHero(for key: HeroConfigurationKey) -> [MediaItem]?
     func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey)
+    /// Discards the hero snapshot.
+    ///
+    /// `saveHero` refuses to write an empty set, so that a failed refresh cannot
+    /// erase a good one. Genuinely running out of content is the opposite case and
+    /// has to say so explicitly, or the next launch repaints titles the viewer no
+    /// longer has.
+    func clearHero()
     /// Discards the snapshot entirely.
     ///
     /// `save` deliberately refuses to overwrite good content with an empty
@@ -278,6 +285,14 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         return stored.items
     }
 
+    public func clearHero() {
+        guard let heroFileURL else { return }
+        try? FileManager.default.removeItem(at: heroFileURL)
+        Self.lock.lock()
+        Self.heroMemo.updateValue(nil, forKey: heroFileURL.path)
+        Self.lock.unlock()
+    }
+
     public func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {
         guard let heroFileURL, !items.isEmpty else { return }
         let stored = StoredHero(
@@ -368,6 +383,11 @@ public final class InMemoryHomeContentStore: HomeContentStoring, @unchecked Send
         lock.lock(); defer { lock.unlock() }
         hero = items.isEmpty ? nil : (key, items)
     }
+
+    public func clearHero() {
+        lock.lock(); defer { lock.unlock() }
+        hero = nil
+    }
 }
 
 /// No-op store: never reads or writes. The default for `HomeViewModel` so tests
@@ -378,5 +398,6 @@ public final class NoOpHomeContentStore: HomeContentStoring, @unchecked Sendable
     public func save(_ content: HomeViewModel.Content) {}
     public func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? { nil }
     public func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {}
+    public func clearHero() {}
     public func clear() {}
 }

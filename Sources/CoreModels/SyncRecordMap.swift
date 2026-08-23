@@ -253,6 +253,11 @@ public struct MediaAliasSyncDTO: Codable, Hashable, Sendable {
             presentation: appliedPresentation,
             bindingHints: mergedHints,
             locallyValidatedBindings: localValidation,
+            // Device-local, and never carried over the wire: an account
+            // descriptor plus a server-local item id means nothing on another
+            // device. Preserved from the existing record so a cloud merge cannot
+            // erase the only handle a title with no catalogue id is filed under.
+            localSources: existing?.localSources ?? [],
             redirectTarget: redirectTarget,
             conflicts: Array(mergedConflicts).sorted()
         )

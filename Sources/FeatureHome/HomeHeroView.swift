@@ -568,13 +568,25 @@ struct HomeHeroView: View {
                 selectedButton = min(selectedButton, max(0, buttons(for: items[index]).count - 1))
             }
         }
-        // Drop optimistic watchlist overrides once the authoritative loaded set
-        // agrees, so a stale override can't outlive the real data.
-        .onChange(of: watchlistedKeys) { _, keys in
-            guard !watchlistOverrides.isEmpty else { return }
-            watchlistOverrides = watchlistOverrides.filter { key, value in
-                value != keys.contains(key)
-            }
+        // Drop optimistic watchlist overrides once the AUTHORITY THE PILL FALLS
+        // BACK TO agrees — not merely once Home's loaded watchlist row does.
+        //
+        // Those are two different sources. `isWatchlistedForHero` falls back to
+        // `actionHandler.isWatchlisted`, which reads the ledger; `watchlistedKeys`
+        // is built from `content.watchlist`, the aggregator's fetched row. Dropping
+        // on the row's say-so handed the pill straight back to a source that had
+        // not necessarily caught up, and the button flipped back to not-added on
+        // the very add it had just confirmed. The row moving is a fine TRIGGER —
+        // it means the world changed — but the condition has to be the value the
+        // override is standing in for.
+        .onChange(of: watchlistedKeys) { _, _ in
+            reconcileWatchlistOverrides()
+        }
+        // The same reconcile when the slides themselves change, so an override set
+        // on a title that is still on screen can retire without waiting for the
+        // watchlist row to move.
+        .onChange(of: items.map(\.id)) { _, _ in
+            reconcileWatchlistOverrides()
         }
         // Drop optimistic request overrides once Home's in-place featured refresh
         // reports an authoritative status that reflects the landed request (the
@@ -1723,7 +1735,46 @@ struct HomeHeroView: View {
         // Flip the button instantly; the loaded row can lag (an added series from
         // an episode slide isn't an existing card).
         let key = Self.watchlistKey(accountID: target.sourceAccountID, itemID: target.id)
-        watchlistOverrides[key] = (action == .addToWatchlist)
+        let adding = action == .addToWatchlist
+        watchlistOverrides[key] = adding
+        // Bounded, because agreement is not guaranteed to arrive. A write that
+        // FAILS announces nothing and moves no row, so an override that only ever
+        // retires on agreement would stand until the view was recreated — the pill
+        // lying in the other direction, which is the same defect wearing the
+        // opposite sign. Mirrors `PlozziOSHomeView.heroRequestOverrideGrace`.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.watchlistOverrideGrace))
+            // Only this press's override. A later tap replaces the value and
+            // brings its own timer.
+            if watchlistOverrides[key] == adding {
+                watchlistOverrides[key] = nil
+            }
+        }
+    }
+
+    /// How long an optimistic watchlist override may stand in for the
+    /// authoritative membership read before that read wins regardless.
+    private static let watchlistOverrideGrace: TimeInterval = 10
+
+    /// Retire every override the authoritative read now agrees with.
+    ///
+    /// Deliberately asks `actionHandler.isWatchlisted` — the exact value
+    /// `isWatchlistedForHero` falls back to — for the slide's own watchlist
+    /// target, so an override can never be handed back to a source that still
+    /// disagrees with it.
+    private func reconcileWatchlistOverrides() {
+        guard !watchlistOverrides.isEmpty, let actionHandler else { return }
+        for item in items {
+            let target = watchlistTarget(for: item)
+            let key = Self.watchlistKey(
+                accountID: target.sourceAccountID,
+                itemID: target.id
+            )
+            guard let override = watchlistOverrides[key] else { continue }
+            if actionHandler.isWatchlisted(target) == override {
+                watchlistOverrides[key] = nil
+            }
+        }
     }
 
     /// Sends a one-tap Seerr request for a not-owned featured title, flipping the

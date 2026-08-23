@@ -6,6 +6,9 @@ public struct MediaAliasSnapshot: Sendable, Equatable {
     public let aliasesByStrongEvidence: [MediaAliasStrongEvidence: Set<MediaAliasID>]
     public let aliasesByValidatedBinding: [MediaAliasProviderBindingKey: Set<MediaAliasID>]
     public let aliasesByWeakEvidence: [MediaAliasWeakEvidence: Set<MediaAliasID>]
+    /// See ``MediaAliasLocalSourceKey``. The index of last resort, and the only
+    /// one a title with no catalogue id and no year is ever filed under.
+    public let aliasesByLocalSource: [MediaAliasLocalSourceKey: Set<MediaAliasID>]
     public let activeRecordCount: Int
 
     public init(records: [MediaAliasRecord]) {
@@ -23,6 +26,7 @@ public struct MediaAliasSnapshot: Sendable, Equatable {
         var strong: [MediaAliasStrongEvidence: Set<MediaAliasID>] = [:]
         var binding: [MediaAliasProviderBindingKey: Set<MediaAliasID>] = [:]
         var weak: [MediaAliasWeakEvidence: Set<MediaAliasID>] = [:]
+        var localSource: [MediaAliasLocalSourceKey: Set<MediaAliasID>] = [:]
         for record in records {
             guard let resolvedID = Self.resolve(record.id, records: recordsByID) else {
                 continue
@@ -41,10 +45,14 @@ public struct MediaAliasSnapshot: Sendable, Equatable {
             for evidence in record.weakEvidence {
                 weak[evidence, default: []].insert(resolvedID)
             }
+            for key in record.localSources {
+                localSource[key, default: []].insert(resolvedID)
+            }
         }
         aliasesByStrongEvidence = strong
         aliasesByValidatedBinding = binding
         aliasesByWeakEvidence = weak
+        aliasesByLocalSource = localSource
         activeRecordCount = records.lazy.filter { $0.redirectTarget == nil }.count
     }
 
@@ -75,6 +83,10 @@ public struct MediaAliasSnapshot: Sendable, Equatable {
 
     public func aliases(for evidence: MediaAliasWeakEvidence) -> Set<MediaAliasID> {
         aliasesByWeakEvidence[evidence] ?? []
+    }
+
+    public func aliases(for localSource: MediaAliasLocalSourceKey) -> Set<MediaAliasID> {
+        aliasesByLocalSource[localSource] ?? []
     }
 
     private static func resolve(

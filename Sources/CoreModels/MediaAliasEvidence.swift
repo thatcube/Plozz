@@ -106,6 +106,42 @@ public struct MediaAliasPresentation: Codable, Hashable, Sendable {
     }
 }
 
+/// The viewer's own copy of a title: one account, one item id on it.
+///
+/// Deliberately NOT a ``MediaAliasProviderBindingKey``. A binding is a
+/// reconciliation target — `WatchlistMutationTarget` reads
+/// `locallyValidatedBindings` to decide which id to write to a destination — and
+/// for Plex that set means **Discover** ratingKeys. Putting a local library
+/// ratingKey in there would send a watchlist write to an id the Discover API
+/// does not know, which is the exact silent no-op that made removing a show
+/// fail. This is a lookup handle only: nothing ever writes to it.
+///
+/// It exists because a durable alias must be findable again by whoever created
+/// it. A subject with no catalogue ids and no year — the show an episode hero is
+/// promoted to, which is a bare `id` + `title` stub — has no strong evidence and
+/// no weak evidence either, and on Plex no binding, so the ledger minted a record
+/// indexed under nothing at all. The write "succeeded", the button asked for the
+/// same title a moment later, and the ledger had no way to answer.
+public struct MediaAliasLocalSourceKey: Codable, Hashable, Sendable, Comparable {
+    public let accountDescriptorID: String
+    public let providerItemID: String
+
+    public init?(accountDescriptorID: String, providerItemID: String) {
+        let account = accountDescriptorID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let item = providerItemID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !account.isEmpty, !item.isEmpty else { return nil }
+        self.accountDescriptorID = account
+        self.providerItemID = item
+    }
+
+    public static func < (lhs: Self, rhs: Self) -> Bool {
+        if lhs.accountDescriptorID != rhs.accountDescriptorID {
+            return lhs.accountDescriptorID < rhs.accountDescriptorID
+        }
+        return lhs.providerItemID < rhs.providerItemID
+    }
+}
+
 public struct MediaAliasProviderBindingKey: Codable, Hashable, Sendable, Comparable {
     public let providerKind: ProviderKind
     public let accountDescriptorID: String
@@ -246,6 +282,10 @@ public struct MediaAliasEvidence: Codable, Hashable, Sendable {
     public var presentation: MediaAliasPresentation?
     public var bindingHints: [MediaAliasProviderBindingHint]
     public var locallyValidatedBindings: Set<MediaAliasProviderBindingKey>
+    /// See ``MediaAliasLocalSourceKey``. Derived from the item on **every** path
+    /// that builds evidence from one, so the read and the write cannot disagree
+    /// about it.
+    public var localSources: Set<MediaAliasLocalSourceKey>
 
     public init?(
         kind: MediaItemKind,
@@ -253,7 +293,8 @@ public struct MediaAliasEvidence: Codable, Hashable, Sendable {
         weak: MediaAliasWeakEvidence? = nil,
         presentation: MediaAliasPresentation? = nil,
         bindingHints: [MediaAliasProviderBindingHint] = [],
-        locallyValidatedBindings: Set<MediaAliasProviderBindingKey> = []
+        locallyValidatedBindings: Set<MediaAliasProviderBindingKey> = [],
+        localSources: Set<MediaAliasLocalSourceKey> = []
     ) {
         guard kind == .movie || kind == .series else { return nil }
         self.kind = kind
@@ -269,6 +310,7 @@ public struct MediaAliasEvidence: Codable, Hashable, Sendable {
         self.bindingHints = Self.canonicalHints(bindingHints)
         let hintKeys = Set(self.bindingHints.map(\.binding))
         self.locallyValidatedBindings = locallyValidatedBindings.intersection(hintKeys)
+        self.localSources = localSources
     }
 
     /// Evidence for `item`, optionally widened by the **canonical evidence of its
@@ -322,8 +364,35 @@ public struct MediaAliasEvidence: Codable, Hashable, Sendable {
                 backdropURL: (item.heroBackdropURL ?? item.backdropURL)?.absoluteString
             ),
             bindingHints: bindingHints,
-            locallyValidatedBindings: locallyValidatedBindings
+            locallyValidatedBindings: locallyValidatedBindings,
+            // Derived HERE, from the item alone, on purpose. Both the read
+            // (`TitleIdentityResolver.durableAliasID`, which passes no bindings)
+            // and the write (`universalWatchlistEvidence`, which passes them all)
+            // funnel through this initializer, so deriving the handle from the
+            // item's own coordinates is the one way to guarantee the two sides
+            // look the title up under the same key.
+            localSources: Self.localSources(for: item)
         )
+    }
+
+    static func localSources(for item: MediaItem) -> Set<MediaAliasLocalSourceKey> {
+        var result: Set<MediaAliasLocalSourceKey> = []
+        if let accountID = item.sourceAccountID,
+           let key = MediaAliasLocalSourceKey(
+               accountDescriptorID: accountID,
+               providerItemID: item.id
+           ) {
+            result.insert(key)
+        }
+        for ref in item.sources {
+            if let key = MediaAliasLocalSourceKey(
+                accountDescriptorID: ref.accountID,
+                providerItemID: ref.itemID
+            ) {
+                result.insert(key)
+            }
+        }
+        return result
     }
 
     static let strongNamespacesByToken: [String: ProviderIDNamespace] = {

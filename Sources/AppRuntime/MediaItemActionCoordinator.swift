@@ -70,6 +70,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// changes, so a heart can never be answered from a stale world.
     private var membershipCache: [String: Bool] = [:]
     private var membershipRevision: UInt64?
+    private var watchlistChangeObserver: (any NSObjectProtocol)?
 
     private struct ProviderCapabilities {
         let supportsWatchState: Bool
@@ -129,6 +130,31 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         self.seedLegacyUniversalWatchlist = seedLegacyUniversalWatchlist
         self.downloadState = downloadState
         self.performDownloadAction = performDownloadAction
+        // Every membership memo drops together, or none of them mean anything.
+        //
+        // `announceUniversalWatchlistDidChange` invalidates the process-wide
+        // membership set, but this per-item memo is keyed on the same O(1) count
+        // revision and so is blind to exactly the changes that set was: a removal
+        // of a title whose presence came from a destination's own list, or a
+        // remote sync that adds and drops the same number of titles. A local
+        // toggle clears it outright below; this covers every OTHER way the
+        // watchlist moves.
+        watchlistChangeObserver = NotificationCenter.default.addObserver(
+            forName: .universalWatchlistDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.membershipCache.removeAll(keepingCapacity: true)
+                self?.membershipRevision = nil
+            }
+        }
+    }
+
+    deinit {
+        if let watchlistChangeObserver {
+            NotificationCenter.default.removeObserver(watchlistChangeObserver)
+        }
     }
 
     public func actions(for item: MediaItem, context: MediaItemActionContext) -> [MediaItemAction] {

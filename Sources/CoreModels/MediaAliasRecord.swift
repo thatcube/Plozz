@@ -49,6 +49,10 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
     public var presentation: MediaAliasPresentation?
     public var bindingHints: [MediaAliasProviderBindingHint]
     public var locallyValidatedBindings: Set<MediaAliasProviderBindingKey>
+    /// See ``MediaAliasLocalSourceKey``. A lookup handle, never a write target:
+    /// it is what makes a record minted from otherwise unidentifiable evidence
+    /// findable again by the surface that minted it.
+    public var localSources: Set<MediaAliasLocalSourceKey>
     public var redirectTarget: MediaAliasID?
     public var conflicts: [MediaAliasConflict]
 
@@ -62,6 +66,7 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
         presentation: MediaAliasPresentation? = nil,
         bindingHints: [MediaAliasProviderBindingHint] = [],
         locallyValidatedBindings: Set<MediaAliasProviderBindingKey> = [],
+        localSources: Set<MediaAliasLocalSourceKey> = [],
         redirectTarget: MediaAliasID? = nil,
         conflicts: [MediaAliasConflict] = []
     ) {
@@ -75,6 +80,7 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
         self.presentation = presentation
         self.bindingHints = bindingHints
         self.locallyValidatedBindings = locallyValidatedBindings
+        self.localSources = localSources
         self.redirectTarget = redirectTarget
         self.conflicts = conflicts
         canonicalize()
@@ -139,7 +145,7 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, createdAt, updatedAt, strongEvidence, weakEvidence, presentation
-        case bindingHints, locallyValidatedBindings, redirectTarget, conflicts
+        case bindingHints, locallyValidatedBindings, localSources, redirectTarget, conflicts
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -166,6 +172,17 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
             value.locallyValidatedBindings.sorted(),
             forKey: .locallyValidatedBindings
         )
+        // Only when there is something to say. A record with no local sources —
+        // every record that predates this field, and every one built purely from
+        // catalogue ids — must encode byte-for-byte as it did before, because the
+        // canonical encoding is what sync compares and what the ledger's payload
+        // budget is measured against.
+        if !value.localSources.isEmpty {
+            try container.encode(
+                value.localSources.sorted(),
+                forKey: .localSources
+            )
+        }
         try container.encodeIfPresent(value.redirectTarget, forKey: .redirectTarget)
         try container.encode(value.conflicts, forKey: .conflicts)
     }
@@ -202,6 +219,10 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
         locallyValidatedBindings = Set(try container.decodeIfPresent(
             [MediaAliasProviderBindingKey].self,
             forKey: .locallyValidatedBindings
+        ) ?? [])
+        localSources = Set(try container.decodeIfPresent(
+            [MediaAliasLocalSourceKey].self,
+            forKey: .localSources
         ) ?? [])
         redirectTarget = try container.decodeIfPresent(
             MediaAliasID.self,

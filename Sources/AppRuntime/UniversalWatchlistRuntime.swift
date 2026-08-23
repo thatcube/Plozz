@@ -377,12 +377,14 @@ public extension UniversalWatchlistHost {
         guard runtimeFeatureFlags.isEnabled(.universalWatchlist) else {
             return false
         }
-        // One identity path. Resolving through `TitleIdentityResolver` rather than
-        // the item's own evidence means a Plex Discover row (which carries only a
-        // PlexGuid) and a Jellyfin row (which carries IMDb) both reach the same Plozz
-        // UUID when the index knows they are one title — so the heart on a card and
-        // the heart on the page it opens can no longer disagree.
-        guard let aliasID = titleIdentityResolver.aliasID(for: item) else { return false }
+        // One identity path. Resolving through `universalWatchlistAliasID` rather
+        // than the item's own evidence means a Plex Discover row (which carries only
+        // a PlexGuid) and a Jellyfin row (which carries IMDb) both reach the same
+        // Plozz UUID when the index knows they are one title — so the heart on a card
+        // and the heart on the page it opens can no longer disagree. It is also the
+        // SAME call the write makes, which is what keeps a freshly created alias
+        // visible to the button that just created it.
+        guard let aliasID = universalWatchlistAliasID(for: item) else { return false }
         // Through the LEDGER's redirect graph, which is the same map the union
         // keyed itself by. Going through the watchlist snapshot's own table
         // instead left a merged title with two ids and made the card disagree
@@ -1170,11 +1172,38 @@ public extension UniversalWatchlistHost {
         )
     }
 
+    /// The alias this item is watchlisted AS — the single resolution both the
+    /// button's state and the write it performs go through.
+    ///
+    /// `TitleIdentityResolver` alone is not enough, and the gap is not academic.
+    /// It builds evidence from the item's own payload widened by the identity
+    /// index; the write widens further with provider bindings (see
+    /// `universalWatchlistEvidence`). A subject with no ids of its own — the show
+    /// an episode hero is promoted to, which is a bare id + title stub with no
+    /// year, so it has no strong evidence and no *weak* evidence either — reaches
+    /// the ledger only by its ``MediaAliasLocalSourceKey``. Resolving through one
+    /// function means the read and the write cannot look for it under different
+    /// keys.
+    func universalWatchlistAliasID(for item: MediaItem) -> MediaAliasID? {
+        if let preferred = item.watchlistAliasID,
+           let resolved = mediaAliasLedger.activeSnapshot.resolvedAliasID(for: preferred) {
+            return resolved
+        }
+        if let indexed = titleIdentityResolver.aliasID(for: item) {
+            return indexed
+        }
+        guard let evidence = universalWatchlistEvidence(for: item) else { return nil }
+        return MediaAliasResolver.lookup(
+            evidence: evidence,
+            in: mediaAliasLedger.activeSnapshot
+        )
+    }
+
     /// The alias a watchlist mutation must address: whichever one
     /// ``universalWatchlistMembership`` answered from, so the write can never
     /// target a different row than the button the viewer just pressed.
     func universalWatchlistPreferredAliasID(for item: MediaItem) -> MediaAliasID? {
-        item.watchlistAliasID ?? titleIdentityResolver.aliasID(for: item)
+        universalWatchlistAliasID(for: item)
     }
 
 

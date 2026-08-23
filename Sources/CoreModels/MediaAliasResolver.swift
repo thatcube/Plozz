@@ -39,6 +39,27 @@ public enum MediaAliasResolver {
             return match
         }
 
+        // The viewer's own copy, on their own account. Consulted after the
+        // catalogue ids (which are what actually merge two servers' copies into
+        // one title) and before title/year, because "the same item id on the
+        // same account" is a stronger statement than "same name, same year" —
+        // and unlike title/year it cannot collide across accounts.
+        //
+        // Placed OUTSIDE the `evidence.strong.isEmpty` gate below on purpose: a
+        // subject that carries a strong id which matched nothing is still the
+        // viewer's own copy, and refusing to recognise it there would mint a
+        // second alias for a title the ledger already holds.
+        let localCandidates = Set(
+            evidence.localSources.flatMap { snapshot.aliases(for: $0) }
+        )
+        if let match = uniqueCompatible(
+            localCandidates,
+            evidence: evidence,
+            snapshot: snapshot
+        ) {
+            return match
+        }
+
         guard let weak = evidence.weak else { return nil }
         // Rule 1 of `MediaItemIdentity`: **a strong id suppresses the title key.**
         // Falling back to title/year while the incoming item carries a catalogue id
@@ -137,6 +158,10 @@ public enum MediaAliasResolver {
         result.locallyValidatedBindings.formUnion(evidence.locallyValidatedBindings)
         result.locallyValidatedBindings.formIntersection(Set(hints.keys))
         changed = changed || priorValidation != result.locallyValidatedBindings
+
+        let priorLocalSources = result.localSources
+        result.localSources.formUnion(evidence.localSources)
+        changed = changed || priorLocalSources != result.localSources
 
         if let incoming = evidence.presentation {
             if result.presentation == nil {

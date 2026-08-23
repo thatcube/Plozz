@@ -100,7 +100,8 @@ public actor MediaAliasLedger: MediaAliasResolving {
                 weakEvidence: evidence.weak.map { [$0] } ?? [],
                 presentation: evidence.presentation,
                 bindingHints: evidence.bindingHints,
-                locallyValidatedBindings: evidence.locallyValidatedBindings
+                locallyValidatedBindings: evidence.locallyValidatedBindings,
+                localSources: evidence.localSources
               ) else {
             throw DurableLocalStateError.writeConflict
         }

@@ -322,13 +322,16 @@ struct DetailHeroView: View, Equatable {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var presentationCache = HeroPresentationCache()
-    /// Bumped when the watchlist changes anywhere, purely to re-run `body`.
+    /// Bumped when a watchlist press is accepted, purely to re-run `body`.
     ///
     /// `heroWatchlistAction` recomputes its add/remove state from
     /// `actionHandler.actions(for:)` every pass, so it is already correct the
     /// moment it is asked — it was simply never re-asked. Home rebuilds off this
     /// notification; the detail page never listened, so its button kept whatever
-    /// it had resolved to on appear until the page was rebuilt.
+    /// it had resolved to on appear until the page was rebuilt. Listens to the
+    /// CHEAP signal — the durable one re-resolves every card and saves the content
+    /// store, which is precisely the main-thread work that was stopping the new
+    /// state from reaching the screen.
     @State private var watchlistRevision = 0
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
@@ -1049,7 +1052,7 @@ struct DetailHeroView: View, Equatable {
         // backdrop swaps underneath it.
         .onReceive(
             NotificationCenter.default.publisher(
-                for: .universalWatchlistDidChange
+                for: .watchlistIntentDidChange
             )
         ) { _ in
             watchlistRevision &+= 1

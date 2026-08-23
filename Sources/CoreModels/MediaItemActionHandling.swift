@@ -61,8 +61,28 @@ public extension Notification.Name {
     /// it. Carries no payload; observers read the live snapshot on receipt.
     static let identityIndexDidUpdate = Notification.Name("PlozzIdentityIndexDidUpdate")
     /// Posted after durable Plozz watchlist membership changes locally.
+    ///
+    /// **Expensive.** Home answers it with `refreshDurableWatchlist()`, which
+    /// re-resolves universal identity for every loaded card and then saves the
+    /// content store — hundreds of milliseconds of main-thread work, on purpose,
+    /// because the durable set really did move. Post it when the DURABLE state
+    /// changes, never merely to refresh a control.
     static let universalWatchlistDidChange =
         Notification.Name("PlozzUniversalWatchlistDidChange")
+
+    /// Posted when a watchlist press is accepted, before the durable write.
+    ///
+    /// The cheap counterpart to `universalWatchlistDidChange`, and separate from
+    /// it for a measured reason: raising the durable notification on the press
+    /// ran Home's full identity re-resolve plus a content-store save on the main
+    /// thread, so the frame that would have shown the button's new state could
+    /// not be drawn until it finished. The button appeared to lag the toast by
+    /// six or seven seconds — worse than the two or three it was meant to fix.
+    ///
+    /// Only the views that draw a watchlist control observe this, and all they do
+    /// is ask again. Nothing recomputes a row, nothing touches disk.
+    static let watchlistIntentDidChange =
+        Notification.Name("PlozzWatchlistIntentDidChange")
 }
 
 /// The payload of a `.mediaItemDidMutate` notification: which items changed and

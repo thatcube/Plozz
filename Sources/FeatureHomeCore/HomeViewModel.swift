@@ -563,6 +563,8 @@ public final class HomeViewModel {
 
     /// Re-resolves the durable alias-ordered Watchlist against already-loaded
     /// presentation candidates. No provider creation, disk read, or network work.
+    private var durableWatchlistSaveTask: Task<Void, Never>?
+
     public func refreshDurableWatchlist() {
         guard case var .loaded(content) = state,
               let mediaItemActionHandler else { return }
@@ -576,7 +578,26 @@ public final class HomeViewModel {
             from: candidates
         )
         state = content.isEmpty ? .empty : .loaded(content)
-        if !content.isEmpty { contentStore.save(content) }
+        if !content.isEmpty { scheduleDurableWatchlistSave(content) }
+    }
+
+    /// Persists Home's snapshot after a watchlist change, off the press.
+    ///
+    /// `contentStore.save` JSON-encodes every row and writes the file, on the
+    /// main thread. Doing that inline meant one watchlist toggle paid for a full
+    /// encode of Home before the next frame could be drawn, and a burst of
+    /// presses paid for one per press — the interaction visibly stalled.
+    ///
+    /// The snapshot is only a warm start for next launch, so it does not have to
+    /// be written during the gesture. Coalescing to the last change also means a
+    /// burst writes once instead of once per press.
+    private func scheduleDurableWatchlistSave(_ content: Content) {
+        durableWatchlistSaveTask?.cancel()
+        durableWatchlistSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(1200))
+            guard !Task.isCancelled, let self else { return }
+            self.contentStore.save(content)
+        }
     }
 
     public func cachedHeroItems(for settings: HeroSettings) -> [MediaItem]? {

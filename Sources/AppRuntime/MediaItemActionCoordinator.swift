@@ -191,19 +191,22 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         }
     }
 
-    /// Tell every watchlist surface to re-ask.
+    /// Tell the watchlist controls to re-ask, and nothing else to do any work.
     ///
     /// The coordinator is not `@Observable` — deliberately, since `actions(for:)`
     /// runs from view bodies and mutates the memo above — so changing intent moves
-    /// nothing on its own. This is the channel the watchlist already changes on,
-    /// so reusing it means a press reaches every surface that shows the state
-    /// rather than only the one the finger was on.
+    /// nothing on its own and the surfaces need telling.
     ///
-    /// Re-entering our own observer is harmless: it drops the memo, and intent is
-    /// consulted ahead of the memo, so the answer does not change.
-    private func announceWatchlistChanged() {
+    /// This deliberately does NOT raise `universalWatchlistDidChange`. Doing that
+    /// was the first attempt and it made the very thing it was fixing worse: that
+    /// notification runs Home's full identity re-resolve and a content-store save
+    /// on the main thread, so the frame carrying the button's new state couldn't
+    /// be drawn until it finished. Nothing durable has changed at this point
+    /// anyway — a press has been accepted, which is exactly what the cheap
+    /// notification means.
+    private func announceWatchlistIntentChanged() {
         NotificationCenter.default.post(
-            name: .universalWatchlistDidChange,
+            name: .watchlistIntentDidChange,
             object: nil
         )
     }
@@ -376,7 +379,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             // the press is on screen this frame instead of after the ledger write.
             let key = Self.membershipKey(item)
             watchlistIntents[key] = adding
-            announceWatchlistChanged()
+            announceWatchlistIntentChanged()
 
             // One writer per title. A second press while a write is in flight only
             // updates the intent above; the running writer picks it up when it
@@ -388,7 +391,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             Task { @MainActor in
                 defer {
                     self.watchlistWriters.remove(key)
-                    self.announceWatchlistChanged()
+                    self.announceWatchlistIntentChanged()
                 }
                 // Keep writing until what's on disk is what the viewer last asked
                 // for. Re-read each pass: they may have pressed again mid-write.
@@ -434,7 +437,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
                         )
                         if self.watchlistIntents[key] == desired {
                             self.watchlistIntents[key] = nil
-                            self.announceWatchlistChanged()
+                            self.announceWatchlistIntentChanged()
                         }
                     }
                     return

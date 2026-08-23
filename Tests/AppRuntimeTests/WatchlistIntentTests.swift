@@ -138,19 +138,32 @@ final class WatchlistIntentTests: XCTestCase {
 
     /// A write that fails must hand the button back to the truth rather than
     /// leave a confirmation standing for something that did not happen.
+    ///
+    /// Starts from a title that IS saved and fails the removal, so "reverted"
+    /// and "never applied" are different answers — otherwise an implementation
+    /// with no intent at all would pass this by doing nothing.
     func testFailedWriteRevertsTheButton() async {
         let durable = DurableDouble()
+        let subject = item
+        durable.saved.insert(subject.id)
         durable.succeed = false
         let coordinator = makeCoordinator(durable)
-        let subject = item
 
-        coordinator.perform(.addToWatchlist, on: subject, context: .none)
-        await settle { durable.writes.count == 1 }
+        XCTAssertTrue(coordinator.isWatchlisted(subject))
 
-        XCTAssertFalse(
+        coordinator.perform(.removeFromWatchlist, on: subject, context: .none)
+
+        // Wait for the writer to have run and given up, rather than for the
+        // write to be merely recorded — the intent is cleared on the way out.
+        await settle {
+            durable.writes.count == 1 && coordinator.isWatchlisted(subject)
+        }
+
+        XCTAssertTrue(
             coordinator.isWatchlisted(subject),
-            "A failed write must not leave the button claiming the title was saved."
+            "A failed removal must hand the button back to the truth — the title is still saved."
         )
+        XCTAssertTrue(durable.saved.contains(subject.id))
     }
 
     /// Yields until `condition` holds, so tests wait on the coordinator's own

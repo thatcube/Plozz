@@ -19,6 +19,17 @@ public struct ResumeProgressCapsule: View {
     /// resume position reads as an intentional start rather than a hairline sliver.
     /// Live gauges (downloads) pass `false` to stay exact at low percentages.
     public var floorsMinimumFill: Bool
+    /// Lets the bar trade width with its neighbour instead of holding `width`
+    /// come what may: it shrinks toward a dot when the row runs short, and takes
+    /// the slack when there is some going spare.
+    ///
+    /// Off by default: the hero Play buttons want an exact, stable gauge. The
+    /// Continue Watching chip turns it on because there the bar shares one line
+    /// with the label naming the episode, and how much room that label needs
+    /// changes completely from "2h 2m" to "S1, E12 · 1h 21m". A fixed bar is
+    /// either a stub beside the short one or a slab crowding out the long one;
+    /// a flexible bar is right for both.
+    public var flexesToFitRow: Bool
 
     @Environment(\.plozzChromeIsFocused) private var isFocused
 
@@ -27,13 +38,15 @@ public struct ResumeProgressCapsule: View {
         onLight: Bool,
         width: CGFloat = 150,
         height: CGFloat = 6,
-        floorsMinimumFill: Bool = true
+        floorsMinimumFill: Bool = true,
+        flexesToFitRow: Bool = false
     ) {
         self.progress = progress
         self.onLight = onLight
         self.width = width
         self.height = height
         self.floorsMinimumFill = floorsMinimumFill
+        self.flexesToFitRow = flexesToFitRow
     }
 
     public var body: some View {
@@ -48,11 +61,23 @@ public struct ResumeProgressCapsule: View {
             : PlozzMediaChrome.foreground(isFocused: isFocused)
         Capsule()
             .fill(track)
-            .frame(width: width, height: height)
+            // Flexible between a dot and `width` when the row asks it to be, so
+            // it can give space back to a long label and take it back from a
+            // short one. Rigid at exactly `width` otherwise.
+            .frame(
+                minWidth: flexesToFitRow ? min(height * 2, width) : width,
+                maxWidth: width
+            )
+            .frame(height: height)
             .overlay(alignment: .leading) {
-                Capsule()
-                    .fill(fill)
-                    .frame(width: filledWidth, height: height)
+                // Reads the width the bar was actually GIVEN rather than the one
+                // it asked for, so a squeezed bar's fill stays a true fraction of
+                // it instead of overhanging the track.
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(fill)
+                        .frame(width: filledWidth(in: geo.size.width), height: height)
+                }
             }
             .animation(.easeInOut(duration: 0.2), value: onLight)
     }
@@ -60,10 +85,10 @@ public struct ResumeProgressCapsule: View {
     /// The fill width. Any real progress (`> 0`) shows at least a single dot (one
     /// bar height → a full circle) when `floorsMinimumFill` is set. Exactly 0
     /// shows nothing.
-    private var filledWidth: CGFloat {
+    private func filledWidth(in available: CGFloat) -> CGFloat {
         guard progress > 0 else { return 0 }
         let minFill = floorsMinimumFill ? height : 0
-        return min(width, max(minFill, width * progress))
+        return min(available, max(minFill, available * progress))
     }
 }
 
@@ -101,12 +126,20 @@ public struct PlayResumeButtonLabel: View {
     public let onLight: Bool
     public var spacing: CGFloat
     public var capsuleWidth: CGFloat
-    /// Height of the resume progress bar inside the button. Defaults to the
-    /// compact 6pt used on iOS; tvOS heroes pass a taller bar.
-    public var barHeight: CGFloat
+    /// Height of the resume progress bar inside the button.
+    ///
+    /// `nil` — the default — sizes it from the reader's text size, on the same
+    /// damped curve the Continue Watching chip's bar uses (see
+    /// ``PlozzMetrics/resumeChipBarHeight``), so the gauge keeps its proportion
+    /// to the button's label instead of staying a 6pt hairline under 30pt type.
+    /// A caller with its own tuned value still passes one.
+    public var barHeight: CGFloat?
     /// How much of the resume trailing text to render. Defaults to `.full`; a
     /// width-constrained caller can request a shorter form to avoid wrapping.
     public var resumeTrailingStyle: ResumeTrailingStyle
+
+    /// Supplies the default bar height, which tracks the reader's text size.
+    @Environment(\.plozzMetrics) private var metrics
 
     public init(
         title: LocalizedStringResource,
@@ -116,7 +149,7 @@ public struct PlayResumeButtonLabel: View {
         onLight: Bool,
         spacing: CGFloat = 16,
         capsuleWidth: CGFloat = 75,
-        barHeight: CGFloat = 6,
+        barHeight: CGFloat? = nil,
         resumeTrailingStyle: ResumeTrailingStyle = .full
     ) {
         self.title = title
@@ -170,7 +203,12 @@ public struct PlayResumeButtonLabel: View {
         HStack(spacing: spacing) {
             Image(systemName: "play.fill")
             if let resumeProgress {
-                ResumeProgressCapsule(progress: resumeProgress, onLight: onLight, width: capsuleWidth, height: barHeight)
+                ResumeProgressCapsule(
+                    progress: resumeProgress,
+                    onLight: onLight,
+                    width: capsuleWidth,
+                    height: barHeight ?? metrics.heroProgressBarHeight
+                )
                 if let resumeTrailing {
                     Text(resumeTrailing)
                         .lineLimit(1)

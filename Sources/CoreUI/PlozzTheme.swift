@@ -62,17 +62,20 @@ public enum PlozzTheme {
 
         // MARK: Continue Watching (logo & artwork) card shape
 
-        /// Shape (width ÷ height) of a Continue Watching card that carries the
-        /// show's logo over its artwork.
+        /// How much reflection a Continue Watching card shows, as a fraction of
+        /// the picture's own height.
         ///
-        /// Deliberately TALLER than the 16:9 art it holds. A show's wide art is
-        /// the only thing naming the card, so the chrome along the bottom — the
-        /// play glyph, progress bar and "S1, E12 · 17m" — used to sit *on* the
-        /// picture, over the very region a backdrop tends to put its subject in.
-        /// Giving the card extra height below the picture moves that chrome off
-        /// the image entirely (see ``continueWatchingArtworkSideCrop`` for how
-        /// the shortfall is filled), and the taller card carries a bigger logo.
-        public static let continueWatchingCardAspectRatio: CGFloat = 1.38
+        /// This — not an aspect ratio — is the number worth choosing, because it
+        /// is the thing you actually see: the card's shape falls out of it (see
+        /// ``ContinueWatchingCardShape/aspectRatio``). The card is taller than its
+        /// 16:9 art so the chrome along the bottom — play glyph, progress bar,
+        /// "S1, E12 · 17m" — sits in a band of its own rather than on top of the
+        /// subject, and this says how deep that band is.
+        ///
+        /// Kept modest. Height is what a rail spends, and past a point the
+        /// reflection stops reading as the picture having a soft bottom and
+        /// starts being a feature of its own that the chip then sits on top of.
+        public static let continueWatchingReflectionShare: CGFloat = 0.135
         /// Fraction of the artwork's width trimmed from **each** side of a
         /// Continue Watching card.
         ///

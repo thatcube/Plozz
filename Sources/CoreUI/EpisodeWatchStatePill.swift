@@ -115,9 +115,18 @@ public struct EpisodeWatchStatePill: View {
                     progress: fraction,
                     onLight: false,
                     width: barWidth,
-                    height: barHeight
+                    height: barHeight,
+                    flexesToFitRow: true
                 )
-                if let trailing = joined(remaining) { Text(verbatim: trailing) }
+                // The bar yields before the label does. An `HStack` otherwise
+                // splits a shortfall between them, so a long string at a large
+                // text size lost characters while the gauge beside it kept its
+                // full width — the label is the only part that says *which*
+                // episode, and a truncated "S4, E1 ·…" says nothing.
+                .layoutPriority(0)
+                if let trailing = joined(remaining) {
+                    Text(verbatim: trailing).layoutPriority(1)
+                }
             }
             .accessibilityLabel(
                 remaining.map { Text("\($0) left") }
@@ -199,6 +208,7 @@ public struct ResumeChipOverlay: View {
     private let detailText: String?
     private let showsPlayGlyphWhenIdle: Bool
     private let bottomScrimStart: CGFloat?
+    private let bottomScrimDepth: CGFloat?
 
     @Environment(\.plozzMetrics) private var metrics
 
@@ -212,17 +222,18 @@ public struct ResumeChipOverlay: View {
     ///   - showsPlayGlyphWhenIdle: give the not-started form a play glyph and no
     ///     progress bar.
     ///   - bottomScrimStart: where the legibility scrim starts darkening, as a
-    ///     fraction of the artwork's height. `nil` keeps the shared default,
-    ///     which suits chrome sitting directly on the picture. A card that
-    ///     reserves a band beneath its picture for this chrome passes that band's
-    ///     top edge, so the picture above it stays untouched.
+    ///     fraction of the artwork's height. `nil` keeps the shared default.
+    ///   - bottomScrimDepth: how dark that scrim gets at the bottom edge. `nil`
+    ///     keeps the shared default; a host that lays its own wash over the same
+    ///     region passes less, since the two compound.
     public init(
         item: MediaItem,
         downloadState: MediaDownloadBadgeState? = nil,
         showsMenu: Bool = false,
         detailText: String? = nil,
         showsPlayGlyphWhenIdle: Bool = false,
-        bottomScrimStart: CGFloat? = nil
+        bottomScrimStart: CGFloat? = nil,
+        bottomScrimDepth: CGFloat? = nil
     ) {
         self.item = item
         self.downloadState = downloadState
@@ -230,6 +241,7 @@ public struct ResumeChipOverlay: View {
         self.detailText = detailText
         self.showsPlayGlyphWhenIdle = showsPlayGlyphWhenIdle
         self.bottomScrimStart = bottomScrimStart
+        self.bottomScrimDepth = bottomScrimDepth
     }
 
     public var body: some View {
@@ -241,7 +253,8 @@ public struct ResumeChipOverlay: View {
                     MediaArtworkChromeScrim(
                         top: showsMenu,
                         bottom: hasBottomChrome,
-                        bottomStart: bottomScrimStart ?? 0.52
+                        bottomStart: bottomScrimStart ?? 0.52,
+                        bottomDepth: bottomScrimDepth ?? 0.78
                     )
                 }
                 .overlay(alignment: .topLeading) {
@@ -252,10 +265,17 @@ public struct ResumeChipOverlay: View {
             .allowsHitTesting(showsMenu)
             .overlay(alignment: .bottom) {
                 // The bar is sized against the CARD, not a constant. At its full
-                // 80pt it fits a landscape thumbnail comfortably, but a poster in a
-                // dense grid can be ~86pt wide, where a fixed bar plus the time
+                // width it fits a landscape thumbnail comfortably, but a poster in
+                // a dense grid can be ~86pt wide, where a fixed bar plus the time
                 // text would overflow the card. Reading the host's width keeps the
                 // wide cards pixel-identical and only shrinks where it must.
+                //
+                // On a card whose bar is flexible (see `flexesToFitRow`) this is a
+                // CEILING rather than the width: the label outranks the bar, so
+                // what it actually gets is whatever the label leaves, up to this.
+                // The ceiling itself stays the tuned width — a share of the card
+                // was tried instead and gave a gauge that ran most of the way
+                // across a wide tvOS card.
                 GeometryReader { geometry in
                     let barWidth = min(
                         metrics.resumeChipBarWidth,
@@ -276,9 +296,14 @@ public struct ResumeChipOverlay: View {
                                 showsPlayGlyphWhenIdle: showsPlayGlyphWhenIdle
                             )
                             .font(.system(size: metrics.resumeChipFontSize, weight: .semibold))
-                            // Last-resort guard for a very narrow card with a long
-                            // remaining string ("1h 12m"): shrink rather than clip.
-                            .minimumScaleFactor(0.75)
+                            // The card grows with Dynamic Type to keep this label
+                            // whole (see `PlozzMetrics.continueWatchingWidth`),
+                            // but that growth is capped so a card can't outgrow a
+                            // phone. Past the cap this is what keeps "S1, E1 ·
+                            // 43m" readable instead of "S1, E1 · 4…": a smaller
+                            // label still says which episode, a truncated one
+                            // does not.
+                            .minimumScaleFactor(0.6)
                         }
                         // Keeps the download badge pinned trailing whether or not
                         // the pill is present, so it never drifts to the leading edge.

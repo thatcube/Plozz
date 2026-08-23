@@ -1571,7 +1571,8 @@ private struct PlozziOSHomeMediaRail: View {
                         .frame(
                             width: metrics.cardSlotWidth(
                                 for: style,
-                                cardStyle: cardStyle
+                                cardStyle: cardStyle,
+                                showsSeriesArtwork: showsSeriesArtwork
                             )
                         )
                     }

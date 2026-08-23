@@ -32,6 +32,20 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let posterHeight: CGFloat
     public let landscapeWidth: CGFloat
     public let landscapeHeight: CGFloat
+    /// Artwork width for a Continue Watching card.
+    ///
+    /// Narrower than an ordinary landscape card because it is taller (see
+    /// ``ContinueWatchingCardShape/widthScale``) — but unlike every other card
+    /// size it also grows with **Dynamic Type**.
+    ///
+    /// It has to. This card carries its text *inside* the artwork ("S1, E12 ·
+    /// 17m", on one line, beside a play glyph and a progress bar) rather than in
+    /// a caption underneath that can wrap or grow. The text tracks the reader's
+    /// chosen size while a density-scaled card does not, so at a large text size
+    /// the label simply ran out of card and truncated to "S1, E1 · 4…" — the
+    /// episode you are being told about, cut off. A card whose contents are fixed
+    /// to the text they hold has to be sized by that text.
+    public let continueWatchingWidth: CGFloat
     /// Inset between a media card's glass surface and its artwork — shared by
     /// poster *and* landscape cards so the glass border is a uniform thickness.
     public let cardInset: CGFloat
@@ -134,6 +148,13 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let resumeChipBarHeight: CGFloat
     /// Edge length of the trailing accessory (download state) on a resume chip.
     public let resumeChipAccessorySize: CGFloat
+    /// Height of the resume progress bar inside a hero Play button.
+    ///
+    /// Bigger than the card chip's bar — a hero button is a much larger target
+    /// carrying much larger type — and, like it, grown on a damped curve as the
+    /// reader's text size goes up. Without that it stayed a hairline under a
+    /// button whose label had doubled.
+    public let heroProgressBarHeight: CGFloat
     /// Artwork "…" menu: glyph size, tap-target edge, and inset from the artwork
     /// edge. Sized as a CONTROL (finger/remote), not to match nearby text — which
     /// is why it doesn't ride `resumeChipAccessorySize`.
@@ -165,11 +186,12 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// surface and create invisible inter-card spacing.
     public func cardSlotWidth(
         for style: PosterCardView.Style,
-        cardStyle: CardStyle
+        cardStyle: CardStyle,
+        showsSeriesArtwork: Bool = false
     ) -> CGFloat {
         let artworkWidth = switch style {
         case .poster: posterWidth
-        case .landscape: landscapeWidth
+        case .landscape: showsSeriesArtwork ? continueWatchingWidth : landscapeWidth
         }
         let sideInset = switch cardStyle {
         case .framed: cardInset
@@ -267,8 +289,7 @@ public struct PlozzMetrics: Equatable, Sendable {
         }
         #endif
 
-        func step(_ base: CGFloat) -> CGFloat { (base * s).rounded() }
-        /// Like `step`, but only applies `damping` of the density deviation from
+        func step(_ base: CGFloat) -> CGFloat { (base * s).rounded() }        /// Like `step`, but only applies `damping` of the density deviation from
         /// 1.0 — so `damping: 1` behaves exactly like `step`, `damping: 0` stays
         /// fixed at the base, and values between let an element nod to density
         /// without scaling 1:1 with the cards.
@@ -282,6 +303,27 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.posterHeight = step(PlozzTheme.Metrics.posterHeight)
         self.landscapeWidth = step(PlozzTheme.Metrics.landscapeWidth)
         self.landscapeHeight = step(PlozzTheme.Metrics.landscapeHeight)
+
+        // How much bigger the reader has asked the chip's text style to be. 1 at
+        // the default size on every platform, so nothing below changes until
+        // someone actually turns text up.
+        let chipTypeGrowth: CGFloat
+        #if canImport(UIKit)
+        chipTypeGrowth = scaled(.subheadline, 100) / 100
+        #else
+        chipTypeGrowth = 1
+        #endif
+        // Damped and capped rather than followed 1:1. The chip is not all text —
+        // its inset, play glyph and progress bar are fixed — so matching the type
+        // growth exactly would over-widen the card, and at the accessibility sizes
+        // it would run past the width of a phone. Past the cap the text scales
+        // itself down instead (see `ResumeChipOverlay`), which keeps the label
+        // whole; growing the card is what stops that being necessary for the
+        // ordinary large sizes people actually use.
+        let cardTypeGrowth = min(1.6, max(1, 1 + (chipTypeGrowth - 1) * 0.75))
+        self.continueWatchingWidth = (
+            self.landscapeWidth * ContinueWatchingCardShape.widthScale * cardTypeGrowth
+        ).rounded()
         self.cardInset = step(PlozzTheme.Metrics.cardInset)
 
         self.artistTileDiameter = step(PlozzTheme.Metrics.artistTileDiameter)
@@ -359,25 +401,28 @@ public struct PlozzMetrics: Equatable, Sendable {
         // the card's own typography, rather than inheriting tvOS point sizes (which
         // read as enormous on a handset — the same trap the card caption fell into).
         //
-        // tvOS keeps its tuned 10-foot constants as the BASE but now scales every
-        // one of them on the `.subheadline` curve, the same way the tvOS card
-        // subtitle already does. `UIFontMetrics` is fully available on tvOS
-        // (`tvos(11.0)`), and at the default content size `scaledValue(for:)`
-        // returns the base unchanged — so this is visually identical today and only
-        // grows if the system text size does. Scaling the whole set together (font,
-        // inset, bar, badge) is what keeps the chip in proportion instead of a
-        // large label crowding a fixed-width bar.
+        // tvOS keeps its tuned 10-foot constants as the BASE and scales them on the
+        // `.subheadline` curve, the same way the tvOS card subtitle already does.
+        // `UIFontMetrics` is fully available on tvOS (`tvos(11.0)`), and at the
+        // default content size `scaledValue(for:)` returns the base unchanged.
+        //
+        // The bar is the exception on BOTH platforms: its tuned size is kept at
+        // the default text size and only ever scaled UP from there — see
+        // `barTypeScale`.
         #if os(tvOS)
         let baseChipFont = scaled(.subheadline, PlozzTheme.Metrics.resumeChipFontSize)
         let baseChipInset = scaled(.subheadline, PlozzTheme.Metrics.resumeChipInset)
-        let baseChipBarWidth = scaled(.subheadline, PlozzTheme.Metrics.resumeChipBarWidth)
-        let baseChipBarHeight = scaled(.subheadline, PlozzTheme.Metrics.resumeChipBarHeight)
+        let barScale = barTypeScale(scaled(.subheadline, 100) / 100)
+        let baseChipBarWidth = PlozzTheme.Metrics.resumeChipBarWidth * barScale
+        let baseChipBarHeight = PlozzTheme.Metrics.resumeChipBarHeight * barScale
         let baseChipAccessory = scaled(.subheadline, PlozzTheme.Metrics.resumeChipAccessorySize)
         #elseif canImport(UIKit)
         let baseChipFont = preferred(.subheadline)
         let baseChipInset: CGFloat = 12
-        let baseChipBarWidth: CGFloat = 38
-        let baseChipBarHeight: CGFloat = 6
+        let barScale = barTypeScale(scaled(.subheadline, 100) / 100)
+        // 38 × 6 at the default text size, exactly as they were tuned.
+        let baseChipBarWidth = 38 * barScale
+        let baseChipBarHeight = 6 * barScale
         // Matches the chip's cap height closely enough to sit on the same baseline.
         let baseChipAccessory = preferred(.subheadline) + 6
         #else
@@ -393,6 +438,22 @@ public struct PlozzMetrics: Equatable, Sendable {
         // Floored: a sub-pixel bar disappears entirely at micro density.
         self.resumeChipBarHeight = max((baseChipBarHeight * densityScale).rounded(), 3)
         self.resumeChipAccessorySize = (baseChipAccessory * densityScale).rounded()
+        // Hero Play button bar. Same rule: the tuned height at the default text
+        // size, scaled up only as the reader's text grows.
+        #if os(tvOS)
+        let heroBarBase: CGFloat = 10
+        #else
+        let heroBarBase: CGFloat = 6
+        #endif
+        #if canImport(UIKit)
+        let heroBarScale = barTypeScale(scaled(.subheadline, 100) / 100)
+        #else
+        let heroBarScale: CGFloat = 1
+        #endif
+        self.heroProgressBarHeight = max(
+            (heroBarBase * heroBarScale * densityScale).rounded(),
+            3
+        )
 
         // Same treatment for the artwork "…" affordance: tuned tvOS constants as the
         // base, scaled on the `.headline` curve the iOS branch below already uses.
@@ -484,5 +545,24 @@ extension DynamicTypeSize {
         @unknown default: return .large
         }
     }
+}
+/// How much a progress bar grows for a given growth in the reader's text size.
+///
+/// Returns **exactly 1 at the default text size**, which is the important part:
+/// the tuned bar sizes are right as they are, and were never the complaint. The
+/// bar only looked short when the text around it had grown and it had not, so
+/// this only ever scales *up* from a size that is already correct.
+///
+/// Damped and capped rather than tracking the type curve: a bar that matched it
+/// 1:1 became a slab and the loudest thing on the card. It is applied to both
+/// dimensions, since a bar that grew only in height would go from short to
+/// stubby.
+///
+/// Width growth is safe here only because the bar is flexible where it shares a
+/// line with a label (see `ResumeProgressCapsule.flexesToFitRow`): this is a
+/// ceiling it may reach, not a width it insists on, so a long label still takes
+/// what it needs first.
+private func barTypeScale(_ typeGrowth: CGFloat) -> CGFloat {
+    min(1.7, 1 + (max(1, typeGrowth) - 1) * 0.5)
 }
 #endif

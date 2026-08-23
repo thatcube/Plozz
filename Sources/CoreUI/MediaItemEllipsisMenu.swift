@@ -105,17 +105,26 @@ public struct MediaArtworkChromeScrim: View {
     private let hasTopChrome: Bool
     private let hasBottomChrome: Bool
     private let bottomStart: CGFloat
+    private let bottomDepth: CGFloat
 
     /// - Parameter bottomStart: where the bottom ramp begins, as a fraction of
     ///   the artwork's height. The default half-way point suits a card whose
-    ///   chrome sits directly on the picture. A card that reserves a band under
-    ///   its picture for the chrome (Continue Watching — see
-    ///   ``ExtendedArtworkFill``) passes that band's top edge instead, so the
-    ///   darkening lands on the band and leaves the picture alone.
-    public init(top: Bool, bottom: Bool, bottomStart: CGFloat = 0.52) {
+    ///   chrome sits directly on the picture.
+    /// - Parameter bottomDepth: how dark that ramp gets at the very bottom edge.
+    ///   The default is the depth chrome needs when nothing else is darkening the
+    ///   artwork; a caller that lays down its own wash over the same region (a
+    ///   Continue Watching card and its reflection — see ``ExtendedArtworkFill``)
+    ///   passes less, because the two compound and would otherwise reach black.
+    public init(
+        top: Bool,
+        bottom: Bool,
+        bottomStart: CGFloat = 0.52,
+        bottomDepth: CGFloat = 0.78
+    ) {
         self.hasTopChrome = top
         self.hasBottomChrome = bottom
-        self.bottomStart = min(0.95, max(0.34, bottomStart))
+        self.bottomStart = min(0.95, max(0.2, bottomStart))
+        self.bottomDepth = min(1, max(0, bottomDepth))
     }
 
     public var body: some View {
@@ -129,13 +138,29 @@ public struct MediaArtworkChromeScrim: View {
     /// directly as the text looking bright on one card and washed out on the next
     /// — which is exactly what a translucent 0.58 did over pale artwork. Deeper,
     /// and starting its ramp higher, gives a consistent bed to read against.
+    ///
+    /// Both ramps are **eased** rather than straight lines. A linear ramp changes
+    /// at a constant rate, so where it begins the rate goes from nothing to
+    /// something within one row, and the eye reads that as an edge drawn across
+    /// the artwork. Easing in from zero slope (see ``ArtworkGradientRamp``) makes
+    /// the darkening start where it is too slight to notice, which is the only
+    /// way it can start without announcing itself.
     private var stops: [Gradient.Stop] {
-        [
-            .init(color: .black.opacity(hasTopChrome ? 0.5 : 0), location: 0),
-            .init(color: .clear, location: min(0.34, bottomStart)),
-            .init(color: .clear, location: bottomStart),
-            .init(color: .black.opacity(hasBottomChrome ? 0.78 : 0), location: 1),
-        ]
+        let quiet = min(0.34, bottomStart)
+        var stops: [Gradient.Stop] = []
+        if hasTopChrome {
+            stops += ArtworkGradientRamp.fadingStops(peak: 0.5, from: 0, to: quiet)
+        } else {
+            stops.append(.init(color: .clear, location: 0))
+            stops.append(.init(color: .clear, location: quiet))
+        }
+        stops.append(.init(color: .clear, location: bottomStart))
+        if hasBottomChrome {
+            stops += ArtworkGradientRamp.stops(peak: bottomDepth, from: bottomStart, to: 1)
+        } else {
+            stops.append(.init(color: .clear, location: 1))
+        }
+        return stops
     }
 }
 

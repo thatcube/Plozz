@@ -31,6 +31,11 @@ public struct SkeletonCardView: View {
     /// to drop the caption too — otherwise Continue Watching visibly shrinks the
     /// moment real cards replace the placeholders.
     private let showsCaption: Bool
+    /// Mirrors `PosterCardView`'s series-artwork shape: taller than 16:9 (it
+    /// reserves a band for its chrome) and narrower to compensate. Kept explicit
+    /// rather than inferred from `showsCaption` so the placeholder and the real
+    /// card can't quietly disagree about the shape of the row.
+    private let showsSeriesArtwork: Bool
 
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.themePalette) private var palette
@@ -39,9 +44,27 @@ public struct SkeletonCardView: View {
     /// real cards will render in.
     @Environment(\.plozzCardStyle) private var cardStyle
 
-    public init(style: Style = .poster, showsCaption: Bool = true) {
+    public init(
+        style: Style = .poster,
+        showsCaption: Bool = true,
+        showsSeriesArtwork: Bool = false
+    ) {
         self.style = style
         self.showsCaption = showsCaption
+        self.showsSeriesArtwork = showsSeriesArtwork
+    }
+
+    /// The artwork slot this placeholder reserves — identical to
+    /// `PosterCardView.size` for the same inputs.
+    private var artworkSize: CGSize {
+        guard showsSeriesArtwork else {
+            return CGSize(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
+        }
+        let width = metrics.continueWatchingWidth
+        return CGSize(
+            width: width,
+            height: (width / ContinueWatchingCardShape.aspectRatio).rounded()
+        )
     }
 
     @ViewBuilder
@@ -90,15 +113,15 @@ public struct SkeletonCardView: View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous)
                 .fill(palette.fill)
-                .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
+                .frame(width: artworkSize.width, height: artworkSize.height)
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             // PosterCardView's landscape caption uses VStack(spacing: 4).
             if showsCaption {
-                textLines(contentWidth: metrics.landscapeWidth - 2 * metrics.landscapeCaptionInset, spacing: 4)
+                textLines(contentWidth: artworkSize.width - 2 * metrics.landscapeCaptionInset, spacing: 4)
                     .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
-                    .frame(width: metrics.landscapeWidth, alignment: .leading)
+                    .frame(width: artworkSize.width, alignment: .leading)
             }
         }
         .padding(metrics.cardInset)
@@ -152,7 +175,9 @@ public struct SkeletonCardView: View {
     private var borderlessAspectRatio: CGFloat {
         switch style {
         case .poster: return 2.0 / 3.0
-        case .landscape: return 16.0 / 9.0
+        case .landscape: return showsSeriesArtwork
+            ? ContinueWatchingCardShape.aspectRatio
+            : 16.0 / 9.0
         }
     }
 
@@ -193,7 +218,11 @@ public struct SkeletonCardView: View {
         let slot: CGFloat
         switch style {
         case .poster: slot = metrics.posterWidth
-        case .landscape: slot = metrics.landscapeCardSlotWidth
+        case .landscape: slot = metrics.cardSlotWidth(
+            for: .landscape,
+            cardStyle: .borderless,
+            showsSeriesArtwork: showsSeriesArtwork
+        )
         }
         return slot - 2 * metrics.borderlessCardSideMargin - 2 * borderlessCaptionInset
     }

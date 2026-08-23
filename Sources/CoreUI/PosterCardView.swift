@@ -108,14 +108,16 @@ public struct PosterCardView: View {
             return CGSize(width: metrics.posterWidth, height: metrics.posterHeight)
         case .landscape:
             // A series-artwork card stands taller than the 16:9 art it carries so
-            // its chrome has a band of its own beneath the picture. See
-            // ``ExtendedArtworkFill``.
+            // its chrome has a band of its own beneath the picture, and is
+            // narrower to keep that extra height from enlarging the whole rail.
+            // See ``ExtendedArtworkFill``.
             guard showsSeriesArtwork else {
                 return CGSize(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
             }
+            let width = metrics.continueWatchingWidth
             return CGSize(
-                width: metrics.landscapeWidth,
-                height: (metrics.landscapeWidth / ContinueWatchingCardShape.aspectRatio).rounded()
+                width: width,
+                height: (width / ContinueWatchingCardShape.aspectRatio).rounded()
             )
         }
     }
@@ -516,12 +518,12 @@ public struct PosterCardView: View {
                 // which show (the logo), which episode, and how much is left.
                 detailText: showsSeriesArtwork ? item.seasonEpisodeLabel : nil,
                 showsPlayGlyphWhenIdle: showsSeriesArtwork,
-                // Concentrate the darkening on the reflection band the chip
-                // actually sits on. The shared default ramps from half-way up,
-                // which on a card that reserves a band for its chrome would dim
-                // the picture for no reason — and wash out the reflection that
-                // band exists to show.
-                bottomScrimStart: showsSeriesArtwork ? ContinueWatchingCardShape.scrimStart : nil
+                // A Continue Watching card darkens over a much longer run,
+                // starting up in the picture and finishing lighter: it is not
+                // working alone down there — the reflection lays down its own
+                // wash — and the two compound. See ``ContinueWatchingCardShape``.
+                bottomScrimStart: showsSeriesArtwork ? ContinueWatchingCardShape.scrimStart : nil,
+                bottomScrimDepth: showsSeriesArtwork ? ContinueWatchingCardShape.scrimDepth : nil
             )
         }
     }
@@ -837,22 +839,23 @@ public struct PosterCardView: View {
         GeometryReader { geo in
             let width = geo.size.width
             let height = geo.size.height
-            // The picture's own band. The chrome owns everything below it, so
-            // centring the logo here — rather than in the card — is what stops it
-            // sitting low and crowding the progress bar and "S1, E12 · 17m".
-            // Optically it also lands where a viewer expects a show's wordmark:
-            // the middle of the image, not the middle of the frame around it.
+            // The picture's own band. Sizing the logo against it — rather than
+            // against the card — keeps the chrome band underneath as its own
+            // space, so growing the logo can never crowd the progress bar and
+            // "S1, E12 · 17m".
             let stage = height * ContinueWatchingCardShape.mirrorLine
+            let box = ContinueWatchingCardShape.logoBox(cardWidth: width, stage: stage, edgeInset: metrics.resumeChipInset)
             ZStack(alignment: .top) {
-                // Keeps a pale or busy backdrop from swallowing the logo. Kept
-                // light: the bottom chrome already lays down its own scrim, and
-                // stacking two reads as a muddy card.
-                Color.black.opacity(0.22)
+                // An even dim over the whole card — see
+                // ``ContinueWatchingCardShape/artworkDim``. It was 0.22 and read
+                // as the logo competing with busy artwork; a few points more and
+                // both the logo and the chip sit clearly on top of the picture.
+                Color.black.opacity(ContinueWatchingCardShape.artworkDim)
                 HeroLogoArtwork(
                     references: item.artworkReferences(for: .logo),
                     asyncFallbackURL: seriesLogoFallback,
-                    maxWidth: width * ContinueWatchingCardShape.logoWidthFraction,
-                    maxHeight: stage * ContinueWatchingCardShape.logoHeightFraction,
+                    maxWidth: box.width,
+                    maxHeight: box.height,
                     alignment: .center,
                     // No background sample is taken per card (that would be an
                     // image analysis per card while scrolling), so the halo is
@@ -864,7 +867,10 @@ public struct PosterCardView: View {
                 ) {
                     seriesLogoTextFallback(width: width)
                 }
-                .frame(width: width, height: stage)
+                .frame(width: width, height: box.height)
+                // Sits between the picture's centre and the card's — see
+                // ``ContinueWatchingCardShape/logoCenter``.
+                .offset(y: height * ContinueWatchingCardShape.logoCenter - box.height / 2)
             }
             .frame(width: width, height: height)
         }
@@ -873,9 +879,14 @@ public struct PosterCardView: View {
 
     /// The readable stand-in shown while the logo resolves, and kept when there
     /// isn't one. Sized off the card so it holds up at any display density.
+    ///
+    /// The factor stands in for a *logo*, not for body text, so it tracks the
+    /// logo's own budget rather than the card: it was raised when the card shrank
+    /// so a show without artwork reads at the size it always did, exactly as a
+    /// show with artwork does.
     private func seriesLogoTextFallback(width: CGFloat) -> some View {
         seriesDisplayTitle
-            .font(.system(size: max(17, width * 0.082), weight: .bold, design: .rounded))
+            .font(.system(size: max(17, width * 0.092), weight: .bold, design: .rounded))
             .foregroundStyle(.white)
             .multilineTextAlignment(.center)
             .lineLimit(2)

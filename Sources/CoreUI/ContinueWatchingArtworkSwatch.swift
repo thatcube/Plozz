@@ -218,17 +218,17 @@ public struct ContinueWatchingArtworkSwatch: View {
     }
 
     /// The resume chip along the bottom — present in both, since it isn't what
-    /// the choice is about. Its scrim covers the band the chip sits in: on the
-    /// logo card that is the mirrored band under the picture, so the picture
-    /// itself stays clear.
+    /// the choice is about. The logo card's scrim runs from high in the picture
+    /// and finishes lighter, matching the real card.
     private func chip(width: CGFloat, height: CGFloat) -> some View {
-        let scrimHeight = style == .logoAndArtwork
+        let isLogo = style == .logoAndArtwork
+        let scrimHeight = isLogo
             ? height * (1 - ContinueWatchingCardShape.scrimStart)
             : height * 0.40
         return VStack(spacing: 0) {
             Spacer(minLength: 0)
             LinearGradient(
-                colors: [.clear, .black.opacity(0.6)],
+                colors: [.clear, .black.opacity(isLogo ? ContinueWatchingCardShape.scrimDepth : 0.6)],
                 startPoint: .top,
                 endPoint: .bottom
             )

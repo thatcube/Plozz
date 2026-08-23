@@ -1929,8 +1929,7 @@ struct HomeHeroView: View {
                     progress: item.resumeProgressFraction,
                     remainingText: item.resumeRemainingText,
                     seasonEpisodeText: HeroForegroundModelBuilder.seasonEpisodeButtonText(for: item),
-                    onLight: selected || colorScheme == .light,
-                    barHeight: 10
+                    onLight: selected || colorScheme == .light
                 )
                 .font(.system(size: 28, weight: .semibold))
             }

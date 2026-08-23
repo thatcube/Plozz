@@ -557,7 +557,11 @@ public struct MediaRowView: View {
         case .poster:
             return metrics.posterWidth
         case .landscape:
-            return metrics.landscapeCardSlotWidth
+            return metrics.cardSlotWidth(
+                for: .landscape,
+                cardStyle: .framed,
+                showsSeriesArtwork: showsSeriesArtwork
+            )
         case .episodeColumn:
             return EpisodeColumnCard.slotWidth
         }

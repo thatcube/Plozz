@@ -150,7 +150,8 @@ struct HomeSkeletonRowView: View {
                     ForEach(0..<cardCount(for: row), id: \.self) { _ in
                         SkeletonCardView(
                             style: cardStyle(for: kind),
-                            showsCaption: showsCaption(for: kind)
+                            showsCaption: showsCaption(for: kind),
+                            showsSeriesArtwork: usesSeriesArtwork(kind)
                         )
                         .frame(width: cardWidth(for: kind))
                     }
@@ -197,8 +198,23 @@ struct HomeSkeletonRowView: View {
     /// (`landscapeCardSlotWidth`), so pinning to the bare `landscapeWidth` would
     /// make the placeholders 32 pt too narrow and bunch them closer than the real
     /// Continue Watching / Libraries cards.
+    ///
+    /// A series-artwork Continue Watching card is narrower still (it stands
+    /// taller instead — see ``ContinueWatchingCardShape``), so it has to be asked
+    /// for by name or the row visibly re-pitches the moment content lands.
     private func cardWidth(for kind: HomeRowKind) -> CGFloat {
-        cardStyle(for: kind) == .landscape ? metrics.landscapeCardSlotWidth : metrics.posterWidth
+        guard cardStyle(for: kind) == .landscape else { return metrics.posterWidth }
+        return metrics.cardSlotWidth(
+            for: .landscape,
+            cardStyle: .framed,
+            showsSeriesArtwork: usesSeriesArtwork(kind)
+        )
+    }
+
+    /// Whether this row's real cards will carry show art with a logo over it —
+    /// which is a different card *shape*, not just different contents.
+    private func usesSeriesArtwork(_ kind: HomeRowKind) -> Bool {
+        kind == .continueWatching && continueWatchingShowsSeriesArtwork
     }
 
     /// How many placeholder cards to render for a row. We show the count the row

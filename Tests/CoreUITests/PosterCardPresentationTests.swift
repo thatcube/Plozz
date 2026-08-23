@@ -401,3 +401,76 @@ final class TextlessBackdropSuppressionTests: XCTestCase {
         )
     }
 }
+
+/// The whole value of persisting these answers is that they are present on the
+/// FIRST frame. Without it the row's first screenful renders before the router
+/// can reply, paints the server's titled art, memoizes "keep the logo", and then
+/// holds that for the session — correcting only when scrolling far enough tears
+/// the card down and rebuilds it, which is what made the fault look like it was
+/// fixing itself at random.
+@MainActor
+final class TextlessBackdropIndexTests: XCTestCase {
+
+    private var directory: URL!
+
+    override func setUp() {
+        super.setUp()
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("textless-index-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: directory)
+        super.tearDown()
+    }
+
+    private func anime(_ id: String) -> MediaItem {
+        MediaItem(id: id, title: "Anime \(id)", kind: .series, genres: ["Anime"])
+    }
+
+    /// A conclusive miss survives a relaunch, so the second launch suppresses the
+    /// logo on its first frame instead of a scroll later.
+    func testAConclusiveMissIsKnownOnTheNextLaunchsFirstFrame() {
+        let index = TextlessBackdropIndex(directory: directory)
+        let first = TextlessBackdropStore(store: index)
+        first.recordForTesting(.none, for: anime("s1"))
+        index.flushForTesting()
+
+        let relaunched = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertTrue(
+            relaunched.suppressesLogo(for: anime("s1")),
+            "the answer must be readable synchronously, before any async work can run"
+        )
+    }
+
+    /// The URL survives too, so the card leads with clean art from frame one
+    /// rather than painting the server's titled art and pinning it.
+    func testAResolvedBackdropIsKnownOnTheNextLaunchsFirstFrame() {
+        let url = URL(string: "https://tmdb.test/clean.jpg")!
+        let index = TextlessBackdropIndex(directory: directory)
+        let first = TextlessBackdropStore(store: index)
+        first.recordForTesting(.available(url), for: anime("s2"))
+        index.flushForTesting()
+
+        let relaunched = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertEqual(relaunched.backdrop(for: anime("s2")), url)
+        XCTAssertFalse(relaunched.suppressesLogo(for: anime("s2")))
+    }
+
+    /// Nothing on disk is still "not answered", never a conclusive miss — the
+    /// distinction the whole design rests on.
+    func testAnEmptyIndexAnswersUnknownRatherThanNone() {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertNil(store.backdrop(for: anime("s3")))
+        XCTAssertFalse(store.suppressesLogo(for: anime("s3")))
+    }
+
+    /// A corrupt file must degrade to "unknown" and re-resolve, not crash and not
+    /// be read as a miss that silently strips logos.
+    func testACorruptIndexIsTreatedAsUnknown() {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? Data("not json".utf8).write(to: directory.appendingPathComponent("index.json"))
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertFalse(store.suppressesLogo(for: anime("s4")))
+    }
+}

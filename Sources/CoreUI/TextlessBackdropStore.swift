@@ -63,8 +63,28 @@ public final class TextlessBackdropStore {
     /// First logo decision made for a show, kept for the session. See
     /// ``suppressesLogo(for:)``.
     private var logoDecisions: [String: Bool] = [:]
+    /// Where last session's answers are kept, so this session starts knowing them.
+    private let store: TextlessBackdropIndex
+    /// Whether ``outcomes`` has been seeded from disk yet. Deferred to first use
+    /// rather than done in `init` so constructing the shared instance costs
+    /// nothing, and the read lands with the first card that actually needs it.
+    private var didSeed = false
 
-    public init() {}
+    public init(store: TextlessBackdropIndex = .sharedIndex) {
+        self.store = store
+    }
+
+    /// Reads last session's answers in, once.
+    ///
+    /// Every public entry point calls this, because the whole value of the file is
+    /// that it is present on the *first frame*: the row's first screenful renders
+    /// before any async work can finish, and a card that guesses wrong there stays
+    /// wrong until it happens to be rebuilt.
+    private func seedIfNeeded() {
+        guard !didSeed else { return }
+        didSeed = true
+        outcomes = store.load()
+    }
 
     /// The textless backdrop for `item`'s show, or `nil` if none is known *yet*.
     ///
@@ -72,6 +92,7 @@ public final class TextlessBackdropStore {
     /// `nil` here is not "there is none" — it is "not in time", which the caller
     /// must treat as final for that card rather than waiting.
     public func backdrop(for item: MediaItem) -> URL? {
+        seedIfNeeded()
         guard case .available(let url) = outcomes[Self.key(for: item)] else { return nil }
         return url
     }
@@ -101,12 +122,17 @@ public final class TextlessBackdropStore {
     ///
     /// Body runs constantly on tvOS — every focus move re-renders the row — so a
     /// decision that could flip mid-life would take a logo off a card the viewer
-    /// is looking at. The first answer is memoized and kept. A card that renders
-    /// before the router replies therefore keeps its logo for this session and
-    /// corrects on the next launch, when the answer is already on disk. That is
-    /// the same bargain the artwork makes, and for the same reason: being right
-    /// one launch late is much cheaper than changing under the viewer.
+    /// is looking at. The first answer is memoized and kept.
+    ///
+    /// That memo is only safe because the answer is usually already there when the
+    /// first card renders: outcomes are persisted and read back synchronously (see
+    /// ``TextlessBackdropIndex``). Without that, the first screenful of every
+    /// launch would memoize "keep the logo" before the router could reply, and
+    /// then hold it — which is exactly what happened, and it looked like the
+    /// doubled cards fixing themselves at random, because they only corrected when
+    /// scrolling far enough rebuilt them.
     func suppressesLogo(for item: MediaItem) -> Bool {
+        seedIfNeeded()
         let key = Self.key(for: item)
         if let decided = logoDecisions[key] { return decided }
         let decision = outcomes[key] == Outcome.none && ContentClassifier.isAnime(item)
@@ -119,13 +145,22 @@ public final class TextlessBackdropStore {
     /// Called from the row's existing forward-window prefetch, so the work is
     /// already done by the time the card is reached. The first-ever launch is the
     /// only one that pays a network cost: the router memoizes the URL to disk —
-    /// *and memoizes the misses too*, which is what makes condition 1 above cheap
-    /// on every later launch.
+    /// *and memoizes the misses too* — and this store keeps its own copy of the
+    /// answer, which is what makes it available on the first frame rather than
+    /// merely fast.
     public func warm(for item: MediaItem, variant: ArtworkImageVariant) {
         #if canImport(UIKit)
+        seedIfNeeded()
         let key = Self.key(for: item)
         guard !attempted.contains(key) else { return }
         attempted.insert(key)
+        // Already answered last session, and re-read on the first frame. Warm the
+        // picture so the card can paint it, but don't re-ask the router.
+        if case .available(let known) = outcomes[key] {
+            ArtworkImageCache.shared.prefetch(known, variant: variant)
+            return
+        }
+        if outcomes[key] == Outcome.none { return }
         let seriesItem = Self.seriesItem(for: item)
         Task { [weak self] in
             var cancelled = false
@@ -156,6 +191,7 @@ public final class TextlessBackdropStore {
 
     private func record(_ outcome: Outcome, for key: String) {
         outcomes[key] = outcome
+        store.save(outcome, for: key)
     }
 
     /// Seeds an outcome without going near the network, so the decision table

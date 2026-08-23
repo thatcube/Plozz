@@ -90,6 +90,24 @@ public struct PosterCardView: View {
     private var hideThumbnail: Bool {
         !showsSeriesArtwork && spoilerSettings.shouldHideThumbnail(for: item)
     }
+
+    /// A poster-shaped episode card is masked by *narrowing its sources*, not by
+    /// blurring what it drew.
+    ///
+    /// Such a card never carries the episode's own frame to begin with: poster
+    /// style resolves an episode through the `.seriesPoster` placement, which is
+    /// the show's poster — the same image the series' own card uses, identical for
+    /// every episode of that show. Blurring it hid nothing and cost the viewer the
+    /// one thing a Recently Added row exists to say: which show this is.
+    ///
+    /// The single leak in that ladder is its `posterURL` last resort (on Jellyfin
+    /// the episode's own primary image), so the card draws
+    /// ``placeholderArtworkReferences`` instead — the series-only ladder — and
+    /// draws it sharp. Landscape and episode-column cards are NOT included: those
+    /// paint `.episodeThumbnail`, which really is the still, and keep their mask.
+    private var showsSpoilerSafePoster: Bool {
+        hideThumbnail && style == .poster && item.kind == .episode
+    }
     private var hideText: Bool { spoilerSettings.shouldHideText(for: item) }
 
     /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
@@ -541,6 +559,11 @@ public struct PosterCardView: View {
             )
         } else if showsSeriesArtwork {
             seriesArtwork
+        } else if showsSpoilerSafePoster {
+            // Series art, unblurred — see `showsSpoilerSafePoster`. Both spoiler
+            // modes land here: `.placeholder` asked for series art already, and
+            // `.blur` was only ever blurring series art too.
+            placeholderArtwork
         } else if hideThumbnail {
             switch spoilerSettings.mode {
             case .blur:

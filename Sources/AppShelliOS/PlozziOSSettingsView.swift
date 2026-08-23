@@ -2294,13 +2294,15 @@ private struct PlozziOSSpoilerSettingsView: View {
                     isOn: $model.settings.hideRatingsUntilWatched
                 )
             } footer: {
-                Text(
-                    """
-                    Episode titles, summaries, and artwork can be hidden until you \
-                    watch them. Hidden ratings are blurred on a title's page — tap \
-                    to reveal them.
-                    """
-                )
+                Text(LocalizedStringResource(
+                    "settings.spoilers.footer",
+                    defaultValue: """
+                        Episode titles, summaries, and artwork can be hidden until \
+                        you watch them. Hidden ratings are blurred on a title's \
+                        page — tap to reveal them.
+                        """,
+                    comment: "Footer under the Spoilers settings group on iPhone/iPad, explaining what the switches above it do."
+                ))
             }
         }
         .settingsPageSurface()

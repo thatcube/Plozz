@@ -826,7 +826,15 @@ public struct DetailInformationSections: View {
         // Never both: "Released 14 Apr 2019" already contains "Year 2019", and a
         // list of facts that restates one of its own entries reads as a bug.
         if let released = item.releaseDateLabel {
-            facts.append(InformationFact(id: "released", label: "Released", value: released))
+            facts.append(InformationFact(
+                id: "released",
+                label: LocalizedStringResource(
+                    "mediaDetail.fact.released",
+                    defaultValue: "Released",
+                    comment: "Label on a movie or episode's detail page beside the date it first came out. A noun-style field label ('Released: 14 Apr 2019'), not a verb or a status."
+                ),
+                value: released
+            ))
         } else if let year = item.productionYear {
             facts.append(InformationFact(id: "year", label: "Year", value: String(year)))
         }
@@ -862,7 +870,7 @@ public struct DetailInformationSections: View {
         ) ?? availability.regionCode
         var facts: [InformationFact] = []
         for event in availability.releaseEvents.sorted(by: { $0.date < $1.date }) {
-            let label: LocalizedStringKey
+            let label: LocalizedStringResource
             switch event.kind {
             case .premiere: label = "Premiere"
             case .theatricalLimited: label = "Limited Theatrical"
@@ -879,7 +887,7 @@ public struct DetailInformationSections: View {
         }
         func offerFact(
             id: String,
-            label: LocalizedStringKey,
+            label: LocalizedStringResource,
             _ matching: (TitleWatchOffer) -> Bool
         ) -> InformationFact? {
             let offers = availability.watchOffers.filter(matching)
@@ -981,7 +989,7 @@ public struct DetailInformationSections: View {
 
     private func appendVersionFact(
         id: String,
-        label: LocalizedStringKey,
+        label: LocalizedStringResource,
         value: String?,
         alwaysInclude: Bool = false,
         to facts: inout [InformationFact]
@@ -1003,7 +1011,7 @@ public struct DetailInformationSections: View {
 
     private func appendListFact(
         id: String,
-        label: LocalizedStringKey,
+        label: LocalizedStringResource,
         values: [String],
         to facts: inout [InformationFact]
     ) {
@@ -1336,7 +1344,12 @@ private struct InformationGroup: Identifiable {
 
 private struct InformationFact: Identifiable {
     let id: String
-    let label: LocalizedStringKey
+    /// `LocalizedStringResource`, not `LocalizedStringKey`, so a label that needs
+    /// a translator note can carry one. Several of these are ambiguous out of
+    /// context — "Released" reads as a past-tense verb as easily as a date label,
+    /// and "Rent" is a verb in English and a noun in half the languages we ship.
+    /// Bare string literals still work at the call site.
+    let label: LocalizedStringResource
     let value: String
     /// Service artwork for a "where to watch" row. A logo is read at a glance from
     /// across a room where a list of names has to be parsed, so where these exist

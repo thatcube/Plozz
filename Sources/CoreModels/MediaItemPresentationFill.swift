@@ -18,6 +18,7 @@ public extension MediaItem {
         if originalTitle?.isEmpty != false { originalTitle = donor.originalTitle }
         if overview?.isEmpty != false { overview = donor.overview }
         if productionYear == nil { productionYear = donor.productionYear }
+        if releaseDate == nil { releaseDate = donor.releaseDate }
         if officialRating?.isEmpty != false {
             officialRating = donor.officialRating
         }

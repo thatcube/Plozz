@@ -101,6 +101,51 @@ final class MediaRowPolicyTests: XCTestCase {
         )
     }
 
+    /// A poster card of an episode paints the SHOW's poster whatever the spoiler
+    /// mode — there is no episode frame on it to mask — so blur mode must warm the
+    /// series ladder here too, not the still it will never draw.
+    func testBlurModePrefetchesSeriesArtworkOnAPosterCard() {
+        let artwork = artworkURLs()
+        let candidates = MediaArtworkPrefetchPolicy.candidates(
+            for: episode(artwork: artwork, seriesPoster: artwork.seriesPoster),
+            style: .poster,
+            spoilerSettings: SpoilerSettings(isEnabled: true, mode: .blur)
+        )
+
+        XCTAssertEqual(candidates, [artwork.seriesPoster, artwork.fallback])
+        XCTAssertFalse(candidates.contains(artwork.still),
+                       "the episode's own frame is the one thing a poster card must never warm")
+    }
+
+    /// The mask is what changes by shape, not the rule: a landscape card really
+    /// does carry the still, so blur mode keeps warming it.
+    func testBlurModeStillPrefetchesTheStillOnALandscapeCard() {
+        let artwork = artworkURLs()
+        XCTAssertEqual(
+            MediaArtworkPrefetchPolicy.candidates(
+                for: episode(artwork: artwork, seriesPoster: artwork.seriesPoster),
+                style: .landscape,
+                spoilerSettings: SpoilerSettings(isEnabled: true, mode: .blur)
+            ),
+            [artwork.still, artwork.backdrop]
+        )
+    }
+
+    /// A watched episode is hidden by no rule, so a poster card goes back to the
+    /// ordinary ladder — the series poster first (a poster grid always wants the
+    /// vertical art), but with the episode's own image restored behind it.
+    func testWatchedEpisodeKeepsTheOrdinaryPosterLadder() {
+        let artwork = artworkURLs()
+        XCTAssertEqual(
+            MediaArtworkPrefetchPolicy.candidates(
+                for: episode(artwork: artwork, isPlayed: true, seriesPoster: artwork.seriesPoster),
+                style: .poster,
+                spoilerSettings: SpoilerSettings(isEnabled: true, mode: .blur)
+            ),
+            [artwork.seriesPoster, artwork.still, artwork.fallback]
+        )
+    }
+
     func testWatchedEpisodePrefetchesRealArtworkInPlaceholderMode() {
         let artwork = artworkURLs()
         XCTAssertEqual(
@@ -152,6 +197,35 @@ final class MediaRowPolicyTests: XCTestCase {
             ),
             [backdrop, poster]
         )
+    }
+
+    /// A movie is never a spoiler candidate, so a poster card draws its OWN
+    /// poster and the prefetcher must warm that. Guards the `.episode` clause in
+    /// the policy: without it, widening the spoiler rule to another kind (as
+    /// `shouldHideRatings` was widened to series and seasons) would have the
+    /// prefetcher warm series art for a card still drawing the item's own.
+    func testPosterPolicyLeavesNonEpisodesOnTheirOwnArtwork() {
+        let poster = URL(string: "https://example.com/movie-poster.jpg")!
+        let fallback = URL(string: "https://example.com/movie-fallback.jpg")!
+        let movie = MediaItem(
+            id: "movie-1",
+            title: "A Movie",
+            kind: .movie,
+            posterURL: poster,
+            fallbackArtworkURL: fallback
+        )
+
+        for mode in [SpoilerSettings.Mode.blur, .placeholder] {
+            XCTAssertEqual(
+                MediaArtworkPrefetchPolicy.candidates(
+                    for: movie,
+                    style: .poster,
+                    spoilerSettings: SpoilerSettings(isEnabled: true, mode: mode)
+                ),
+                [poster, fallback],
+                "mode: \(mode)"
+            )
+        }
     }
 
     private typealias ArtworkURLs = (still: URL, backdrop: URL, fallback: URL, seriesPoster: URL)

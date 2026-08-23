@@ -113001,9 +113001,6 @@
         }
       }
     },
-    "Episode titles, summaries, and artwork can be hidden until you watch them. Hidden ratings are blurred on a title's page — tap to reveal them." : {
-
-    },
     "Episodes" : {
       "comment" : "Section title used for search results listing individual episodes, the loose-episode rail on a series page, and downloaded TV seasons that have no season number.",
       "localizations" : {
@@ -131200,9 +131197,6 @@
           }
         }
       }
-    },
-    "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them." : {
-
     },
     "Hide watched movies, shows, and episodes" : {
       "localizations" : {
@@ -222892,9 +222886,6 @@
           }
         }
       }
-    },
-    "Released" : {
-
     },
     "Releases %@" : {
       "comment" : "Badge on an unaired episode card. %@ is a locale-formatted weekday or release date.",
@@ -383612,6 +383603,18 @@
         }
       }
     },
+    "mediaDetail.fact.released" : {
+      "comment" : "Label on a movie or episode's detail page beside the date it first came out. A noun-style field label ('Released: 14 Apr 2019'), not a verb or a status.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Released"
+          }
+        }
+      }
+    },
     "mediaDetail.ratings.reveal" : {
       "comment" : "Button over the blurred Ratings section of a title's detail page; pressing it reveals scores that spoiler protection is hiding.",
       "extractionState" : "extracted_with_value",
@@ -410424,6 +410427,30 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "音軌與字幕"
+          }
+        }
+      }
+    },
+    "settings.spoilers.description" : {
+      "comment" : "Description under the Spoilers heading in tvOS Settings, explaining what the switches below it do. 'Press' is the Apple TV remote's Select button.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them."
+          }
+        }
+      }
+    },
+    "settings.spoilers.footer" : {
+      "comment" : "Footer under the Spoilers settings group on iPhone/iPad, explaining what the switches above it do.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Episode titles, summaries, and artwork can be hidden until you watch them. Hidden ratings are blurred on a title's page — tap to reveal them."
           }
         }
       }

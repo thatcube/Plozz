@@ -946,6 +946,55 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         timeZone: .gmt
     ).year().month().day()
 
+    /// Snaps an absolute instant to the calendar day it was *meant* to be, for a
+    /// backend that means a bare day but transmits a timestamp.
+    ///
+    /// Jellyfin is that backend. Its scrapers take TMDb/TheTVDB's bare `AirDate`,
+    /// stamp it with the **server's** zone and convert to UTC
+    /// (`DateTime.SpecifyKind(airDate, .Local).ToUniversalTime()`), then serialise
+    /// with a hardcoded `Z`. A premiere of 14 April therefore leaves a UTC-5
+    /// server as `2019-04-14T05:00:00Z` and a UTC+10 server as
+    /// `2019-04-13T14:00:00Z` — and that second one is a different UTC *day*.
+    /// Reading the day straight off the wire shows everyone using an eastern
+    /// server the date a day early. It is a long-standing Jellyfin-side defect,
+    /// not something a client can ask the server to stop doing.
+    ///
+    /// A shifted midnight is always exactly the server's own offset away from the
+    /// true one, so the *nearest* midnight recovers the intended day from UTC−11:30
+    /// through UTC+12 — every inhabited zone but two, and the tie-break is what
+    /// buys the top of that range.
+    ///
+    /// The two it does not fix, and the one it costs:
+    /// - **UTC+12:45 … +14** (Chatham Islands, New Zealand in summer, Kiritimati)
+    ///   read a day early. They read a day early before this too — not a
+    ///   regression, just out of reach.
+    /// - **UTC−12** now reads a day *late*, where it used to be right. That is a
+    ///   real (if tiny) regression, and it is the price of the tie: a −12 midnight
+    ///   lands exactly 12 hours into the UTC day, the same distance as a +12 one,
+    ///   and resolving ties to the later day is what makes +12 correct. New
+    ///   Zealand, Fiji, Kamchatka and the Marshall Islands sit at +12; UTC−12 is
+    ///   Baker and Howland Islands, which nobody lives on. Taking that trade
+    ///   deliberately.
+    ///
+    /// Deliberately NOT for a value that is a genuine timestamp: rounding a real
+    /// 20:00 broadcast would move it to the next day. Use it only on fields
+    /// documented as a bare calendar day.
+    public static func calendarDayReleaseDate(snapping instant: Date?) -> Date? {
+        guard let instant else { return nil }
+        let day: TimeInterval = 24 * 60 * 60
+        let seconds = instant.timeIntervalSince1970
+        // `.down` rather than truncation so instants before 1970 floor the same
+        // direction as everything after it.
+        let dayStart = (seconds / day).rounded(.down) * day
+        return Date(
+            // `>=`, not `>`, and load-bearing: a midnight from a UTC+12 server sits
+            // exactly half a day in, so resolving the tie to the LATER day is what
+            // makes New Zealand right (and UTC−12 wrong). Pinned by the `+12` case
+            // in `MediaItemReleaseDateTests`.
+            timeIntervalSince1970: (seconds - dayStart) >= day / 2 ? dayStart + day : dayStart
+        )
+    }
+
     /// The episode's place in the run, comma-separated — `S4, E1`.
     ///
     /// A tighter sibling of ``subtitle`` for places that already join with `·`,

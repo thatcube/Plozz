@@ -30,6 +30,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
     private let variant: ArtworkImageVariant
     private let previewVariant: ArtworkImageVariant?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
+    private let onResolveReference: ((ArtworkReference?) -> Void)?
     private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
 
@@ -39,6 +40,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         variant: ArtworkImageVariant = .original,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        onResolveReference: ((ArtworkReference?) -> Void)? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -47,6 +49,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.onResolveReference = onResolveReference
         self.content = content
         self.placeholder = placeholder
     }
@@ -59,6 +62,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            onResolveReference: onResolveReference,
             content: content,
             placeholder: placeholder
         )
@@ -110,6 +114,7 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            onResolveReference: nil,
             content: ArtworkFillImage.init,
             placeholder: placeholder
         )
@@ -129,6 +134,7 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            onResolveReference: nil,
             content: ArtworkFillImage.init,
             placeholder: placeholder
         )
@@ -196,6 +202,10 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// small, and a second decode there would cost more than it saves.
     let previewVariant: ArtworkImageVariant?
     let asyncFallbackURL: (@Sendable () async -> URL?)?
+    /// Reports which candidate actually won, so a caller can react to WHICH art it
+    /// got and not merely that it got some. `nil` when the async fallback supplied
+    /// it, which is outside the ordered list.
+    let onResolveReference: ((ArtworkReference?) -> Void)?
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
 
@@ -217,6 +227,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         variant: ArtworkImageVariant,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)?,
+        onResolveReference: ((ArtworkReference?) -> Void)? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -225,6 +236,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.onResolveReference = onResolveReference
         self.content = content
         self.placeholder = placeholder
         // Seed synchronously from the decoded-image cache so an already-warmed card
@@ -282,6 +294,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             image = seeded.image
             resolved = true
             isPreviewQuality = false
+            onResolveReference?(references.indices.contains(seeded.index) ? references[seeded.index] : nil)
             if seeded.index == references.startIndex {
                 loadedKey = key
                 return
@@ -325,6 +338,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                onResolveReference?(reference)
                 return
             }
             // 2) Nothing usable from the provider — try the async fallback (TMDb).
@@ -335,6 +349,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                onResolveReference?(nil)
                 return
             }
             // Cancelled (the cell scrolled away, or the inputs changed): leave

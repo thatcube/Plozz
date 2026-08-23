@@ -636,7 +636,8 @@ final class HeroForegroundUIView: UIView {
             let fitted = HeroLogoFit.fittedSize(
                 for: image.size,
                 maxWidth: min(maxWidth, logoMaxWidth),
-                maxHeight: logoMaxHeight
+                maxHeight: logoMaxHeight,
+                coverage: currentLogo?.coverage ?? 1
             )
             let (w, h) = (fitted.width, fitted.height)
             logoImageView.frame = CGRect(x: leading, y: y - h, width: w, height: h)

@@ -125,3 +125,141 @@ final class PosterCardPresentationTests: XCTestCase {
     }
 }
 #endif
+
+/// Which artwork already has the show's name printed on it.
+///
+/// A poster is designed to be seen alone, so it is designed to name itself.
+/// Laying our own wordmark over one prints the title twice — which is what the
+/// "Let's go KAIKIGUMI" and "Black Cat and a Witch" cards were doing, because
+/// those series have no untitled wide art and the poster is all there is.
+final class TitleBearingArtworkTests: XCTestCase {
+
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    /// An episode's *series poster* names the show, so a card that falls back to
+    /// it must not name it again.
+    func testSeriesPosterCountsAsTitleBearing() {
+        let episode = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            seriesPosterURL: url("https://example.test/series-poster.jpg")
+        )
+        XCTAssertTrue(
+            PosterCardPresentation.titleBearingArtwork(for: episode)
+                .contains(.remote(url("https://example.test/series-poster.jpg")))
+        )
+    }
+
+    /// A backdrop is not key art and is left alone — this is the common case, and
+    /// the one that must keep its logo.
+    func testBackdropIsNotTitleBearing() {
+        let episode = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            seriesPosterURL: url("https://example.test/series-poster.jpg"),
+            backdropURL: url("https://example.test/backdrop.jpg"),
+            fallbackArtworkURL: url("https://example.test/series-backdrop.jpg")
+        )
+        let titled = PosterCardPresentation.titleBearingArtwork(for: episode)
+        XCTAssertFalse(titled.contains(.remote(url("https://example.test/backdrop.jpg"))))
+        XCTAssertFalse(titled.contains(.remote(url("https://example.test/series-backdrop.jpg"))))
+    }
+
+    /// A movie or series *is* the show, so its own poster is the one that names it.
+    func testOwnPosterCountsForAMovie() {
+        let movie = MediaItem(
+            id: "m", title: "A Movie", kind: .movie,
+            posterURL: url("https://example.test/poster.jpg")
+        )
+        XCTAssertTrue(
+            PosterCardPresentation.titleBearingArtwork(for: movie)
+                .contains(.remote(url("https://example.test/poster.jpg")))
+        )
+    }
+
+    /// An episode's OWN poster is its still, not the show's key art, so it names
+    /// nothing and must not suppress the logo.
+    func testEpisodeOwnPosterIsNotTreatedAsKeyArt() {
+        let episode = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            posterURL: url("https://example.test/episode-still.jpg")
+        )
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: episode)
+                .contains(.remote(url("https://example.test/episode-still.jpg")))
+        )
+    }
+
+    /// An item with no artwork at all suppresses nothing.
+    func testNoArtworkSuppressesNothing() {
+        let bare = MediaItem(id: "x", title: "Bare", kind: .series)
+        XCTAssertTrue(PosterCardPresentation.titleBearingArtwork(for: bare).isEmpty)
+    }
+}
+
+/// The blanket "an anime's backdrop is titled" rule was tried and reverted, and
+/// these pin the revert so it is not re-derived from the same reasoning. Whether
+/// a backdrop has the title burned into it is a fact about the pixels, and the
+/// genre/id test that stood in for it was wrong in both directions at once.
+final class AnimeBackdropKeepsItsLogoTests: XCTestCase {
+
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    private func animeEpisode() -> MediaItem {
+        MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            genres: ["Anime"],
+            fallbackArtworkURL: url("https://example.test/series-backdrop.jpg")
+        )
+    }
+
+    /// The false-positive half of the reverted rule. "Arcane" carries an anime
+    /// label but has an ordinary textless backdrop, and the rule took its logo
+    /// away — a card the viewer had no complaint about before.
+    func testAnimeLabelledBackdropIsNotTreatedAsTitled() {
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: animeEpisode())
+                .contains(.remote(url("https://example.test/series-backdrop.jpg")))
+        )
+    }
+
+    /// Recognised-by-provider-id was the wider half of the same test, and is
+    /// equally not evidence about the picture.
+    func testAnimeProviderIDBackdropIsNotTreatedAsTitled() {
+        let byID = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            fallbackArtworkURL: url("https://example.test/b.jpg"),
+            providerIDs: ["AniList": "12345"]
+        )
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: byID)
+                .contains(.remote(url("https://example.test/b.jpg")))
+        )
+    }
+
+    /// Live action was never affected, and still isn't — the rule that survives
+    /// is about slots, and a backdrop slot is a backdrop slot either way.
+    func testLiveActionBackdropIsUnaffected() {
+        let liveAction = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            genres: ["Drama"],
+            fallbackArtworkURL: url("https://example.test/series-backdrop.jpg")
+        )
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: liveAction)
+                .contains(.remote(url("https://example.test/series-backdrop.jpg")))
+        )
+    }
+
+    /// What does survive: an anime's *poster* still names itself, exactly as a
+    /// live-action one does. The slot rule is unchanged by the revert.
+    func testAnimePosterIsStillTitleBearing() {
+        let withPoster = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            genres: ["Anime"],
+            seriesPosterURL: url("https://example.test/series-poster.jpg")
+        )
+        XCTAssertTrue(
+            PosterCardPresentation.titleBearingArtwork(for: withPoster)
+                .contains(.remote(url("https://example.test/series-poster.jpg")))
+        )
+    }
+}

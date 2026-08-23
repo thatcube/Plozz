@@ -321,15 +321,158 @@ public enum ContinueWatchingCardShape {
     /// between the two lands it where a viewer looks for a wordmark.
     public static let logoCenter: CGFloat = 0.455
 
-    /// A flat dim laid over the whole card, picture and reflection alike.
+    /// A dim laid over the whole card, picture and reflection alike.
     ///
     /// Not a legibility scrim — the chip has its own, and it is shaped. This is
     /// even, and its job is to take the top off artwork that would otherwise
-    /// compete with what is written on it, so the logo and the chip read as
-    /// sitting *on* the card rather than fighting it. Flat on purpose: anything
-    /// with a shape to it would be a second gradient over the same pixels, and
-    /// the eye finds the edge where two gradients disagree.
+    /// compete with the logo written on it. Flat on purpose: anything with a shape
+    /// to it would be a second gradient over the same pixels, and the eye finds
+    /// the edge where two gradients disagree.
+    ///
+    /// This is the value for artwork bright enough to actually need it; see
+    /// ``artworkDim(logo:background:)`` for how much of it a given card spends.
     public static let artworkDim: CGFloat = 0.33
+
+    /// The share of the base dim that still applies to pure black artwork.
+    ///
+    /// Dark artwork does not need dimming. There is nothing bright in it competing
+    /// with the wordmark, so taking a third of the light off a frame that is
+    /// already at a tenth of full brightness buys no legibility at all — it just
+    /// drains the picture, which is what made a dark card (House of the Dragon,
+    /// Fallout, Andor) look flat and lifeless. Not zero, because a little keeps the
+    /// treatment consistent across a rail and stops the chip's own scrim from
+    /// being the only thing darkening the foot of the card.
+    static let darkArtworkDimScale: CGFloat = 0.38
+
+    /// Artwork luminance at which the dim is spent in full. Above this the picture
+    /// is bright enough that the logo is genuinely competing with it.
+    static let fullDimLuminance: Double = 0.45
+
+    /// How much further the dim may go for a logo that does not separate from the
+    /// artwork behind it — see ``artworkDim(logo:background:)``.
+    ///
+    /// Generous, because for some titles there is nothing else to be done: the
+    /// provider's logo and the provider's artwork are simply close in tone (Boba
+    /// Fett's metallic wordmark on its own warm tan scene), and no amount of
+    /// sizing or shadow fixes that. Darkening what sits behind it is the only
+    /// lever left, so where it is genuinely needed it is spent properly.
+    public static let artworkDimBoost: CGFloat = 0.24
+
+    /// How far apart in brightness a logo and its backdrop must be to count as
+    /// separated **on a card**.
+    ///
+    /// Stricter than the hero's own threshold, and for the same reason as
+    /// ``dimColorThreshold``: this wordmark is small and read across a room, where
+    /// a gap that reads clearly at hero scale does not. The hero's looser value
+    /// scored Boba Fett as comfortably separated when it was the hardest card on
+    /// the row to read.
+    static let dimLuminanceThreshold: Double = 0.35
+
+    /// How different in hue a logo and its backdrop must be to count as separated,
+    /// as a ``HeroLogoAnalysis/perceptualDistance``.
+    ///
+    /// Deliberately stricter than the hero's own threshold. A hero wordmark is
+    /// large and close; a card's is small and read across a room, and at that size
+    /// brightness carries far more of the separation than hue does. Leaving the
+    /// hero's looser value here declared a gold logo on tan mist "separated" when
+    /// it plainly was not.
+    static let dimColorThreshold: Double = 1.0
+
+    /// How much bright ink a logo needs before it counts as carrying its own
+    /// contrast and stops earning any help.
+    ///
+    /// Deliberately demanding — nearly half the ink. A logo has to be *mostly*
+    /// bright before it is excused entirely; a keyline or a set of highlights
+    /// earns a partial reprieve rather than a full one. Set at a third instead,
+    /// every logo with any pale detail was let off, including metallic art whose
+    /// highlights read as bright to a pixel counter but not to a viewer across a
+    /// room.
+    static let brightInkForSelfContrast: Double = 0.45
+
+    /// The slice of the artwork the logo actually sits on, in the picture's own
+    /// normalized coordinates. Sampling here rather than over the whole frame is
+    /// what makes the measurement mean anything: a card can be bright at the edges
+    /// and dark behind its wordmark, or the reverse.
+    public static let logoSampleRegion = CGRect(x: 0.12, y: 0.29, width: 0.76, height: 0.45)
+
+    /// The dim to use behind a resolved logo, given what the artwork behind it
+    /// actually looks like.
+    ///
+    /// This is the lever that separates a logo from its backdrop, and a better one
+    /// than a halo: the dim sits *between* artwork and logo, so it darkens only
+    /// what is behind — where a halo draws something visible around the
+    /// letterforms and reads as an outline stuck on the logo.
+    ///
+    /// It is spent only where it buys something. Guessing from the logo alone does
+    /// not work, and the failures are instructive: a bold yellow wordmark is
+    /// mid-tone whether it sits on a night sky (Fallout, Pokémon — perfectly
+    /// legible, and dimming those only muddied artwork that was fine) or on its
+    /// own orange fire (Oppenheimer — genuinely hard to read). Same logo tone,
+    /// opposite needs. Only the **gap** between the two tells them apart.
+    ///
+    /// A logo separates when it differs in *either* brightness or hue, so both are
+    /// measured and the better one wins — which is what leaves a saturated logo on
+    /// an equally bright but differently coloured backdrop alone.
+    ///
+    /// Measured against the artwork **as it is**, not as this function is about to
+    /// dim it. Comparing against the dimmed version is circular: the dim itself
+    /// manufactures a brightness gap, so every logo then looks safely separated and
+    /// the boost never fires. Whether a logo and its artwork are alike is a fact
+    /// about the pair, not about how far we have already darkened one of them.
+    ///
+    /// The base is then scaled by how bright the artwork is (see
+    /// ``darkArtworkDimScale``), because dimming a dark picture costs it the little
+    /// light it has and buys nothing. The *boost* is not scaled: a logo that
+    /// vanishes into its backdrop needs the help whether that backdrop is bright
+    /// or dark.
+    public static func artworkDim(
+        logo: ResolvedLogoTone?,
+        background: HeroBackgroundSample?
+    ) -> CGFloat {
+        guard let logo, let background else { return artworkDim }
+        return artworkDim * brightnessScale(background.luminance)
+            + artworkDimBoost * CGFloat(1 - separation(logo: logo, background: background))
+    }
+
+    /// How clearly a logo stands apart from the artwork behind it: 0 when it is
+    /// lost in the picture, 1 when it is comfortably clear.
+    ///
+    /// The single measure both remedies read from, so dimming the backdrop and
+    /// lifting the logo can never disagree about *whether* a card needs help —
+    /// only about which lever suits it.
+    public static func separation(
+        logo: ResolvedLogoTone,
+        background: HeroBackgroundSample
+    ) -> Double {
+        let lumaGap = abs(logo.luminance - background.luminance)
+        let colorGap = HeroLogoAnalysis.perceptualDistance(
+            r1: logo.red, g1: logo.green, b1: logo.blue,
+            r2: background.red, g2: background.green, b2: background.blue
+        )
+        // A logo's mean tone hides its most legible feature. The white keyline
+        // around a pastel wordmark reads instantly, but averaged into the pink
+        // fill it registers as "pastel logo on pastel picture" and earns a heavy
+        // dim it never needed. Ink bright on its own counts as separation in its
+        // own right.
+        let selfContrast = min(1, logo.brightInk / brightInkForSelfContrast)
+        // Whichever axis separates them best decides; 1 means comfortably clear on
+        // at least one of them, and so no help needed.
+        return min(1, max(
+            selfContrast,
+            max(
+                lumaGap / dimLuminanceThreshold,
+                colorGap / dimColorThreshold
+            )
+        ))
+    }
+
+    /// How much of the base dim artwork of this brightness should receive, eased so
+    /// two similar cards can't land on visibly different backdrops.
+    static func brightnessScale(_ luminance: Double) -> CGFloat {
+        let t = min(1, max(0, luminance / fullDimLuminance))
+        let eased = t * t * (3 - 2 * t)
+        return darkArtworkDimScale + (1 - darkArtworkDimScale) * CGFloat(eased)
+    }
 }
 
 /// The reflection's own constants, and the gradient built from them.

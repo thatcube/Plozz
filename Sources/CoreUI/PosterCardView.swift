@@ -51,6 +51,15 @@ public struct PosterCardView: View {
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
+    /// This card's resolved logo tone, and the tone of the artwork it sits on.
+    /// Together they decide how far the artwork is dimmed behind it — see
+    /// ``ContinueWatchingCardShape/artworkDim(logo:background:)``. Either being
+    /// `nil` (still resolving, or a card with no logo) simply means the base dim.
+    /// Whether the artwork this card ended up with already has the show's name
+    /// printed on it, in which case the card must not print it again.
+    @State private var artworkAlreadyCarriesTitle = false
+    @State private var logoTone: ResolvedLogoTone?
+    @State private var artworkTone: HeroBackgroundSample?
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.plozzMetrics) private var metrics
     /// Per-profile card presentation (framed glass card vs borderless artwork).
@@ -819,6 +828,13 @@ public struct PosterCardView: View {
             maxAspectRatio: posterAspectGuard,
             variant: artworkVariant,
             asyncFallbackURL: seriesArtworkFallback,
+            onResolveReference: { reference in
+                // A `nil` reference means the metadata router supplied the art
+                // late, from outside the ordered list. That path asks TMDb first
+                // and TMDb is ranked textless-backdrop-first, so it is the least
+                // likely candidate of all to carry a title — treat it as clean.
+                artworkAlreadyCarriesTitle = reference.map(titleBearingArtwork.contains) ?? false
+            },
             // The card is taller than the picture, so the picture is laid in at
             // its own shape and the band left underneath is filled with a
             // mirrored continuation of it — never by cropping the sides down to
@@ -829,13 +845,19 @@ public struct PosterCardView: View {
         ) {
             neutralPlaceholder
         }
-        .overlay { seriesLogo }
+        // A logo drawn over art that already shows the title says it twice — see
+        // ``titleBearingArtwork``.
+        .overlay { if !artworkAlreadyCarriesTitle { seriesLogo } }
         // The show's name moved onto the artwork (as a logo, which carries no text
         // for VoiceOver), and out of the caption — which now reads "S2 · E5". Name
         // the artwork so the card still announces WHAT it is, not just where in it
         // you are.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(seriesDisplayTitle)
+    }
+
+    private var titleBearingArtwork: Set<ArtworkReference> {
+        PosterCardPresentation.titleBearingArtwork(for: item)
     }
 
     /// For an episode this is the spoiler-safe series ladder (never the episode's
@@ -869,11 +891,16 @@ public struct PosterCardView: View {
             let stage = height * ContinueWatchingCardShape.mirrorLine
             let box = ContinueWatchingCardShape.logoBox(cardWidth: width, stage: stage, edgeInset: metrics.resumeChipInset)
             ZStack(alignment: .top) {
-                // An even dim over the whole card — see
-                // ``ContinueWatchingCardShape/artworkDim``. It was 0.22 and read
-                // as the logo competing with busy artwork; a few points more and
-                // both the logo and the chip sit clearly on top of the picture.
-                Color.black.opacity(ContinueWatchingCardShape.artworkDim)
+                // An even dim over the whole card, deepened when the resolved
+                // logo turns out to be the kind that vanishes into artwork — see
+                // ``ContinueWatchingCardShape/artworkDim(forLogoLuminance:)``.
+                // Animated because the logo arrives asynchronously, and a backdrop
+                // that steps darker the moment it lands would read as a flicker.
+                Color.black.opacity(
+                    ContinueWatchingCardShape.artworkDim(logo: logoTone, background: artworkTone)
+                )
+                .animation(.easeOut(duration: 0.25), value: logoTone)
+                .animation(.easeOut(duration: 0.25), value: artworkTone)
                 HeroLogoArtwork(
                     references: item.artworkReferences(for: .logo),
                     asyncFallbackURL: seriesLogoFallback,
@@ -886,7 +913,12 @@ public struct PosterCardView: View {
                     // every mid-to-dark logo. Down, always: it reads as depth
                     // rather than as an effect, and the scrim above already
                     // darkens the artwork under the logo.
-                    haloStyle: .alwaysDark
+                    haloStyle: .alwaysDark,
+                    // Lets a logo that is losing against its own picture lift
+                    // itself, which is what dimming the backdrop cannot do once
+                    // the backdrop is already dark — see ``LogoToneLift``.
+                    logoNeedsHelp: seriesLogoNeedsHelp,
+                    onResolve: { logoTone = $0 }
                 ) {
                     seriesLogoTextFallback(width: width)
                 }
@@ -898,6 +930,32 @@ public struct PosterCardView: View {
             .frame(width: width, height: height)
         }
         .allowsHitTesting(false)
+        .task(id: seriesArtworkSampleKey) {
+            // Samples the SAME decoded image the card is displaying (the
+            // `.landscapeCard` variant), so this reads pixels that are already
+            // resident rather than commissioning a bigger decode. Results are
+            // memoized by reference + region and concurrent requests coalesced
+            // (see ``HeroBackgroundSampler``), so a rail that scrolls back and
+            // forth pays for each card once.
+            artworkTone = await HeroBackgroundSampler.sample(
+                references: seriesArtworkReferences,
+                region: ContinueWatchingCardShape.logoSampleRegion,
+                variant: artworkVariant
+            )
+        }
+    }
+
+    /// How badly this card's logo is losing against its own artwork, once both
+    /// have been measured. Shared with the backdrop dim so the two remedies always
+    /// agree about whether there is a problem.
+    private var seriesLogoNeedsHelp: Double? {
+        guard let logoTone, let artworkTone else { return nil }
+        return 1 - ContinueWatchingCardShape.separation(logo: logoTone, background: artworkTone)
+    }
+
+    /// Re-samples only when the artwork this card shows actually changes.
+    private var seriesArtworkSampleKey: String {
+        seriesArtworkReferences.map(\.privacySafeIdentity).joined(separator: "|")
     }
 
     /// The readable stand-in shown while the logo resolves, and kept when there
@@ -976,6 +1034,38 @@ public struct PosterCardView: View {
 /// SwiftUI. Folders retain the shared poster footprint/focus mechanics but never
 /// look like playable, unwatched media.
 enum PosterCardPresentation {
+    /// The candidates that are **key art** rather than a clean backdrop, and so
+    /// almost certainly have the show's name set into them already.
+    ///
+    /// A poster is designed to be seen alone, which means it is designed to name
+    /// itself. Laying our own wordmark over one prints the title twice.
+    ///
+    /// Deliberately decided by *provenance* rather than by looking at the picture,
+    /// and only for the poster slots — the one place where "this art names itself"
+    /// is a property of the slot rather than a guess about the show.
+    ///
+    /// Widening it to "every backdrop belonging to an anime" was tried and
+    /// reverted. Whether a given backdrop has the title burned into it is a fact
+    /// about the *pixels*, and no metadata field stands in for it: the genre/id
+    /// test it was keyed on ("Anime") was wrong in both directions at once —
+    /// Arcane matched and lost a logo it should have kept, while "Let's go
+    /// KAIKIGUMI" and "Black Cat and a Witch", the two shows the rule existed to
+    /// fix, did not match and went on doubling. A test that mislabels both the
+    /// cases it was aimed at and the cases it wasn't is not a signal, so the card
+    /// keeps its logo unless the art came from a slot that is titled by
+    /// definition.
+    static func titleBearingArtwork(for item: MediaItem) -> Set<ArtworkReference> {
+        var titled: Set<ArtworkReference> = []
+        if let poster = item.seriesPosterURL { titled.insert(.remote(poster)) }
+        // A movie or series shows its own art, where `posterURL` is the poster.
+        if item.kind != .episode, let poster = item.posterURL { titled.insert(.remote(poster)) }
+        item.artworkSelections
+            .filter { $0.placement == .seriesPoster || $0.placement == .poster }
+            .flatMap(\.references)
+            .forEach { titled.insert($0) }
+        return titled
+    }
+
     /// Which title a series-artwork card draws over its artwork.
     enum SeriesArtworkTitleSource: Equatable {
         /// The owning series' name (`parentTitle`).

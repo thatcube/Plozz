@@ -243,6 +243,52 @@ public enum MediaItemMerger {
             }
         }
 
+        // Rescue an episode that carries NO identity at all onto its identified
+        // twin.
+        //
+        // Every episode key in ``MediaItemIdentity/identities(for:)`` is built from
+        // an external id, and the title fallback there is movie-only. An episode
+        // whose backend supplied no ids — a plain file share derives everything
+        // from the filename — therefore produces ZERO merge keys and can never
+        // join anything, so a show held on both a managed server and a share
+        // showed twice in Continue Watching: the server's card carrying the
+        // progress, and the share's carrying none.
+        //
+        // Deliberately one-directional and unambiguous:
+        //   * only an episode with no identity of its own is ever moved, so two
+        //     id-bearing episodes that stayed apart (because their ids genuinely
+        //     disagree) are never forced together here;
+        //   * it joins on `(series title, season, episode)`, which identifies an
+        //     episode far more tightly than the title+year movies already merge
+        //     on — the season and episode numbers have to agree too;
+        //   * and only when every identified episode under that key is ALREADY a
+        //     single component. Two different shows sharing a title ("The Office"
+        //     UK vs US) both carry ids and so sit in two components, and the
+        //     orphan is then left alone rather than guessed into one of them.
+        var episodesByTitleKey: [String: [Int]] = [:]
+        var identityLessEpisodes: Set<Int> = []
+        for index in items.indices {
+            guard let key = episodeTitleKey(for: items[index]) else { continue }
+            if MediaItemIdentity.identities(for: items[index]).isEmpty {
+                identityLessEpisodes.insert(index)
+            }
+            episodesByTitleKey[key, default: []].append(index)
+        }
+        // Sorted so the unions are order-independent rather than following the
+        // dictionary's hash order.
+        for key in episodesByTitleKey.keys.sorted() {
+            let group = episodesByTitleKey[key] ?? []
+            let orphans = group.filter { identityLessEpisodes.contains($0) }
+            guard let firstOrphan = orphans.first else { continue }
+            // Two id-less copies of one episode are each other's only evidence;
+            // collapsing them is what stops a second share adding a third card.
+            for orphan in orphans.dropFirst() { union(firstOrphan, orphan) }
+            let identified = group.filter { !identityLessEpisodes.contains($0) }
+            guard let anchor = identified.first else { continue }
+            guard Set(identified.map { find($0) }).count == 1 else { continue }
+            union(anchor, firstOrphan)
+        }
+
         var membersByRoot: [Int: [Int]] = [:]
         for index in items.indices {
             membersByRoot[find(index), default: []].append(index)
@@ -268,6 +314,22 @@ public enum MediaItemMerger {
             }
         }
         return output
+    }
+
+    /// The `(series title, season, episode)` key an id-less episode is rescued on,
+    /// or `nil` when any part is missing so a sparse row is never keyed on a guess.
+    ///
+    /// The series title comes from ``MediaItem/parentTitle``, which every backend
+    /// fills for an episode — Jellyfin's `SeriesName`, Plex's `grandparentTitle`,
+    /// and the share parser's folder-derived series name.
+    static func episodeTitleKey(for item: MediaItem) -> String? {
+        guard item.kind == .episode,
+              let season = item.seasonNumber,
+              let episode = item.episodeNumber,
+              let series = item.parentTitle else { return nil }
+        let normalized = MediaItemIdentity.normalizedTitle(series)
+        guard !normalized.isEmpty else { return nil }
+        return "\(normalized)\u{1F}s\(season)e\(episode)"
     }
 
     /// Partitions one union component into sub-groups of mutually-plausible items,

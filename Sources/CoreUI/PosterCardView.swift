@@ -532,7 +532,20 @@ public struct PosterCardView: View {
             && (item.cardRuntimeText != nil
                 || item.resumeProgressFraction != nil
                 || downloadState != nil
-                || showsActionsMenu)
+                || showsActionsMenu
+                // A resumable item whose duration was never learned has NEITHER a
+                // runtime nor a fraction — a share only learns one by playing the
+                // file once, and a record written before that carries neither. The
+                // item is still genuinely resumable, and dropping the chip left a
+                // bare poster in Continue Watching: no progress, no play glyph and
+                // no episode designation, next to the same episode's fully-dressed
+                // card from another server.
+                || item.resumePosition != nil
+                // The designation alone is worth a chip on a series-artwork card,
+                // where it is the only thing naming the episode. `ResumeChipOverlay`
+                // already draws exactly this case (see its `hasBottomChrome`); this
+                // outer gate simply never let it through.
+                || (showsSeriesArtwork && item.seasonEpisodeLabel != nil))
     }
 
     /// The shared resume affordance — identical to the episode card's overlay.

@@ -617,4 +617,27 @@ final class ShareMediaParserTests: XCTestCase {
         )
         XCTAssertEqual(ep?.series, "The Witcher Blood Origin")
     }
+
+    /// A real-world path from a share whose show was missing from the synthesized
+    /// "TV Shows" library and whose episode reached Continue Watching through the
+    /// raw-file fallback (no series linkage, so no "Go to Show").
+    ///
+    /// Pinned because classification was the first suspect and is **not** the
+    /// cause: this parses exactly right, so an absent show has to be explained by
+    /// the scan index, not by the parser. Covers the release-tag suffix and the
+    /// double space before it, both of which sit between the episode marker and
+    /// the end of the name.
+    func testSpacedTitleWithBracketedReleaseTagIsAnEpisode() {
+        let rel = "TV Shows/Cobra Kai/Season 1/Cobra Kai S01E01 Ace Degenerate  [2160p NV 10bit Joy].mkv"
+        let ep = episode(rel)
+        XCTAssertEqual(ep?.series, "Cobra Kai")
+        XCTAssertEqual(ep?.season, 1)
+        XCTAssertEqual(ep?.episode, 1)
+        XCTAssertEqual(ep?.title, "Ace Degenerate", "the release tag is not the episode title")
+        XCTAssertEqual(ShareCatalogID.seriesKey(fromTitle: ep?.series ?? ""), "cobra-kai")
+        XCTAssertFalse(
+            ShareScanner.isAnimePath(rel),
+            "a live-action show under TV Shows must not be routed to the Anime library"
+        )
+    }
 }

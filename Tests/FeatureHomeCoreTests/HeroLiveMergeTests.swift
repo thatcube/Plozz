@@ -297,6 +297,40 @@ final class HeroLiveMergeTests: XCTestCase {
         XCTAssertEqual(pagedAway.items.map(\.id), ["ep-2"])
     }
 
+    func testAPinnedSlideTakesTheNewerRecordEvenIfTheViewerNeverPagesAway() {
+        // The deferral has to converge on its own. It is bounded by a counter that
+        // deferring itself must advance — a pinned slot whose fresh counterpart
+        // merely differs by id never *misses*, so counting only absences would let
+        // it hold a superseded episode for the whole session. That is the case a
+        // one-slide carousel, or auto-advance switched off, produces.
+        var watched = item("ep-1", title: "Chapter One", kind: .episode)
+        watched.seriesID = "show-9"
+        watched.parentTitle = "The Show"
+        var next = item("ep-2", title: "Chapter Two", kind: .episode)
+        next.seriesID = "show-9"
+        next.parentTitle = "The Show"
+
+        var showing = [watched]
+        var misses: [String: Int] = [:]
+        var pinned: Set<String> = ["ep-1"]
+        for _ in 0...(HeroLiveMerge.retentionGrace + HeroLiveMerge.pinnedDeferralLimit) {
+            let merged = HeroLiveMerge.merge(
+                showing: showing,
+                fresh: [next],
+                limit: 1,
+                pinnedItemIDs: pinned,
+                misses: misses
+            )
+            showing = merged.items
+            misses = merged.misses
+            // The viewer never moves: whatever is fronted stays fronted.
+            pinned = Set(showing.map(\.id))
+        }
+
+        XCTAssertEqual(showing.map(\.id), ["ep-2"])
+    }
+
+
     // MARK: - Bounded retention
 
     func testATitleTheCurationStopsOfferingIsRetiredAfterItsGrace() {

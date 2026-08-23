@@ -66,8 +66,14 @@ public enum HeroLiveMerge {
         /// Ids that left: evicted to make room, retained past their grace, or
         /// collapsed into a slide of the same title.
         public var retired: [String]
-        /// How many consecutive curations have now failed to offer each retained
-        /// title. Hand this back to the next merge.
+        /// How many consecutive folds each slot has not accepted — because the
+        /// curation stopped offering the title, or because the slot was pinned and
+        /// the change was deferred. Hand this back to the next merge.
+        ///
+        /// Deferrals have to count too, or the ceiling that bounds pinning can
+        /// never be reached: deferring is itself what would stop the counter
+        /// moving, so a pinned slot whose fresh counterpart merely differs by id
+        /// would hold the superseded record forever.
         public var misses: [String: Int]
 
         public init(
@@ -162,6 +168,7 @@ public enum HeroLiveMerge {
                 // either one out from under it strands the transition, so the
                 // collapse waits for the swipe to finish.
                 guard !effectivePinned.contains(merged[duplicate].id) else {
+                    nextMisses[item.id] = (misses[item.id] ?? 0) + 1
                     placed.append(tokens)
                     merged.append(item)
                     continue
@@ -179,11 +186,13 @@ public enum HeroLiveMerge {
             }
             if let match {
                 claimed[match] = true
-                let upgraded = refreshed(
-                    item,
-                    from: fresh[match],
-                    isPinned: effectivePinned.contains(item.id)
-                )
+                let isPinned = effectivePinned.contains(item.id)
+                let upgraded = refreshed(item, from: fresh[match], isPinned: isPinned)
+                // A pin that declined the fresh record has to age, exactly like an
+                // absence, or it outlasts the ceiling meant to bound it.
+                if upgraded.id != fresh[match].id {
+                    nextMisses[item.id] = (misses[item.id] ?? 0) + 1
+                }
                 placed.append(HeroDedupe.tokens(for: upgraded))
                 merged.append(upgraded)
                 continue

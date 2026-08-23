@@ -96,14 +96,14 @@ final class HeroRandomRollStoreTests: XCTestCase {
         XCTAssertNotEqual(key(hideWatched: true), key(hideWatched: false))
     }
 
-    func testInvalidatingForcesAFreshDraw() async {
-        let store = HeroRandomRollStore()
-
-        _ = await store.items(for: key()) { [self.item("r1")] }
-        await store.invalidate()
-        let second = await store.items(for: key()) { [self.item("r2")] }
-
-        XCTAssertEqual(second.map(\.id), ["r2"])
+    func testADifferentProfileScopeDrawsAgain() {
+        // Scope lives in the key rather than needing an explicit invalidation,
+        // which a shell can forget to wire up and which can lose a race against
+        // the curation the same scope change kicks off.
+        XCTAssertNotEqual(
+            HeroRandomRollStore.Key(libraries: [], limit: 8, hideWatched: true, scope: "a"),
+            HeroRandomRollStore.Key(libraries: [], limit: 8, hideWatched: true, scope: "b")
+        )
     }
 
     func testOverlappingCurationsShareOneDraw() async {
@@ -127,8 +127,10 @@ final class HeroRandomRollStoreTests: XCTestCase {
         await gate.open()
 
         let results = await [first, second]
-        XCTAssertEqual(results[0].map(\.id), ["r1"])
-        XCTAssertEqual(results[1].map(\.id), ["r1"])
+        // Which caller wins the race to start the draw is not the property — that
+        // both get the SAME one, from a single fan-out, is.
+        XCTAssertEqual(results[0].map(\.id), results[1].map(\.id))
+        XCTAssertEqual(results[0].count, 1)
         let count = await rolls.value
         XCTAssertEqual(count, 1)
     }

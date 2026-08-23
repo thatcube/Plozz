@@ -60,9 +60,6 @@ public actor HeroRandomRollStore {
     private var key: Key?
     private var items: [MediaItem] = []
     private var rolledAt = Date.distantPast
-    /// Bumped by ``invalidate()`` so a draw already in flight when the hero's
-    /// basis changed cannot land afterwards and repopulate the store.
-    private var generation = 0
     /// Which request started most recently. A draw only caches if it is still the
     /// newest one: two curations with *different* keys genuinely race, and the
     /// slower/older one must not overwrite the newer one's answer.
@@ -90,40 +87,32 @@ public actor HeroRandomRollStore {
         if let current = reusable(for: key, now: now) { return current }
         if let existing = inFlight[key] { return await existing.value }
 
-        let startedGeneration = generation
         requestSeq &+= 1
         let startedSeq = requestSeq
         latestSeq = startedSeq
+        // Deliberately NOT cancelled when the caller is.
+        //
+        // `Task {}` doesn't inherit cancellation, so a torn-down curation does wait
+        // out the fan-out. Propagating cancellation looks like the fix and is
+        // worse: this task is shared by every waiter on the key, the loader reports
+        // cancellation as an empty draw (`HeroRandomLibraryLoader` returns `[]`),
+        // and an empty draw is never cached — so one curation being superseded
+        // would hand the curation that actually LANDS an empty Random bucket, and
+        // leave nothing behind for the next one either. Under a burst of
+        // invalidations the Random source would contribute nothing at all, which is
+        // the exact inverse of retaining a draw.
+        //
+        // The waiting is also not wasted: what this task produces is precisely what
+        // the superseding curation reuses.
         let task = Task { await roll() }
         inFlight[key] = task
-        // `Task {}` does not inherit cancellation, and the draw is a fan-out across
-        // every visible library on every connected server. Without this, tearing
-        // down a curation left that work running to completion — the caller's own
-        // `Task.isCancelled` checks can't run until it returns.
-        let rolled = await withTaskCancellationHandler {
-            await task.value
-        } onCancel: {
-            task.cancel()
-        }
+        let rolled = await task.value
         if inFlight[key] == task { inFlight[key] = nil }
-        guard !rolled.isEmpty,
-              generation == startedGeneration,
-              latestSeq == startedSeq else { return rolled }
+        guard !rolled.isEmpty, latestSeq == startedSeq else { return rolled }
         self.key = key
         self.items = rolled
         self.rolledAt = now
         return rolled
-    }
-
-    /// Discards the draw, so the next curation rolls again. Used when the hero's
-    /// whole basis changes (a different profile, a different set of servers).
-    public func invalidate() {
-        key = nil
-        items = []
-        rolledAt = .distantPast
-        generation &+= 1
-        for task in inFlight.values { task.cancel() }
-        inFlight.removeAll()
     }
 
     private func reusable(for key: Key, now: Date) -> [MediaItem]? {

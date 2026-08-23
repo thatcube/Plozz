@@ -738,6 +738,14 @@ struct PlozziOSHomeView: View {
         // configuration rather than reshaping the old set, and re-applying the
         // current watched intent so a finished title can't be retained.
         let configuration = HeroConfigurationKey(settings: settings)
+        let freshIsAuthoritative = HeroEmptyCuration.isAuthoritative(
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: content.watchlist,
+            recentlyAdded: content.latest,
+            randomLibraries: randomLibraries,
+            seerConnected: appModel.seerService.isConfigured
+        )
         let foldsIntoLoadedSet = heroCuratedConfiguration == configuration
         let showing = foldsIntoLoadedSet
             ? curator.reconcile(
@@ -752,22 +760,20 @@ struct PlozziOSHomeView: View {
             limit: settings.maxItems,
             pinnedItemIDs: heroPinnedItemIDs,
             misses: foldsIntoLoadedSet ? heroRetainedMisses : [:],
-            freshIsAuthoritative: HeroEmptyCuration.isAuthoritative(
-                settings: settings,
-                continueWatching: content.continueWatching,
-                watchlist: content.watchlist,
-                recentlyAdded: content.latest,
-                randomLibraries: randomLibraries,
-                seerConnected: appModel.seerService.isConfigured
-            )
+            freshIsAuthoritative: freshIsAuthoritative
         )
         heroCuratedConfiguration = configuration
         heroRetainedMisses = merge.misses
         if merge.items != heroItems { heroItems = merge.items }
         // What the next launch may repaint instead of a skeleton, re-checked
         // against the final payload (see `HeroDurableSnapshot`).
+        // Gated on authority, not on the carousel being empty. `merge.items` is
+        // empty whenever nothing was showing and the curation returned nothing —
+        // including a transient failure right after a settings change, when
+        // `showing` is deliberately empty — and deleting the snapshot there is the
+        // very thing `saveHero`'s empty-write refusal exists to prevent.
         let durable = HeroDurableSnapshot.filter(result.durableItems)
-        if durable.isEmpty, merge.items.isEmpty {
+        if durable.isEmpty, freshIsAuthoritative {
             viewModel.clearCachedHeroItems()
         } else {
             viewModel.cacheHeroItems(durable, for: settings)

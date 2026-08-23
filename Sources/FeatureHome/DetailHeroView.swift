@@ -322,6 +322,14 @@ struct DetailHeroView: View, Equatable {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var presentationCache = HeroPresentationCache()
+    /// Bumped when the watchlist changes anywhere, purely to re-run `body`.
+    ///
+    /// `heroWatchlistAction` recomputes its add/remove state from
+    /// `actionHandler.actions(for:)` every pass, so it is already correct the
+    /// moment it is asked — it was simply never re-asked. Home rebuilds off this
+    /// notification; the detail page never listened, so its button kept whatever
+    /// it had resolved to on appear until the page was rebuilt.
+    @State private var watchlistRevision = 0
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -1039,6 +1047,13 @@ struct DetailHeroView: View, Equatable {
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistDidChange
+            )
+        ) { _ in
+            watchlistRevision &+= 1
+        }
         .animation(.easeInOut(duration: 0.2), value: item.id)
         // Cross-fade the backdrop when the active server changes.
         .animation(.easeInOut(duration: 0.3), value: backdrop.id)

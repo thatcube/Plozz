@@ -156,6 +156,21 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var episodeNumber: Int?
     public var productionYear: Int?
 
+    /// The day the title was first released — a movie's premiere or an episode's
+    /// original air date (Jellyfin `PremiereDate`, Plex `originallyAvailableAt`).
+    ///
+    /// Distinct from ``scheduledAirDate``, which exists only on placeholder rows
+    /// for episodes that have *not* aired and are in nobody's library: this is a
+    /// fact about a real item, and is set on anything the server dates. Distinct
+    /// too from ``productionYear``, which is the coarser year the same servers
+    /// report and is what most rows show; keep both, since a server routinely
+    /// knows one and not the other.
+    ///
+    /// Providers report a bare calendar day, so it is stored as the date at UTC
+    /// midnight and must be **formatted in UTC** — rendering it in the device's
+    /// zone shifts a release west of Greenwich back a day.
+    public var releaseDate: Date?
+
     /// The content/age-classification certificate, e.g. `TV-14`, `PG-13`, `R`.
     /// Provider-native string (Jellyfin `OfficialRating`); `nil` when unrated or
     /// unreported. Rendered as an outlined badge on the detail hero.
@@ -391,6 +406,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
         productionYear: Int? = nil,
+        releaseDate: Date? = nil,
         officialRating: String? = nil,
         genres: [String] = [],
         people: [MediaPerson] = [],
@@ -445,6 +461,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.productionYear = productionYear
+        self.releaseDate = releaseDate
         self.officialRating = officialRating
         self.genres = genres
         self.people = people
@@ -491,7 +508,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, watchlistAliasID, title, kind, overview, parentTitle, seasonNumber, episodeNumber
         case originalTitle
-        case productionYear, officialRating, genres, people, studios, tags, taglines
+        case productionYear, releaseDate, officialRating, genres, people, studios, tags, taglines
         case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed, hasBeenPlayed
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
         case fallbackArtworkURL, logoURL, ratings, providerIDs, metadataProvenance
@@ -521,6 +538,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
+        releaseDate = try container.decodeIfPresent(Date.self, forKey: .releaseDate)
         officialRating = try container.decodeIfPresent(String.self, forKey: .officialRating)
         genres = try container.decodeIfPresent([String].self, forKey: .genres) ?? []
         people = try container.decodeIfPresent([MediaPerson].self, forKey: .people) ?? []
@@ -883,6 +901,50 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         if let productionYear { return String(productionYear) }
         return nil
     }
+
+    /// ``releaseDate`` rendered for display — abbreviated, locale-aware, and
+    /// **fixed to UTC**.
+    ///
+    /// The time zone is not a detail: providers date a title by calendar day and
+    /// we store that day at UTC midnight, so formatting it in the device's zone
+    /// would show anyone west of Greenwich the day before. `nil` when the server
+    /// never dated the item.
+    public var releaseDateLabel: String? {  // l10n:content — date-format output, already locale-aware
+        MediaItem.releaseDateLabel(for: releaseDate)
+    }
+
+    /// The shared formatting used by ``releaseDateLabel``, exposed so callers
+    /// holding a loose date (rather than a whole item) format it identically.
+    public static func releaseDateLabel(for date: Date?) -> String? {  // l10n:content — date-format output, already locale-aware
+        guard let date else { return nil }
+        return date.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: .gmt)
+        )
+    }
+
+    /// Parses a bare `YYYY-MM-DD` calendar day into the instant of UTC midnight
+    /// on that day, the storage contract for ``releaseDate``.
+    ///
+    /// Shared because more than one backend dates a title this way — Plex's
+    /// `originallyAvailableAt` and TMDb's `release_date`/`first_air_date` through
+    /// Seerr — and a per-caller parser is how the two would drift a day apart.
+    /// Anchored to UTC: parsed in the device's zone the day would land on local
+    /// midnight, and anyone east of Greenwich would read it back a date later. A
+    /// format *style* rather than a `DateFormatter` so there is no mutable
+    /// singleton to hand across concurrency domains. Anything longer than a bare
+    /// day (an agent that wrote a full timestamp into the same field) is trimmed
+    /// to its leading ten characters, which are the calendar day either way.
+    public static func calendarDayReleaseDate(from raw: String?) -> Date? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.count >= 10
+        else { return nil }
+        return try? calendarDayStyle.parse(String(trimmed.prefix(10)))
+    }
+
+    private static let calendarDayStyle = Date.ISO8601FormatStyle(
+        dateSeparator: .dash,
+        timeZone: .gmt
+    ).year().month().day()
 
     /// The episode's place in the run, comma-separated — `S4, E1`.
     ///

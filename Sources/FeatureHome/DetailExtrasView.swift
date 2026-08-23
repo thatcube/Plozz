@@ -39,6 +39,9 @@ struct DetailExtrasView: View {
     var relatedHasResolved: Bool = true
     var onSelectRelated: ((MediaItem) -> Void)? = nil
     var externalAvailability: ExternalTitleAvailability? = nil
+    /// The viewer's spoiler protection, forwarded to the Ratings section so it
+    /// hides scores on the same terms the hero above it already does.
+    var spoilerSettings: SpoilerSettings = .default
 
     /// Extra gap below the cast row on tvOS so a 3-line name wrapping out
     /// of its circle doesn't overlap the About header below.
@@ -82,6 +85,7 @@ struct DetailExtrasView: View {
             || item.overview != nil
             || !item.ratings.isEmpty
             || item.productionYear != nil
+            || item.releaseDate != nil
             || item.runtime != nil
             || item.officialRating != nil
             || item.originalTitle != nil
@@ -145,7 +149,8 @@ struct DetailExtrasView: View {
                     horizontalInset: leadingInset,
                     selectedSource: selectedSource,
                     selectedVersion: selectedVersion,
-                    externalAvailability: externalAvailability
+                    externalAvailability: externalAvailability,
+                    spoilerSettings: spoilerSettings
                 )
                 .id("detail-extras-info")
             }

@@ -249,9 +249,30 @@ final class SpoilerSettingsTests: XCTestCase {
         XCTAssertTrue(ratingsHidden.shouldHideRatings(for: episode(resume: 120)))
     }
 
-    func testHideRatingsNeverAppliesToSeriesOrSeason() {
-        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: MediaItem(id: "s", title: "Show", kind: .series)))
-        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: MediaItem(id: "se", title: "Season 1", kind: .season)))
+    func testHideRatingsAppliesToSeriesAndSeason() {
+        // A series page is what you read BEFORE starting a show, so its aggregate
+        // score is the most spoiling number on screen, not an exempt one.
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: MediaItem(id: "s", title: "Show", kind: .series)))
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: MediaItem(id: "se", title: "Season 1", kind: .season)))
+    }
+
+    func testHideRatingsRevealsFinishedSeriesAndSeason() {
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "s", title: "Show", kind: .series, isPlayed: true)
+        ))
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "se", title: "Season 1", kind: .season, isPlayed: true)
+        ))
+    }
+
+    func testHideRatingsSkipsKindsWithNoWatchedState() {
+        // Nothing to finish, so hiding would be permanent rather than deferred.
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "c", title: "Marvel", kind: .collection)
+        ))
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "f", title: "Movies", kind: .folder)
+        ))
     }
 
     func testDecodesLegacyPayloadWithoutHideRatingsKey() throws {

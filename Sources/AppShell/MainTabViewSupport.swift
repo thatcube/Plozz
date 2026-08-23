@@ -478,6 +478,12 @@ func makeHeroMetadataEnricher(
             if enriched[index].productionYear == nil {
                 enriched[index].productionYear = root.productionYear
             }
+            // Gap-fill only, and deliberately NOT in the episode branch above:
+            // that one adopts the SERIES' facts, and a series premiere is not the
+            // date this episode aired.
+            if enriched[index].releaseDate == nil {
+                enriched[index].releaseDate = root.releaseDate
+            }
             if enriched[index].genres.isEmpty {
                 enriched[index].genres = root.genres
             }

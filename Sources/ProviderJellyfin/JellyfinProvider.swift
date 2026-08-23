@@ -1406,6 +1406,7 @@ public struct JellyfinProvider: MediaProvider {
             seasonNumber: kind == .season ? dto.IndexNumber : dto.ParentIndexNumber,
             episodeNumber: dto.IndexNumber,
             productionYear: dto.ProductionYear,
+            releaseDate: Self.parseDate(dto.PremiereDate),
             officialRating: dto.OfficialRating,
             genres: dto.Genres ?? [],
             people: Self.people(from: dto, client: client),

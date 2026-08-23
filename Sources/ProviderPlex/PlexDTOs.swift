@@ -141,6 +141,11 @@ struct PlexMetadata: Decodable {
     let index: Int?            // episode number (or season index)
     let parentIndex: Int?      // season number for an episode
     let year: Int?
+    /// The title's release / first-air day as a bare `YYYY-MM-DD` calendar date
+    /// (Plex's `originallyAvailableAt`). Present on movies, shows and episodes
+    /// whenever the agent dated them — including on hub and library listings, so
+    /// it does not need the full metadata fetch.
+    let originallyAvailableAt: String?
     let duration: Int?         // milliseconds
     let viewOffset: Int?       // milliseconds resumed-to
     let viewCount: Int?

@@ -41,6 +41,10 @@ public struct DetailInformationSections: View {
     private let selectedSource: MediaSourceRef?
     private let selectedVersion: MediaVersion?
     private let externalAvailability: ExternalTitleAvailability?
+    /// The viewer's spoiler protection. Ratings honour it here exactly as the
+    /// heroes above do — the section is blurred, not removed, so a deliberate
+    /// press can still lift it.
+    private let spoilerSettings: SpoilerSettings
 
     @State private var showsFullOverview = false
     @State private var overviewCardHeight: CGFloat = 0
@@ -64,13 +68,15 @@ public struct DetailInformationSections: View {
         horizontalInset: CGFloat,
         selectedSource: MediaSourceRef? = nil,
         selectedVersion: MediaVersion? = nil,
-        externalAvailability: ExternalTitleAvailability? = nil
+        externalAvailability: ExternalTitleAvailability? = nil,
+        spoilerSettings: SpoilerSettings = .default
     ) {
         self.item = item
         self.horizontalInset = horizontalInset
         self.selectedSource = selectedSource
         self.selectedVersion = selectedVersion
         self.externalAvailability = externalAvailability
+        self.spoilerSettings = spoilerSettings
     }
 
     public var body: some View {
@@ -253,27 +259,47 @@ public struct DetailInformationSections: View {
         // container does to us: the layout reports the About card's height as its
         // own, so the tiles reach the bottom of About without depending on a Grid
         // choosing to stretch the cell.
-        ProportionalWrapLayout(
-            preferredColumns: 4,
-            minimumCellWidth: ratingsTileMinWidth,
-            spacing: ratingsTileSpacing,
-            minimumHeight: matchesRatingsHeight ? aboutBaseCardHeight : 0
+        SpoilerRevealBox(
+            isHidden: hidesRatings,
+            prompt: LocalizedStringResource(
+                "mediaDetail.ratings.reveal",
+                defaultValue: "Show Ratings",
+                comment: "Button over the blurred Ratings section of a title's detail page; pressing it reveals scores that spoiler protection is hiding."
+            ),
+            identity: item.id
         ) {
-            ForEach(sortedRatings) { rating in
-                RatingTile(rating: rating)
+            ProportionalWrapLayout(
+                preferredColumns: 4,
+                minimumCellWidth: ratingsTileMinWidth,
+                spacing: ratingsTileSpacing,
+                minimumHeight: matchesRatingsHeight ? aboutBaseCardHeight : 0
+            ) {
+                ForEach(sortedRatings) { rating in
+                    RatingTile(rating: rating)
+                }
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        // Report the height back so About can grow to meet it when the tiles wrap.
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: RatingsBlockHeightKey.self,
-                    value: proxy.size.height
-                )
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // Report the height back so About can grow to meet it when the tiles wrap.
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: RatingsBlockHeightKey.self,
+                        value: proxy.size.height
+                    )
+                }
             }
+            .onPreferenceChange(RatingsBlockHeightKey.self) { ratingsBlockHeight = $0 }
         }
-        .onPreferenceChange(RatingsBlockHeightKey.self) { ratingsBlockHeight = $0 }
+    }
+
+    /// Whether spoiler protection currently covers this title's scores.
+    ///
+    /// Deliberately the same `shouldHideRatings` the detail and Home heroes ask,
+    /// so one setting cannot produce two answers on a single screen: an unwatched
+    /// movie whose hero badges are suppressed must not have its scores printed at
+    /// display size two sections further down.
+    private var hidesRatings: Bool {
+        spoilerSettings.shouldHideRatings(for: item)
     }
 
     /// Whether About and Ratings sit side-by-side and should be the same height
@@ -796,7 +822,12 @@ public struct DetailInformationSections: View {
     /// "Details" — the editorial facts about the *title* itself.
     private var detailFacts: [InformationFact] {
         var facts: [InformationFact] = []
-        if let year = item.productionYear {
+        // The exact day when the server knows it, the bare year when it doesn't.
+        // Never both: "Released 14 Apr 2019" already contains "Year 2019", and a
+        // list of facts that restates one of its own entries reads as a bug.
+        if let released = item.releaseDateLabel {
+            facts.append(InformationFact(id: "released", label: "Released", value: released))
+        } else if let year = item.productionYear {
             facts.append(InformationFact(id: "year", label: "Year", value: String(year)))
         }
         if let runtime = item.runtime?.runtimeBadgeText {

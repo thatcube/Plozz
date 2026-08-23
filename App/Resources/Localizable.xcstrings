@@ -112781,6 +112781,7 @@
       }
     },
     "Episode titles, summaries, and artwork can be hidden until you watch them." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -112999,6 +113000,9 @@
           }
         }
       }
+    },
+    "Episode titles, summaries, and artwork can be hidden until you watch them. Hidden ratings are blurred on a title's page — tap to reveal them." : {
+
     },
     "Episodes" : {
       "comment" : "Section title used for search results listing individual episodes, the loose-episode rail on a series page, and downloaded TV seasons that have no season number.",
@@ -130977,6 +130981,7 @@
       }
     },
     "Hide unwatched episodes and ratings until you've seen them." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -131195,6 +131200,9 @@
           }
         }
       }
+    },
+    "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them." : {
+
     },
     "Hide watched movies, shows, and episodes" : {
       "localizations" : {
@@ -220234,6 +220242,9 @@
         }
       }
     },
+    "Ratings are hidden until you've watched this. Reveals them anyway." : {
+      "comment" : "Accessibility hint on the control that lifts the spoiler blur over a title's ratings."
+    },
     "Re-download From iCloud" : {
       "localizations" : {
         "ar" : {
@@ -222881,6 +222892,9 @@
           }
         }
       }
+    },
+    "Released" : {
+
     },
     "Releases %@" : {
       "comment" : "Badge on an unaired episode card. %@ is a locale-formatted weekday or release date.",
@@ -367044,12 +367058,6 @@
       "comment" : "Continue Watching card style option in Settings: artwork with the title laid over it as a logo.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Logo & Artwork"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367090,6 +367098,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Λογότυπο και εικαστικό"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Logo & Artwork"
           }
         },
         "es" : {
@@ -367272,12 +367286,6 @@
       "comment" : "One-line explanation of the Logo & Artwork option for Continue Watching cards.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Title and details on the artwork."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367318,6 +367326,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τίτλος και λεπτομέρειες πάνω στην εικόνα."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Title and details on the artwork."
           }
         },
         "es" : {
@@ -367500,12 +367514,6 @@
       "comment" : "Stand-in wordmark drawn inside the Continue Watching card preview, in place of a real title's logo.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "LOGO"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367545,6 +367553,12 @@
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
+            "value" : "LOGO"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
             "value" : "LOGO"
           }
         },
@@ -367728,12 +367742,6 @@
       "comment" : "Continue Watching card style option in Settings: plain artwork with the title written underneath.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Thumbnail & Title"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367774,6 +367782,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Μικρογραφία και τίτλος"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Thumbnail & Title"
           }
         },
         "es" : {
@@ -367956,12 +367970,6 @@
       "comment" : "One-line explanation of the Thumbnail & Title option for Continue Watching cards.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Title and details below the artwork."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -368002,6 +368010,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τίτλος και λεπτομέρειες κάτω από την εικόνα."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Title and details below the artwork."
           }
         },
         "es" : {
@@ -383594,6 +383608,18 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "已加入觀看列表"
+          }
+        }
+      }
+    },
+    "mediaDetail.ratings.reveal" : {
+      "comment" : "Button over the blurred Ratings section of a title's detail page; pressing it reveals scores that spoiler protection is hiding.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show Ratings"
           }
         }
       }

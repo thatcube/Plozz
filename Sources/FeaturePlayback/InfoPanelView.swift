@@ -35,12 +35,18 @@ struct InfoPanelView: View {
     /// restored centrally by `PlayerControls`'s `onChange(of: openPanel)`.
     let onClose: () -> Void
 
-    /// The bottom metadata row content: "S2 · E7 · 42m" (season/episode + runtime),
-    /// shown inline with the technical badges — Apple-TV style.
-    private var infoMetaLine: String {
-        [model.infoCard.episodeTag, model.infoCard.runtimeLabel]
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
+    /// The bottom metadata row content: "S2 · E7 · 42m · 14 Apr 2019"
+    /// (season/episode + runtime + release date), shown inline with the technical
+    /// badges — Apple-TV style. `includingRelease` is what the row drops when it
+    /// runs out of width; see `metaRow`.
+    private func infoMetaLine(includingRelease: Bool) -> String {
+        [
+            model.infoCard.episodeTag,
+            model.infoCard.runtimeLabel,
+            includingRelease ? model.infoCard.releaseLabel : ""
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
     }
 
     /// A wide now-playing card that fades in over the title/description slot (the
@@ -135,14 +141,9 @@ struct InfoPanelView: View {
             // `ViewThatFits` because the badge row's width is content, not
             // layout: four badges on a 4K Dolby Vision Atmos file are far wider
             // than the one on a plain SDR episode, so no fixed breakpoint gets
-            // this right. It takes the full row when it fits and the meta line
-            // alone when it does not — the badges being available on the item's
-            // detail page, while the season/episode/runtime is the line that
-            // says WHERE you are.
-            ViewThatFits(in: .horizontal) {
-                metaRow(includingBadges: true)
-                metaRow(includingBadges: false)
-            }
+            // this right. It takes the full row when it fits and sheds the
+            // badges — then the release date — when it does not.
+            adaptiveMetaRow
 
             // Playback Info at the far left, apart from the three transport
             // actions: it is a diagnostics toggle rather than something reached
@@ -198,10 +199,11 @@ struct InfoPanelView: View {
     }
 
     @ViewBuilder
-    private func metaRow(includingBadges: Bool) -> some View {
+    private func metaRow(includingBadges: Bool, includingRelease: Bool = true) -> some View {
+        let line = infoMetaLine(includingRelease: includingRelease)
         HStack(spacing: 10) {
-            if !infoMetaLine.isEmpty {
-                Text(infoMetaLine)
+            if !line.isEmpty {
+                Text(line)
                     .font(metrics.captionFont)
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
@@ -213,6 +215,21 @@ struct InfoPanelView: View {
                 MediaBadgeRow(badges: model.infoCard.badges)
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    /// The bottom row's fallbacks, widest first.
+    ///
+    /// Everything on this row is `fixedSize`, so something has to be *removed*
+    /// rather than squeezed. Badges go first (they are repeated on the item's
+    /// detail page), then the release date, leaving season/episode + runtime —
+    /// the line that says where you are — as the one thing that always survives.
+    @ViewBuilder
+    private var adaptiveMetaRow: some View {
+        ViewThatFits(in: .horizontal) {
+            metaRow(includingBadges: true)
+            metaRow(includingBadges: false)
+            metaRow(includingBadges: false, includingRelease: false)
         }
     }
 
@@ -269,18 +286,16 @@ struct InfoPanelView: View {
                 // ~42pt of dead air. The 6pt VStack spacing on either side already
                 // separates the rows, so the floor bought nothing and cost a line.
                 Spacer(minLength: 0)
-                // Bottom metadata row: season/episode + runtime, then the technical
-                // badges, all on one baseline pinned to the card's bottom edge.
+                // Bottom metadata row: season/episode + runtime + release date,
+                // then the technical badges, all on one baseline pinned to the
+                // card's bottom edge.
                 //
                 // Every badge is `fixedSize`, so in a row that overflows the meta
                 // line was the only thing that could give — and "S2 · E9 · 1h"
                 // truncated to "S2…" while the badges kept every pixel. It is the
                 // shorter string AND the more useful one, so it holds its size and
                 // the badges are dropped instead when the row will not fit.
-                ViewThatFits(in: .horizontal) {
-                    metaRow(includingBadges: true)
-                    metaRow(includingBadges: false)
-                }
+                adaptiveMetaRow
             }
             .frame(maxWidth: metrics.textColumnMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)

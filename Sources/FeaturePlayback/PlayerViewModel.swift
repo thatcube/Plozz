@@ -1724,6 +1724,7 @@ public final class PlayerViewModel {
         controls.infoCard.sourceAccountID = request.item.sourceAccountID
         controls.infoCard.sourceItemID = request.item.id
         controls.infoCard.episodeTag = Self.episodeTag(for: request.item)
+        controls.infoCard.releaseLabel = request.item.releaseDateLabel ?? ""
         controls.infoCard.badges = request.item.technicalBadges
         controls.infoCard.artworkURLs = [request.item.backdropURL, request.item.heroBackdropURL, request.item.fallbackArtworkURL, request.item.posterURL].compactMap { $0 }
         controls.infoCard.runtimeLabel = request.item.runtime?.runtimeBadgeText ?? ""

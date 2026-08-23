@@ -2294,7 +2294,13 @@ private struct PlozziOSSpoilerSettingsView: View {
                     isOn: $model.settings.hideRatingsUntilWatched
                 )
             } footer: {
-                Text("Episode titles, summaries, and artwork can be hidden until you watch them.")
+                Text(
+                    """
+                    Episode titles, summaries, and artwork can be hidden until you \
+                    watch them. Hidden ratings are blurred on a title's page — tap \
+                    to reveal them.
+                    """
+                )
             }
         }
         .settingsPageSurface()

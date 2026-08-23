@@ -674,7 +674,8 @@ public struct ItemDetailView: View {
                         relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
                         relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
                         onSelectRelated: onSelectChild,
-                        externalAvailability: detail.externalAvailability
+                        externalAvailability: detail.externalAvailability,
+                        spoilerSettings: spoilerSettings
                     )
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)

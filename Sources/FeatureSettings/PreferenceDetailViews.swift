@@ -150,7 +150,7 @@ struct SpoilerRowsBuilder {
             SettingsSplitRow(
                 id: "spoilers",
                 title: "Spoilers",
-                description: "Hide unwatched episodes and ratings until you've seen them.",
+                description: "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them.",
             ) {
                 VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
                     SettingsRevealSection(

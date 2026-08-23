@@ -210,6 +210,9 @@ public final class InfoCardModel {
     /// Compact season/episode tag for the metadata row (e.g. "S2 · E7"). Empty for
     /// movies.
     public var episodeTag: String = ""   // l10n:content — media metadata from the server
+    /// Pre-formatted original release / air date (e.g. "14 Apr 2019") for the meta
+    /// line. Empty when the server never dated the item.
+    public var releaseLabel: String = ""   // l10n:content — date-format output, already locale-aware
     /// Whether a following episode exists to jump to.
     public var hasNextEpisode: Bool = false
     /// Whether a preceding episode exists to jump to.

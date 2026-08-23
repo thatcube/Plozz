@@ -58,6 +58,9 @@ public struct PosterCardView: View {
     /// Whether the artwork this card ended up with already has the show's name
     /// printed on it, in which case the card must not print it again.
     @State private var artworkAlreadyCarriesTitle = false
+    /// Bumped once this show's artwork source is settled (or the wait for it ran
+    /// out), which is what lets the body re-read the synchronous store.
+    @State private var textlessAnswerRevision = 0
     @State private var logoTone: ResolvedLogoTone?
     @State private var artworkTone: HeroBackgroundSample?
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
@@ -822,7 +825,79 @@ public struct PosterCardView: View {
     /// viewer is part-way through answers that poorly, because mid-episode frames
     /// from different shows look alike. The show's art plus its logo is the same
     /// thing a shelf of DVD spines does.
+    /// The show's own wide art with its logo laid over it.
+    ///
+    /// Nothing is drawn until we know **which** picture this card should use.
+    /// Textless art is this feature's primary source and the server's art is its
+    /// fallback, so painting the server's first and correcting later has the
+    /// relationship backwards: it puts a picture on screen that the card may be
+    /// about to replace, and a replacement the viewer can see is a defect however
+    /// smoothly it is done.
+    ///
+    /// This costs nothing on the path that matters. Answers are read back from
+    /// disk synchronously, so on every launch after a show's first appearance
+    /// ``TextlessBackdropStore/hasAnswer(for:)`` is already true on the first
+    /// frame and the picture goes straight up. Only a show being seen for the
+    /// very first time waits, and it waits showing the same neutral placeholder
+    /// every card already shows while its art loads — not the wrong picture.
     private var seriesArtwork: some View {
+        Group {
+            if textlessAnswerReady {
+                seriesArtworkPicture
+            } else {
+                neutralPlaceholder
+            }
+        }
+        // Settles this show's source, then lets the body re-read it. A plain
+        // synchronous read gives SwiftUI nothing to invalidate on, so without this
+        // the answer would land in a dictionary no view was watching.
+        .task(id: item.id) {
+            guard !TextlessBackdropStore.shared.hasAnswer(for: item) else { return }
+            // Ask on the card's own behalf. The row warms its forward window, but
+            // a card must not depend on having been prefetched — the first card of
+            // a freshly loaded row appears at the same moment the row asks, and a
+            // card used outside a row is never asked for at all.
+            TextlessBackdropStore.shared.warm(for: item, variant: artworkVariant)
+            await Self.settleTextlessAnswer(for: item)
+            textlessAnswerRevision &+= 1
+        }
+        // The show's name moved onto the artwork (as a logo, which carries no text
+        // for VoiceOver), and out of the caption — which now reads "S2 · E5". Name
+        // the artwork so the card still announces WHAT it is, not just where in it
+        // you are.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(seriesDisplayTitle)
+    }
+
+    /// Waits for this show's artwork source to be decided, but never indefinitely.
+    ///
+    /// A lookup that cannot finish — no network, a provider that is down, TMDb
+    /// switched off entirely — must not leave the card blank. Past the deadline
+    /// the server's art is used, which is exactly its job: the fallback for when
+    /// nothing better can be had.
+    private static func settleTextlessAnswer(for item: MediaItem) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await TextlessBackdropStore.shared.answerSettled(for: item) }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: textlessAnswerDeadlineNanoseconds)
+            }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// Long enough for a cache hit or a prompt lookup, short enough that a card
+    /// which will never get an answer is not visibly stalled.
+    private static let textlessAnswerDeadlineNanoseconds: UInt64 = 3_000_000_000
+
+    /// Whether this card knows which picture to draw. `textlessAnswerRevision` is
+    /// read first so the body re-evaluates when the answer lands; it is also what
+    /// records that the deadline passed.
+    private var textlessAnswerReady: Bool {
+        textlessAnswerRevision > 0 || TextlessBackdropStore.shared.hasAnswer(for: item)
+    }
+
+    private var seriesArtworkPicture: some View {
         FallbackAsyncImage(
             references: seriesArtworkReferences,
             maxAspectRatio: posterAspectGuard,
@@ -835,10 +910,6 @@ public struct PosterCardView: View {
                 // likely candidate of all to carry a title — treat it as clean.
                 artworkAlreadyCarriesTitle = reference.map(titleBearingArtwork.contains) ?? false
             },
-            // The candidate list is late-binding here: a clean backdrop may be
-            // published by ``TextlessBackdropStore`` after this card is built.
-            // Taking it while the card is blank is the whole point; taking it
-            // after the card has painted would change the art under the viewer.
             pinIdentity: item.id,
             // The card is taller than the picture, so the picture is laid in at
             // its own shape and the band left underneath is filled with a
@@ -853,12 +924,6 @@ public struct PosterCardView: View {
         // A logo drawn over art that already shows the title says it twice — see
         // ``titleBearingArtwork`` and ``TextlessBackdropStore/suppressesLogo(for:)``.
         .overlay { if !suppressesSeriesLogo { seriesLogo } }
-        // The show's name moved onto the artwork (as a logo, which carries no text
-        // for VoiceOver), and out of the caption — which now reads "S2 · E5". Name
-        // the artwork so the card still announces WHAT it is, not just where in it
-        // you are.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(seriesDisplayTitle)
     }
 
     private var titleBearingArtwork: Set<ArtworkReference> {

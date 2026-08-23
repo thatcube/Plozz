@@ -60,50 +60,17 @@ public final class TextlessBackdropStore {
     private var outcomes: [String: Outcome] = [:]
     /// In flight or already answered, so a row that re-appears never re-asks.
     private var attempted: Set<String> = []
-    /// First logo decision made for a show, kept for the rest of the *foreground
-    /// session*. See ``suppressesLogo(for:)``.
-    private var logoDecisions: [String: Bool] = [:]
     /// Where last session's answers are kept, so this session starts knowing them.
     private let store: TextlessBackdropIndex
     /// Whether ``outcomes`` has been seeded from disk yet. Deferred to first use
     /// rather than done in `init` so constructing the shared instance costs
     /// nothing, and the read lands with the first card that actually needs it.
     private var didSeed = false
-    private var foregroundObserver: (any NSObjectProtocol)?
+    /// Cards currently waiting to hear about a show, by show key.
+    private var waiters: [String: [UUID: CheckedContinuation<Void, Never>]] = [:]
 
-    public init(store: TextlessBackdropIndex = .sharedIndex) {
-        self.store = store
-        observeForeground()
-    }
-
-    deinit {
-        if let foregroundObserver {
-            NotificationCenter.default.removeObserver(foregroundObserver)
-        }
-    }
-
-    /// Re-decides every show's logo when the app comes back to the foreground.
-    ///
-    /// The memo below is scoped to a *foreground session*, not to the process,
-    /// because on tvOS those are rarely the same thing: reopening the app almost
-    /// always resumes a suspended process rather than starting a new one. A memo
-    /// scoped to the process would therefore keep a first-encounter guess alive
-    /// across every subsequent visit — the answer would be sitting on disk,
-    /// already read, and still not used.
-    ///
-    /// Safe to clear here precisely because it is not mid-scroll: the viewer has
-    /// been away, the row re-renders on return anyway, and what replaces the
-    /// guess is the conclusive answer.
-    private func observeForeground() {
-        #if canImport(UIKit)
-        foregroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.logoDecisions.removeAll() }
-        }
-        #endif
+    public init(store: TextlessBackdropIndex? = nil) {
+        self.store = store ?? .sharedIndex
     }
 
     /// Reads last session's answers in, once.
@@ -150,26 +117,18 @@ public final class TextlessBackdropStore {
     /// has: niche anime, no clean art anywhere, title baked into the only picture
     /// there is.
     ///
-    /// ### Decided once per show per session
+    /// ### Answered from the outcome, never memoized
     ///
-    /// Body runs constantly on tvOS — every focus move re-renders the row — so a
-    /// decision that could flip mid-life would take a logo off a card the viewer
-    /// is looking at. The first answer is memoized and kept.
-    ///
-    /// That memo is only safe because the answer is usually already there when the
-    /// first card renders: outcomes are persisted and read back synchronously (see
-    /// ``TextlessBackdropIndex``). Without that, the first screenful of every
-    /// launch would memoize "keep the logo" before the router could reply, and
-    /// then hold it — which is exactly what happened, and it looked like the
-    /// doubled cards fixing themselves at random, because they only corrected when
-    /// scrolling far enough rebuilt them.
+    /// Body runs constantly on tvOS, so this is read very often, and the obvious
+    /// instinct is to memoize the first answer to stop it flipping under the
+    /// viewer. That was tried and removed: an outcome only ever moves from unknown
+    /// to conclusive and never back, so this is monotonic and cannot oscillate —
+    /// the memo protected against nothing. What it *did* do was freeze a
+    /// first-encounter guess, so a show seen for the first time kept its doubled
+    /// title for the whole session no matter what the router later found.
     func suppressesLogo(for item: MediaItem) -> Bool {
         seedIfNeeded()
-        let key = Self.key(for: item)
-        if let decided = logoDecisions[key] { return decided }
-        let decision = outcomes[key] == Outcome.none && ContentClassifier.isAnime(item)
-        logoDecisions[key] = decision
-        return decision
+        return outcomes[Self.key(for: item)] == Outcome.none && ContentClassifier.isAnime(item)
     }
 
     /// Resolves and warms `item`'s textless backdrop, once per show per session.
@@ -195,15 +154,14 @@ public final class TextlessBackdropStore {
         if outcomes[key] == Outcome.none { return }
         let seriesItem = Self.seriesItem(for: item)
         Task { [weak self] in
-            var cancelled = false
             let url = await ArtworkSession.artworkResolveLimiter.run { () -> URL? in
-                if Task.isCancelled { cancelled = true; return nil }
+                if Task.isCancelled { return nil }
                 return await ArtworkRouter.shared.artworkURL(.hero, for: seriesItem)
             }
             // A cancelled resolve proves nothing about what exists, so it must not
             // be recorded as a conclusive miss — that would suppress a logo on the
             // strength of a scroll that happened to interrupt us.
-            guard !cancelled else { self?.forget(key); return }
+            guard !Task.isCancelled else { self?.forget(key); return }
             guard let url else { self?.record(.none, for: key); return }
             // Decode before publishing — see the type's note. `background: true`
             // keeps the decode off the main thread so a scrolling row never
@@ -224,12 +182,54 @@ public final class TextlessBackdropStore {
     private func record(_ outcome: Outcome, for key: String) {
         outcomes[key] = outcome
         store.save(outcome, for: key)
+        // Wake anything waiting on this show. Without this the answer lands in a
+        // dictionary no view is watching, and the card goes on drawing what it
+        // decided before the answer existed — which is why a newly seen show
+        // stayed wrong until scrolling happened to rebuild it.
+        if let waiting = waiters.removeValue(forKey: key) {
+            waiting.values.forEach { $0.resume() }
+        }
     }
 
-    /// Clears the per-foreground-session memo. Exposed for tests, which cannot
-    /// post a real lifecycle notification.
-    func resetLogoDecisionsForTesting() {
-        logoDecisions.removeAll()
+    /// Whether this show's answer is known *now*, synchronously.
+    ///
+    /// Lets a card avoid painting art it may be about to replace. On any launch
+    /// after the first this is true on the very first frame, because the answers
+    /// are read back from disk synchronously — so the common path pays nothing.
+    func hasAnswer(for item: MediaItem) -> Bool {
+        seedIfNeeded()
+        return outcomes[Self.key(for: item)] != nil
+    }
+
+    /// Suspends until this show's answer is known, returning immediately if it
+    /// already is.
+    ///
+    /// Deliberately per-show rather than making the whole store observable: an
+    /// answer concerns exactly one card, and publishing a store-wide change would
+    /// re-render every card in the row for each of the twenty-odd shows that
+    /// resolve on a cold launch.
+    func answerSettled(for item: MediaItem) async {
+        seedIfNeeded()
+        let key = Self.key(for: item)
+        guard outcomes[key] == nil else { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                // Re-checked inside the continuation: the answer can land between
+                // the guard above and this line, and a waiter registered after the
+                // wake-up would never be resumed.
+                guard outcomes[key] == nil else { return continuation.resume() }
+                waiters[key, default: [:]][id] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.stopWaiting(id, for: key) }
+        }
+    }
+
+    /// Resumes and drops a cancelled waiter. A continuation that is never resumed
+    /// leaks its task, so cancellation has to resume it rather than just forget it.
+    private func stopWaiting(_ id: UUID, for key: String) {
+        waiters[key]?.removeValue(forKey: id)?.resume()
     }
 
     /// Seeds an outcome without going near the network, so the decision table

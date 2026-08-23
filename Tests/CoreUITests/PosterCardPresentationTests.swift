@@ -389,15 +389,17 @@ final class TextlessBackdropSuppressionTests: XCTestCase {
         XCTAssertTrue(store.suppressesLogo(for: anime()))
     }
 
-    /// Body runs on every focus move, so a decision that could flip mid-life would
-    /// pull a logo off a card being looked at. First answer wins for the session.
-    func testTheFirstDecisionIsKeptEvenWhenTheAnswerArrivesLater() {
+    /// The answer is derived, never memoized. An outcome only moves from unknown
+    /// to conclusive and never back, so this cannot oscillate — and memoizing it
+    /// would freeze a first-encounter guess, which is what left a newly seen show
+    /// showing a doubled title for the whole session.
+    func testALateAnswerIsAdoptedRatherThanFrozenOut() {
         let store = TextlessBackdropStore()
-        XCTAssertFalse(store.suppressesLogo(for: anime()))
+        XCTAssertFalse(store.suppressesLogo(for: anime()), "nothing known yet")
         store.recordForTesting(.none, for: anime())
-        XCTAssertFalse(
+        XCTAssertTrue(
             store.suppressesLogo(for: anime()),
-            "a late conclusive miss must not retro-actively strip a logo already on screen"
+            "the conclusive answer must be used the moment it exists"
         )
     }
 }
@@ -475,38 +477,73 @@ final class TextlessBackdropIndexTests: XCTestCase {
     }
 }
 
-/// The logo memo is scoped to a foreground session, not to the process, because
-/// on tvOS reopening the app almost always resumes a suspended process rather
-/// than starting a new one. A process-scoped memo would keep a first-encounter
-/// guess alive across every later visit, with the real answer sitting on disk,
-/// already read, and still unused.
+/// A card must know which picture to draw before it draws one. Textless art is
+/// this feature's primary source and the server's art is its fallback, so
+/// painting the server's first and correcting later has the relationship
+/// backwards — and left a newly seen show visibly wrong until a scroll happened
+/// to rebuild the card.
 @MainActor
-final class TextlessBackdropForegroundResetTests: XCTestCase {
+final class TextlessAnswerReadinessTests: XCTestCase {
 
-    private func anime() -> MediaItem {
+    private func directory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    private func show() -> MediaItem {
         MediaItem(id: "s1", title: "Anime", kind: .series, genres: ["Anime"])
     }
 
-    /// The exact resume case: guessed "keep the logo" before the answer arrived,
-    /// then the answer lands. Returning to the app must act on it.
-    func testReturningToTheAppAdoptsAnAnswerThatArrivedTooLate() {
-        let store = TextlessBackdropStore(
-            store: TextlessBackdropIndex(
-                directory: FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            )
-        )
-        XCTAssertFalse(store.suppressesLogo(for: anime()), "no answer yet, so keep the logo")
-        store.recordForTesting(.none, for: anime())
-        XCTAssertFalse(
-            store.suppressesLogo(for: anime()),
-            "still mid-session: the decision must not flip under the viewer"
-        )
+    /// A show nobody has looked up yet is not ready, so the card waits rather than
+    /// committing to art it may be about to replace.
+    func testAnUnknownShowIsNotReady() {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        XCTAssertFalse(store.hasAnswer(for: show()))
+    }
 
-        store.resetLogoDecisionsForTesting()
+    /// "There is none" is an answer. The card can proceed straight to the
+    /// server's art, which is exactly what the fallback is for.
+    func testAConclusiveMissCountsAsAnAnswer() {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        store.recordForTesting(.none, for: show())
+        XCTAssertTrue(store.hasAnswer(for: show()))
+    }
+
+    /// The path that has to cost nothing: on every launch after a show's first
+    /// appearance the answer is read back from disk synchronously, so the card is
+    /// ready on its first frame and never shows a placeholder at all.
+    func testAPreviouslyAnsweredShowIsReadyOnTheFirstFrame() {
+        let directory = directory()
+        let index = TextlessBackdropIndex(directory: directory)
+        let first = TextlessBackdropStore(store: index)
+        first.recordForTesting(.available(URL(string: "https://tmdb.test/clean.jpg")!), for: show())
+        index.flushForTesting()
+
+        let relaunched = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
         XCTAssertTrue(
-            store.suppressesLogo(for: anime()),
-            "on return the conclusive answer is available and must be used"
+            relaunched.hasAnswer(for: show()),
+            "the answer must be readable before any async work can run"
         )
+    }
+
+    /// A card waiting on a show is woken when the answer lands. Without this the
+    /// answer reaches a dictionary no view is watching, and the card goes on
+    /// drawing what it chose before the answer existed.
+    func testAWaitingCardIsWokenWhenTheAnswerArrives() async {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        let waiting = Task { await store.answerSettled(for: show()) }
+        // Let the waiter register before the answer lands.
+        await Task.yield()
+        store.recordForTesting(.none, for: show())
+        await waiting.value
+        XCTAssertTrue(store.hasAnswer(for: show()))
+    }
+
+    /// Already-answered shows must not suspend at all, or every card on a warm
+    /// launch would wait a turn for nothing.
+    func testAnAlreadyAnsweredShowDoesNotSuspend() async {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        store.recordForTesting(.none, for: show())
+        await store.answerSettled(for: show())
     }
 }

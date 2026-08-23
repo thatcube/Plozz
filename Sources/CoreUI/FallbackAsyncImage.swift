@@ -210,18 +210,12 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// got and not merely that it got some. `nil` when the async fallback supplied
     /// it, which is outside the ordered list.
     let onResolveReference: ((ArtworkReference?) -> Void)?
-    /// Identity this view's picture belongs to (a show, a track). When set, a
-    /// *change to the candidate list alone* is ignored once full-quality art is on
-    /// screen — the picture is already right, and re-resolving would swap it under
-    /// the viewer for no gain.
+    /// Identity this view's picture belongs to (a show, a track).
     ///
-    /// This exists because Continue Watching's candidate list is genuinely
-    /// late-binding: ``TextlessBackdropStore`` may publish a clean backdrop after
-    /// the card is built. Taking it while the card is still blank is free and is
-    /// the whole point; taking it after the card has painted is the "art changes
-    /// as I scroll past" fault. Keyed on identity rather than being a plain flag
-    /// so a *recycled* view — same view, different show — still reloads: pinning
-    /// on identity alone would leave the previous show's art on screen.
+    /// Used to tell "better art for what is already up" apart from "a different
+    /// subject entirely". The first keeps its current picture on screen while the
+    /// replacement loads; the second must blank, or a recycled view would leave
+    /// the previous show's art showing under the new one's title.
     let pinIdentity: String?
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
@@ -305,12 +299,22 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // Same inputs we already resolved for — keep the current result rather
         // than wiping it back to gray and re-resolving.
         if loadedKey == key, image != nil, !isPreviewQuality { return }
-        // Different candidates, but for the show already on screen and already
-        // drawn at full quality: the picture up is correct, so leave it. Swapping
-        // it here is precisely the "art changes as I move along the row" fault.
-        if let pinIdentity, pinnedIdentity == pinIdentity, image != nil, !isPreviewQuality {
-            return
-        }
+        // Same show, different candidates: a better picture has been found for
+        // what is already on screen. Take it.
+        //
+        // This deliberately does NOT bail out. It used to, on the reasoning that
+        // replacing a painted card is the "art changes as I scroll past" fault —
+        // but that reasoning had the cost backwards. A card only reaches here when
+        // something better exists, and a show first seen this session has no cached
+        // answer, so it paints the server's titled art and would then be forbidden
+        // from ever correcting. The result was a visibly doubled title that sat
+        // there until the viewer happened to scroll far enough to destroy and
+        // rebuild the card. "Wrong until you scroll" is far worse than a swap.
+        //
+        // The swap costs nothing visually because the replacement is only ever
+        // published after it has been fetched and decoded, so it is already in
+        // cache: it lands in a single frame, with no loading state in between.
+        let isSameSubject = pinIdentity != nil && pinnedIdentity == pinIdentity
         // The urls changed (or this is the first run). Prefer a synchronous cache
         // hit for the *new* urls so a warmed image shows with no flash.
         let seeded = Self.cachedUsableImage(
@@ -332,7 +336,13 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         }
         // No cached image for the new inputs: drop any stale art so we never leave
         // a previous track's cover on screen, and show the loading state instead.
-        if seeded == nil, !isPreviewQuality {
+        //
+        // Unless it is the same subject, in which case what is on screen is not
+        // stale, just second-best: keep it up and swap only once the replacement
+        // has actually loaded. This is what makes correcting a painted card free —
+        // the card is never blanked to fetch something it is already showing an
+        // acceptable version of.
+        if seeded == nil, !isPreviewQuality, !isSameSubject {
             image = nil
             resolved = false
         }

@@ -605,6 +605,24 @@ public struct MediaRowView: View {
             ).prefix(2) {
                 ArtworkImageCache.shared.prefetch(url, variant: variant)
             }
+            // Series-artwork cards also carry a LOGO, resolved asynchronously and
+            // through a different pipeline from the picture. Warming only the
+            // picture meant a card scrolled onto showed its styled title first and
+            // then swapped to the logo a moment later — the card visibly changing
+            // under the viewer, which is the one thing a rail must not do. Warm
+            // both, so the card is finished before it is reached.
+            if showsSeriesArtwork {
+                HeroLogoPipeline.shared.prefetch(
+                    references: candidate.artworkReferences(for: .logo)
+                )
+                // ...and a clean, textless backdrop to draw that logo over, since
+                // the server's own art often has the title baked in and would
+                // print the name twice. Resolved here rather than at the card so
+                // it is already decoded when the card is reached — the store
+                // publishes nothing until it is, so a card can only ever see art
+                // it can draw on the same frame.
+                TextlessBackdropStore.shared.warm(for: candidate, variant: variant)
+            }
         }
         #endif
     }

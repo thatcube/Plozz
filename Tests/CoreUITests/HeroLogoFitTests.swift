@@ -106,3 +106,265 @@ final class HeroLogoFitTests: XCTestCase {
         XCTAssertEqual(zero, slot)
     }
 }
+
+/// Coverage for the **ink** correction, which is the variable area-fitting can't
+/// see.
+///
+/// Fitting by area gives every wordmark the same box to fill. It cannot tell how
+/// much of that box is painted: a heavy slab face may cover half of it and a thin
+/// script an eighth, so at identical area the slab reads as twice the logo. Ink
+/// coverage separates them, and it is measured for free in the pixel pass that
+/// already trims and tones each logo.
+final class HeroLogoInkTests: XCTestCase {
+
+    private let slot = CGSize(width: 300, height: 120)
+
+    /// A logo carrying the reference amount of ink is left exactly as it was.
+    func testReferenceInkIsUnchanged() {
+        XCTAssertEqual(HeroLogoFit.inkScale(coverage: HeroLogoFit.referenceInk), 1, accuracy: 0.001)
+    }
+
+    /// Thin art is drawn larger, heavy art smaller.
+    func testThinArtGrowsAndHeavyArtShrinks() {
+        XCTAssertGreaterThan(HeroLogoFit.inkScale(coverage: 0.15), 1)
+        XCTAssertLessThan(HeroLogoFit.inkScale(coverage: 0.55), 1)
+    }
+
+    /// Monotonic while the correction applies: more ink is never rewarded with
+    /// more size. (Past `inkFadeStart` the curve deliberately eases back toward
+    /// neutral, which is covered separately below.)
+    func testScaleFallsMonotonicallyAsInkRises() {
+        var previous = CGFloat.greatestFiniteMagnitude
+        for step in 1...40 {
+            let coverage = Double(step) / 40
+            guard coverage <= HeroLogoFit.inkFadeStart else { break }
+            let scale = HeroLogoFit.inkScale(coverage: coverage)
+            XCTAssertLessThanOrEqual(scale, previous)
+            previous = scale
+        }
+    }
+
+    /// No discontinuity anywhere in the curve — the whole point is to remove
+    /// visible size jumps between similar logos, not to introduce one.
+    func testCurveIsContinuousAcrossItsWholeRange() {
+        var previous = HeroLogoFit.inkScale(coverage: 0.001)
+        for step in 1...1000 {
+            let scale = HeroLogoFit.inkScale(coverage: Double(step) / 1000)
+            XCTAssertLessThan(abs(scale - previous), 0.02, "step at coverage \(Double(step) / 1000)")
+            previous = scale
+        }
+    }
+
+    /// A nudge, not an equalisation — a heavy face genuinely *is* a bolder logo
+    /// and should still read as one. Equal total ink would demand 1.41× for a
+    /// logo carrying half the reference; the damped curve asks for far less.
+    func testCorrectionIsDampedNotEqualising() {
+        let half = HeroLogoFit.inkScale(coverage: HeroLogoFit.referenceInk / 2)
+        XCTAssertGreaterThan(half, 1.15)
+        XCTAssertLessThan(half, 1.35)
+    }
+
+    /// Clamped at both ends, so one badly-measured logo can't dominate a rail.
+    ///
+    /// The clamp is also what makes a vanishingly small measurement safe, which is
+    /// why there is no floor guard: a guard would itself be a cliff, drawing a
+    /// logo at 0.019 coverage a fifth smaller than one at 0.021.
+    func testScaleIsClampedAtBothEnds() {
+        for coverage in [0.0001, 0.005, 0.03, 0.94, 0.99] {
+            let scale = HeroLogoFit.inkScale(coverage: coverage)
+            XCTAssertGreaterThanOrEqual(scale, HeroLogoFit.minInkScale)
+            XCTAssertLessThanOrEqual(scale, HeroLogoFit.maxInkScale)
+        }
+    }
+
+    /// A near-solid frame is not a wordmark — it is a plate that survived
+    /// stripping — so the correction is gone by the time coverage reaches it.
+    /// Same for a measurement of essentially nothing.
+    func testNonWordmarkCoverageIsLeftAlone() {
+        XCTAssertEqual(HeroLogoFit.inkScale(coverage: 0.95), 1, accuracy: 0.0001)
+        XCTAssertEqual(HeroLogoFit.inkScale(coverage: 0.0), 1, accuracy: 0.0001)
+        XCTAssertEqual(HeroLogoFit.inkScale(coverage: 1.0), 1, accuracy: 0.0001)
+    }
+
+    /// …and it *eases* out rather than switching off at a line.
+    ///
+    /// This is what the monotonicity test caught: a hard cutoff meant two logos a
+    /// hair either side of it were drawn at noticeably different sizes — a step in
+    /// exactly the curve that exists to remove steps.
+    func testCorrectionFadesOutSmoothlyRatherThanCuttingOff() {
+        let justInside = HeroLogoFit.inkScale(coverage: HeroLogoFit.inkFadeEnd - 0.01)
+        XCTAssertEqual(justInside, 1, accuracy: 0.02, "no jump at the far end of the fade")
+        // Across the whole fade the curve only ever moves toward neutral.
+        var previous = HeroLogoFit.inkScale(coverage: HeroLogoFit.inkFadeStart)
+        for step in 1...20 {
+            let coverage = HeroLogoFit.inkFadeStart
+                + (HeroLogoFit.inkFadeEnd - HeroLogoFit.inkFadeStart) * Double(step) / 20
+            let scale = HeroLogoFit.inkScale(coverage: coverage)
+            XCTAssertGreaterThanOrEqual(scale, previous - 0.0001)
+            XCTAssertLessThanOrEqual(scale, 1.0001)
+            previous = scale
+        }
+    }
+
+    /// Omitting the measurement reproduces the previous behaviour exactly, so any
+    /// caller that has no coverage to give is unaffected.
+    func testDefaultCoverageMatchesTheUncorrectedFit() {
+        let image = CGSize(width: 1000, height: 260)
+        let plain = HeroLogoFit.fittedSize(for: image, maxWidth: slot.width, maxHeight: slot.height)
+        let explicit = HeroLogoFit.fittedSize(
+            for: image, maxWidth: slot.width, maxHeight: slot.height, coverage: 1
+        )
+        XCTAssertEqual(plain.width, explicit.width, accuracy: 0.001)
+        XCTAssertEqual(plain.height, explicit.height, accuracy: 0.001)
+    }
+
+    /// The correction reaches the drawn size: two logos of the SAME shape but
+    /// different ink are drawn at different sizes, the thinner one larger.
+    func testInkChangesTheDrawnSizeForIdenticalShapes() {
+        let image = CGSize(width: 1000, height: 300)
+        let thin = HeroLogoFit.fittedSize(
+            for: image, maxWidth: slot.width, maxHeight: slot.height, coverage: 0.14
+        )
+        let heavy = HeroLogoFit.fittedSize(
+            for: image, maxWidth: slot.width, maxHeight: slot.height, coverage: 0.52
+        )
+        XCTAssertGreaterThan(thin.width * thin.height, heavy.width * heavy.height)
+    }
+
+    /// It narrows the spread rather than inverting it: after correction the thin
+    /// logo must not overshoot past the heavy one's original weight.
+    func testInkNarrowsTheSpreadRatherThanInvertingIt() {
+        let image = CGSize(width: 1000, height: 300)
+        func inkArea(_ coverage: Double) -> CGFloat {
+            let size = HeroLogoFit.fittedSize(
+                for: image, maxWidth: slot.width, maxHeight: slot.height, coverage: coverage
+            )
+            // Area actually painted = drawn area × ink.
+            return size.width * size.height * CGFloat(coverage)
+        }
+        let thin = inkArea(0.14)
+        let heavy = inkArea(0.52)
+        XCTAssertLessThan(thin, heavy, "a thin logo must not end up inkier than a heavy one")
+
+        func plainInkArea(_ coverage: Double) -> CGFloat {
+            let size = HeroLogoFit.fittedSize(for: image, maxWidth: slot.width, maxHeight: slot.height)
+            return size.width * size.height * CGFloat(coverage)
+        }
+        let before = plainInkArea(0.52) / plainInkArea(0.14)
+        let after = heavy / thin
+        XCTAssertLessThan(after, before, "the gap in painted ink must close, not widen")
+    }
+
+    /// **The ceilings never move.** They are what keeps a logo clear of the card's
+    /// edges and the chrome below, and those distances belong to the layout — not
+    /// to how much of its own box a logo happens to paint. A thin wordmark may be
+    /// given more area; it may not be given permission to reach further.
+    func testInkNeverPushesALogoPastItsCeilings() {
+        for coverage in [0.05, 0.14, 0.32, 0.6, 0.9] {
+            let wide = HeroLogoFit.fittedSize(
+                for: CGSize(width: 1000, height: 90),
+                maxWidth: slot.width, maxHeight: slot.height, coverage: coverage
+            )
+            XCTAssertLessThanOrEqual(
+                wide.width,
+                slot.width * HeroLogoFit.widthFlex + 0.001,
+                "ink must not widen a logo past the width ceiling at coverage \(coverage)"
+            )
+            let tall = HeroLogoFit.fittedSize(
+                for: CGSize(width: 300, height: 1000),
+                maxWidth: slot.width, maxHeight: slot.height, coverage: coverage
+            )
+            XCTAssertLessThanOrEqual(
+                tall.height,
+                slot.height * HeroLogoFit.heightFlex + 0.001,
+                "ink must not heighten a logo past the height ceiling at coverage \(coverage)"
+            )
+        }
+    }
+}
+
+/// Coverage for the logo lift — the second of the card's two remedies.
+///
+/// Dimming the backdrop only works in one direction: it pulls the picture down
+/// and away from the logo, and runs out once the picture is already black. The
+/// lift pulls the other way. Which one a card gets depends on where the room is.
+final class LogoToneLiftTests: XCTestCase {
+
+    private func lift(needsHelp: Double?, luminance: Double) -> Double {
+        LogoToneLift.lift(needsHelp: needsHelp, luminance: luminance)
+    }
+
+    /// **The case dimming cannot reach.** House of the Dragon's bronze serif on
+    /// near-black fire: the backdrop has no darkness left to give, and the ink has
+    /// the whole range to grow into.
+    func testDarkLogoInTroubleIsLifted() {
+        XCTAssertGreaterThan(lift(needsHelp: 0.36, luminance: 0.34), 0.08)
+    }
+
+    /// **The case that proved tone alone is the wrong test.** Lilo & Stitch's red
+    /// wordmark is dark by luminance and perfectly readable on open sky. Need — not
+    /// darkness — decides, so it is untouched.
+    func testDarkButReadableLogoIsLeftAlone() {
+        XCTAssertEqual(lift(needsHelp: 0, luminance: 0.30), 0, accuracy: 0.0001)
+    }
+
+    /// …and the mirror of it: Boba Fett's metallic type is not dark at all, yet it
+    /// disappears into its own warm scene. It gets help too, which the earlier
+    /// dark-logo test would have denied it.
+    func testBrightLogoInTroubleIsStillHelped() {
+        XCTAssertGreaterThan(lift(needsHelp: 0.35, luminance: 0.72), 0)
+    }
+
+    /// Headroom bounds it: ink with nowhere brighter to go is never lifted, since
+    /// that would only grey the picture around it.
+    func testLogoWithNoHeadroomIsNotLifted() {
+        XCTAssertEqual(lift(needsHelp: 1, luminance: 1.0), 0, accuracy: 0.0001)
+    }
+
+    /// Before the artwork is measured there is nothing to reason from, and
+    /// guessing would break one case or the other.
+    func testUnmeasuredArtworkIsLeftAlone() {
+        XCTAssertEqual(lift(needsHelp: nil, luminance: 0.30), 0, accuracy: 0.0001)
+    }
+
+    /// More trouble and more headroom both mean more lift, monotonically.
+    func testLiftRisesWithNeedAndWithHeadroom() {
+        var previous = -1.0
+        for step in 0...20 {
+            let value = lift(needsHelp: Double(step) / 20, luminance: 0.34)
+            XCTAssertGreaterThanOrEqual(value, previous)
+            previous = value
+        }
+        previous = Double.greatestFiniteMagnitude
+        for step in 0...20 {
+            let value = lift(needsHelp: 0.5, luminance: Double(step) / 20)
+            XCTAssertLessThanOrEqual(value, previous)
+            previous = value
+        }
+    }
+
+    /// Continuous, so two similar cards can't be treated visibly differently.
+    func testLiftIsContinuous() {
+        var previous = lift(needsHelp: 0, luminance: 0.34)
+        for step in 1...200 {
+            let value = lift(needsHelp: Double(step) / 200, luminance: 0.34)
+            XCTAssertLessThan(abs(value - previous), 0.02)
+            previous = value
+        }
+    }
+
+    /// Capped, so even the worst case cannot wash the ink out.
+    func testLiftIsCapped() {
+        for luminance in stride(from: 0.0, through: 1.0, by: 0.05) {
+            XCTAssertLessThanOrEqual(lift(needsHelp: 1, luminance: luminance), LogoToneLift.liftCap)
+        }
+    }
+
+    /// The lift adds brightness *and* restores saturation, which is the whole
+    /// reason it does not bleach: additive brightness alone drifts toward white,
+    /// and pushing the chroma back up cancels exactly that drift.
+    func testLiftRestoresSaturationRatherThanBleaching() {
+        XCTAssertGreaterThan(LogoToneLift.saturationPerLift, 1)
+        XCTAssertLessThanOrEqual(LogoToneLift.liftCap, 0.25, "a lift this large would wash the ink out")
+    }
+}

@@ -709,3 +709,227 @@ final class ContinueWatchingDynamicTypeTests: XCTestCase {
     }
 }
 #endif
+
+/// The card deepens its dim only for a logo that does not separate from the
+/// artwork behind it.
+///
+/// Guessing from the logo alone did not work, and the cases below are the ones
+/// that proved it: a bold yellow wordmark is mid-tone whether it sits on a night
+/// sky (legible) or on its own orange fire (not). Same logo, opposite needs —
+/// only the gap between logo and backdrop tells them apart.
+final class ContinueWatchingAdaptiveDimTests: XCTestCase {
+
+    private func tone(_ r: Double, _ g: Double, _ b: Double) -> ResolvedLogoTone {
+        ResolvedLogoTone(
+            luminance: 0.2126 * r + 0.7152 * g + 0.0722 * b,
+            coverage: 0.3, red: r, green: g, blue: b
+        )
+    }
+
+    private func backdrop(_ r: Double, _ g: Double, _ b: Double) -> HeroBackgroundSample {
+        HeroBackgroundSample(
+            red: r, green: g, blue: b,
+            luminance: 0.2126 * r + 0.7152 * g + 0.0722 * b
+        )
+    }
+
+    private func dim(_ logo: ResolvedLogoTone?, _ background: HeroBackgroundSample?) -> CGFloat {
+        ContinueWatchingCardShape.artworkDim(logo: logo, background: background)
+    }
+
+    /// The dim a bright, well-separated card lands on — the reference the other
+    /// cases are judged against.
+    private var brightAndClear: CGFloat {
+        dim(tone(0.85, 0.15, 0.12), backdrop(0.55, 0.62, 0.72))
+    }
+
+    /// **The case the whole thing exists for.** A logo sitting on artwork of its
+    /// own colour gets real help.
+    func testLogoOnArtworkOfItsOwnColourIsHelped() {
+        // An orange wordmark on orange fire.
+        let boosted = dim(tone(0.85, 0.45, 0.15), backdrop(0.75, 0.38, 0.12))
+        XCTAssertGreaterThan(boosted, brightAndClear + 0.1)
+    }
+
+    /// **The case that was being over-corrected.** The same mid-tone yellow, but
+    /// on a night sky — perfectly legible, and dimming it only muddied artwork
+    /// that was fine.
+    func testBoldLogoOnADarkBackdropIsLeftAlone() {
+        let yellowOnNight = dim(tone(0.95, 0.80, 0.15), backdrop(0.06, 0.08, 0.16))
+        // Not merely "no boost" — a dark picture gets most of its light back,
+        // since dimming it buys no legibility at all.
+        XCTAssertLessThan(yellowOnNight, ContinueWatchingCardShape.artworkDim * 0.6)
+    }
+
+    /// **Dark artwork keeps its light.** Taking a third off a frame already at a
+    /// tenth of full brightness makes no wordmark easier to read; it just drains
+    /// the picture, which is what left a dark card looking flat.
+    func testDarkArtworkIsBarelyDimmed() {
+        let dark = dim(tone(0.92, 0.92, 0.92), backdrop(0.10, 0.10, 0.12))
+        let bright = dim(tone(0.92, 0.92, 0.92), backdrop(0.62, 0.62, 0.60))
+        XCTAssertLessThan(dark, bright)
+        XCTAssertLessThan(dark, ContinueWatchingCardShape.artworkDim * 0.7)
+    }
+
+    /// …but a dark card whose logo genuinely blends still gets help, because the
+    /// boost is not scaled by brightness — only the base is.
+    func testDarkArtworkStillGetsHelpWhenTheLogoBlends() {
+        let blends = dim(tone(0.55, 0.15, 0.12), backdrop(0.15, 0.08, 0.05))
+        let clear = dim(tone(0.95, 0.95, 0.95), backdrop(0.15, 0.08, 0.05))
+        XCTAssertGreaterThan(blends, clear + 0.05)
+    }
+
+    /// Brightness is not the only way to separate: a saturated logo on an equally
+    /// bright but differently coloured backdrop reads fine and is left alone.
+    func testHueAloneIsEnoughSeparation() {
+        // Red wordmark on a blue sky of near-identical luminance.
+        let logo = tone(0.80, 0.12, 0.12)
+        let sky = backdrop(0.20, 0.45, 0.75)
+        XCTAssertLessThan(
+            abs(logo.luminance - sky.luminance), 0.2,
+            "fixture must actually be a luminance match for this test to mean anything"
+        )
+        XCTAssertEqual(dim(logo, sky), brightAndClear, accuracy: 0.02)
+    }
+
+    /// …and brightness alone is enough too, when the hues are close.
+    func testBrightnessAloneIsEnoughSeparation() {
+        let white = tone(0.97, 0.97, 0.97)
+        let grey = backdrop(0.62, 0.62, 0.62)
+        XCTAssertEqual(dim(white, grey), brightAndClear, accuracy: 0.02)
+    }
+
+    /// Nothing resolved yet — or a card with no logo — is the base dim, so
+    /// ordinary cards are untouched and nothing shifts while art is loading.
+    func testUnknownInputsAreTheBaseDim() {
+        let base = ContinueWatchingCardShape.artworkDim
+        XCTAssertEqual(dim(nil, nil), base, accuracy: 0.001)
+        XCTAssertEqual(dim(tone(0.5, 0.5, 0.5), nil), base, accuracy: 0.001)
+        XCTAssertEqual(dim(nil, backdrop(0.5, 0.5, 0.5)), base, accuracy: 0.001)
+    }
+
+    /// The boost rises smoothly as the two tones converge. A threshold would mean
+    /// two similar cards sitting on visibly different backdrops.
+    func testDimRisesSmoothlyAsTonesConverge() {
+        let logo = tone(0.70, 0.55, 0.30)
+        var last = dim(logo, backdrop(0, 0, 0))
+        for step in 1...40 {
+            // Walk the backdrop from black up to the logo's own colour.
+            let t = Double(step) / 40
+            let value = dim(logo, backdrop(0.70 * t, 0.55 * t, 0.30 * t))
+            XCTAssertLessThan(abs(value - last), 0.03, "step at t=\(t)")
+            last = value
+        }
+        // Converging on the logo's own colour must end up more dimmed than black.
+        XCTAssertGreaterThan(last, dim(logo, backdrop(0, 0, 0)) + 0.05)
+    }
+
+    /// **The regression this model exists to prevent.** The same logo tone on a
+    /// dark backdrop must be dimmed strictly less than on a backdrop of its own
+    /// colour — that single comparison is the whole difference between Fallout
+    /// (fine as it was) and Oppenheimer (genuinely hard to read).
+    func testSameLogoIsTreatedDifferentlyByItsBackdrop() {
+        let logo = tone(0.90, 0.62, 0.18)
+        let onDark = dim(logo, backdrop(0.07, 0.09, 0.15))
+        let onItsOwnColour = dim(logo, backdrop(0.82, 0.55, 0.16))
+        XCTAssertGreaterThan(onItsOwnColour, onDark + 0.2)
+    }
+
+    /// Bounded at both ends: never lighter than the base, never so dark the
+    /// artwork stops reading as artwork.
+    func testDimStaysWithinBounds() {
+        for r in stride(from: 0.0, through: 1.0, by: 0.1) {
+            for l in stride(from: 0.0, through: 1.0, by: 0.25) {
+                let value = dim(tone(l, l, l), backdrop(r, r, r))
+                // Never inverts into a brightening, and never so dark the artwork
+                // stops reading as artwork.
+                XCTAssertGreaterThan(value, 0)
+                XCTAssertLessThanOrEqual(value, 0.6)
+            }
+        }
+    }
+
+    /// The brightness ramp is smooth and rises with the artwork, so two similar
+    /// cards can't sit on visibly different backdrops.
+    func testBrightnessScaleIsSmoothAndRising() {
+        var previous = ContinueWatchingCardShape.brightnessScale(0)
+        XCTAssertGreaterThan(previous, 0, "even black artwork keeps a little dim")
+        for step in 1...200 {
+            let value = ContinueWatchingCardShape.brightnessScale(Double(step) / 200)
+            XCTAssertGreaterThanOrEqual(value, previous - 0.0001)
+            XCTAssertLessThan(abs(value - previous), 0.02)
+            previous = value
+        }
+        XCTAssertEqual(ContinueWatchingCardShape.brightnessScale(1), 1, accuracy: 0.001)
+    }
+}
+
+/// A logo's mean tone hides its most legible feature, and this is the correction.
+///
+/// The white keyline around a pastel wordmark reads instantly — but averaged into
+/// the pink fill it registers as "pastel logo on pastel picture" and earns a heavy
+/// dim it never needed. Bright ink is counted separately, in the same pixel pass
+/// that already tones every logo.
+final class ContinueWatchingBrightInkTests: XCTestCase {
+
+    private func dim(brightInk: Double) -> CGFloat {
+        // A pastel wordmark on a pastel picture: no separation by tone or hue, so
+        // bright ink is the only thing that can excuse it.
+        ContinueWatchingCardShape.artworkDim(
+            logo: ResolvedLogoTone(
+                luminance: 0.62, coverage: 0.3,
+                red: 0.85, green: 0.55, blue: 0.72, brightInk: brightInk
+            ),
+            background: HeroBackgroundSample(
+                red: 0.75, green: 0.70, blue: 0.80, luminance: 0.72
+            )
+        )
+    }
+
+    /// An outlined logo is dimmed markedly less than the same logo without one.
+    func testBrightInkEarnsABrighterCard() {
+        XCTAssertLessThan(dim(brightInk: 0.40), dim(brightInk: 0.0) - 0.08)
+    }
+
+    /// …but a partial reprieve, not a full one. A keyline helps; it does not make
+    /// a logo immune, which is what let metallic art off entirely when the bar was
+    /// set lower.
+    func testBrightInkDoesNotFullyExcuseALogo() {
+        let outlined = dim(brightInk: 0.35)
+        let none = dim(brightInk: 0.0)
+        let clear = ContinueWatchingCardShape.artworkDim(
+            logo: ResolvedLogoTone(
+                luminance: 0.95, coverage: 0.3,
+                red: 0.97, green: 0.97, blue: 0.97, brightInk: 1
+            ),
+            background: HeroBackgroundSample(red: 0.05, green: 0.05, blue: 0.07, luminance: 0.05)
+        )
+        XCTAssertLessThan(outlined, none)
+        XCTAssertGreaterThan(outlined, clear)
+    }
+
+    /// Monotonic and continuous, so two similar logos can't be treated visibly
+    /// differently.
+    func testBrightInkResponseIsSmoothAndMonotonic() {
+        var previous = dim(brightInk: 0)
+        for step in 1...100 {
+            let value = dim(brightInk: Double(step) / 100)
+            XCTAssertLessThanOrEqual(value, previous + 0.0001)
+            XCTAssertLessThan(abs(value - previous), 0.02)
+            previous = value
+        }
+    }
+
+    /// A logo with no bright ink at all is unaffected by the rule.
+    func testLogosWithoutBrightInkAreUnchanged() {
+        let thinOrange = ResolvedLogoTone(
+            luminance: 0.51, coverage: 0.12,
+            red: 0.85, green: 0.45, blue: 0.15, brightInk: 0
+        )
+        let fire = HeroBackgroundSample(red: 0.75, green: 0.38, blue: 0.12, luminance: 0.44)
+        XCTAssertGreaterThan(
+            ContinueWatchingCardShape.artworkDim(logo: thinOrange, background: fire),
+            ContinueWatchingCardShape.artworkDim
+        )
+    }
+}

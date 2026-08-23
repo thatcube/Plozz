@@ -30,6 +30,8 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
     private let variant: ArtworkImageVariant
     private let previewVariant: ArtworkImageVariant?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
+    private let onResolveReference: ((ArtworkReference?) -> Void)?
+    private let pinIdentity: String?
     private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
 
@@ -39,6 +41,8 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         variant: ArtworkImageVariant = .original,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        onResolveReference: ((ArtworkReference?) -> Void)? = nil,
+        pinIdentity: String? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -47,6 +51,8 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.onResolveReference = onResolveReference
+        self.pinIdentity = pinIdentity
         self.content = content
         self.placeholder = placeholder
     }
@@ -59,6 +65,8 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            onResolveReference: onResolveReference,
+            pinIdentity: pinIdentity,
             content: content,
             placeholder: placeholder
         )
@@ -110,6 +118,7 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            onResolveReference: nil,
             content: ArtworkFillImage.init,
             placeholder: placeholder
         )
@@ -129,6 +138,7 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            onResolveReference: nil,
             content: ArtworkFillImage.init,
             placeholder: placeholder
         )
@@ -196,6 +206,17 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// small, and a second decode there would cost more than it saves.
     let previewVariant: ArtworkImageVariant?
     let asyncFallbackURL: (@Sendable () async -> URL?)?
+    /// Reports which candidate actually won, so a caller can react to WHICH art it
+    /// got and not merely that it got some. `nil` when the async fallback supplied
+    /// it, which is outside the ordered list.
+    let onResolveReference: ((ArtworkReference?) -> Void)?
+    /// Identity this view's picture belongs to (a show, a track).
+    ///
+    /// Used to tell "better art for what is already up" apart from "a different
+    /// subject entirely". The first keeps its current picture on screen while the
+    /// replacement loads; the second must blank, or a recycled view would leave
+    /// the previous show's art showing under the new one's title.
+    let pinIdentity: String?
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
 
@@ -204,6 +225,9 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// Whether `image` is the cheap pass, and so still owes a full-quality swap.
     @State private var isPreviewQuality = false
     @Environment(\.themePalette) private var palette
+    /// The identity `image` was produced for, so the pin above can tell "new
+    /// candidates for the show already on screen" from "a different show".
+    @State private var pinnedIdentity: String?
     /// The `.task` id the current `image`/`resolved` state was produced for. Lets
     /// `resolve()` tell "same inputs, keep the result" apart from "the urls
     /// changed (e.g. the player advanced to a new track), re-resolve" — the view
@@ -217,6 +241,8 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         variant: ArtworkImageVariant,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)?,
+        onResolveReference: ((ArtworkReference?) -> Void)? = nil,
+        pinIdentity: String? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -225,6 +251,8 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.onResolveReference = onResolveReference
+        self.pinIdentity = pinIdentity
         self.content = content
         self.placeholder = placeholder
         // Seed synchronously from the decoded-image cache so an already-warmed card
@@ -244,6 +272,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         _loadedKey = State(initialValue: seeded?.index == references.startIndex
             ? Self.makeKey(references: references, variant: variant, maxAspectRatio: maxAspectRatio)
             : nil)
+        _pinnedIdentity = State(initialValue: seeded != nil ? pinIdentity : nil)
     }
 
     private var taskKey: String {
@@ -270,6 +299,22 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // Same inputs we already resolved for — keep the current result rather
         // than wiping it back to gray and re-resolving.
         if loadedKey == key, image != nil, !isPreviewQuality { return }
+        // Same show, different candidates: a better picture has been found for
+        // what is already on screen. Take it.
+        //
+        // This deliberately does NOT bail out. It used to, on the reasoning that
+        // replacing a painted card is the "art changes as I scroll past" fault —
+        // but that reasoning had the cost backwards. A card only reaches here when
+        // something better exists, and a show first seen this session has no cached
+        // answer, so it paints the server's titled art and would then be forbidden
+        // from ever correcting. The result was a visibly doubled title that sat
+        // there until the viewer happened to scroll far enough to destroy and
+        // rebuild the card. "Wrong until you scroll" is far worse than a swap.
+        //
+        // The swap costs nothing visually because the replacement is only ever
+        // published after it has been fetched and decoded, so it is already in
+        // cache: it lands in a single frame, with no loading state in between.
+        let isSameSubject = pinIdentity != nil && pinnedIdentity == pinIdentity
         // The urls changed (or this is the first run). Prefer a synchronous cache
         // hit for the *new* urls so a warmed image shows with no flash.
         let seeded = Self.cachedUsableImage(
@@ -282,6 +327,8 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             image = seeded.image
             resolved = true
             isPreviewQuality = false
+            pinnedIdentity = pinIdentity
+            onResolveReference?(references.indices.contains(seeded.index) ? references[seeded.index] : nil)
             if seeded.index == references.startIndex {
                 loadedKey = key
                 return
@@ -289,7 +336,13 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         }
         // No cached image for the new inputs: drop any stale art so we never leave
         // a previous track's cover on screen, and show the loading state instead.
-        if seeded == nil, !isPreviewQuality {
+        //
+        // Unless it is the same subject, in which case what is on screen is not
+        // stale, just second-best: keep it up and swap only once the replacement
+        // has actually loaded. This is what makes correcting a painted card free —
+        // the card is never blanked to fetch something it is already showing an
+        // acceptable version of.
+        if seeded == nil, !isPreviewQuality, !isSameSubject {
             image = nil
             resolved = false
         }
@@ -325,6 +378,8 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                pinnedIdentity = pinIdentity
+                onResolveReference?(reference)
                 return
             }
             // 2) Nothing usable from the provider — try the async fallback (TMDb).
@@ -335,6 +390,8 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                pinnedIdentity = pinIdentity
+                onResolveReference?(nil)
                 return
             }
             // Cancelled (the cell scrolled away, or the inputs changed): leave

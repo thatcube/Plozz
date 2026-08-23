@@ -1391,6 +1391,24 @@ public struct JellyfinProvider: MediaProvider {
         }()
         let hasContainerHistory = isContainer
             && ((playedPercentage ?? 0) > 0 || (watchedChildren ?? 0) > 0)
+        // Jellyfin computes a leaf's `PlayedPercentage` as position ÷ runtime, so
+        // a response carrying both a playback position and a percentage has
+        // already told us the runtime even when it omits `RunTimeTicks`. Recover
+        // it rather than dropping it: the card draws its progress bar from the
+        // percentage alone, so without this it shows a bar it cannot label — which
+        // is how a Continue Watching card ended up reading "S1, E2" with no
+        // duration beside a bar showing real progress.
+        //
+        // Containers are untouched by design. A series' percentage is a count of
+        // watched episodes and comes with no position, so nothing is inferred and
+        // a series goes on having no runtime, which is correct — it doesn't have
+        // one.
+        let runtime = JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? Self.runtimeInferredFromProgress(
+                position: resumePosition,
+                fraction: playedPercentage
+            )
         return MediaItem(
             id: dto.Id,
             title: dto.Name ?? "Untitled",
@@ -1421,7 +1439,7 @@ public struct JellyfinProvider: MediaProvider {
             taglines: dto.Taglines ?? [],
             seriesID: dto.SeriesId ?? (kind == .season ? dto.ParentId : nil),
             seasonID: dto.SeasonId,
-            runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
+            runtime: runtime,
             resumePosition: resumePosition,
             playedPercentage: playedPercentage,
             isPlayed: serverPlayed && !isRewatching,
@@ -1567,6 +1585,29 @@ public struct JellyfinProvider: MediaProvider {
             value.replaceSubrange(dot, with: "." + digits)
         }
         return iso8601Fractional.date(from: value) ?? iso8601Plain.date(from: value)
+    }
+
+    /// Recovers a leaf's runtime from its own progress when the server omitted it.
+    ///
+    /// Only for items that report an actual playback position: that is what makes
+    /// the arithmetic exact rather than a guess, and it is also what keeps
+    /// containers out — a series' percentage counts watched episodes and carries
+    /// no position, so it infers nothing and correctly keeps no runtime.
+    ///
+    /// Bounded on both sides because dividing by a small fraction magnifies the
+    /// rounding in whatever the server rounded first, and a wildly wrong runtime
+    /// is worse than an absent one: a card that omits the duration looks
+    /// incomplete, but a card claiming "14h left" looks broken.
+    static func runtimeInferredFromProgress(
+        position: TimeInterval?,
+        fraction: Double?
+    ) -> TimeInterval? {
+        guard let position, position > 0,
+              let fraction, fraction >= 0.01, fraction < 1
+        else { return nil }
+        let inferred = position / fraction
+        guard inferred >= 30, inferred <= 24 * 60 * 60 else { return nil }
+        return inferred
     }
 
 

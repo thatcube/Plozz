@@ -125,3 +125,425 @@ final class PosterCardPresentationTests: XCTestCase {
     }
 }
 #endif
+
+/// Which artwork already has the show's name printed on it.
+///
+/// A poster is designed to be seen alone, so it is designed to name itself.
+/// Laying our own wordmark over one prints the title twice — which is what the
+/// "Let's go KAIKIGUMI" and "Black Cat and a Witch" cards were doing, because
+/// those series have no untitled wide art and the poster is all there is.
+final class TitleBearingArtworkTests: XCTestCase {
+
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    /// An episode's *series poster* names the show, so a card that falls back to
+    /// it must not name it again.
+    func testSeriesPosterCountsAsTitleBearing() {
+        let episode = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            seriesPosterURL: url("https://example.test/series-poster.jpg")
+        )
+        XCTAssertTrue(
+            PosterCardPresentation.titleBearingArtwork(for: episode)
+                .contains(.remote(url("https://example.test/series-poster.jpg")))
+        )
+    }
+
+    /// A backdrop is not key art and is left alone — this is the common case, and
+    /// the one that must keep its logo.
+    func testBackdropIsNotTitleBearing() {
+        let episode = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            seriesPosterURL: url("https://example.test/series-poster.jpg"),
+            backdropURL: url("https://example.test/backdrop.jpg"),
+            fallbackArtworkURL: url("https://example.test/series-backdrop.jpg")
+        )
+        let titled = PosterCardPresentation.titleBearingArtwork(for: episode)
+        XCTAssertFalse(titled.contains(.remote(url("https://example.test/backdrop.jpg"))))
+        XCTAssertFalse(titled.contains(.remote(url("https://example.test/series-backdrop.jpg"))))
+    }
+
+    /// A movie or series *is* the show, so its own poster is the one that names it.
+    func testOwnPosterCountsForAMovie() {
+        let movie = MediaItem(
+            id: "m", title: "A Movie", kind: .movie,
+            posterURL: url("https://example.test/poster.jpg")
+        )
+        XCTAssertTrue(
+            PosterCardPresentation.titleBearingArtwork(for: movie)
+                .contains(.remote(url("https://example.test/poster.jpg")))
+        )
+    }
+
+    /// An episode's OWN poster is its still, not the show's key art, so it names
+    /// nothing and must not suppress the logo.
+    func testEpisodeOwnPosterIsNotTreatedAsKeyArt() {
+        let episode = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            posterURL: url("https://example.test/episode-still.jpg")
+        )
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: episode)
+                .contains(.remote(url("https://example.test/episode-still.jpg")))
+        )
+    }
+
+    /// An item with no artwork at all suppresses nothing.
+    func testNoArtworkSuppressesNothing() {
+        let bare = MediaItem(id: "x", title: "Bare", kind: .series)
+        XCTAssertTrue(PosterCardPresentation.titleBearingArtwork(for: bare).isEmpty)
+    }
+}
+
+/// The blanket "an anime's backdrop is titled" rule was tried and reverted, and
+/// these pin the revert so it is not re-derived from the same reasoning. Whether
+/// a backdrop has the title burned into it is a fact about the pixels, and the
+/// genre/id test that stood in for it was wrong in both directions at once.
+final class AnimeBackdropKeepsItsLogoTests: XCTestCase {
+
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    private func animeEpisode() -> MediaItem {
+        MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            genres: ["Anime"],
+            fallbackArtworkURL: url("https://example.test/series-backdrop.jpg")
+        )
+    }
+
+    /// The false-positive half of the reverted rule. "Arcane" carries an anime
+    /// label but has an ordinary textless backdrop, and the rule took its logo
+    /// away — a card the viewer had no complaint about before.
+    func testAnimeLabelledBackdropIsNotTreatedAsTitled() {
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: animeEpisode())
+                .contains(.remote(url("https://example.test/series-backdrop.jpg")))
+        )
+    }
+
+    /// Recognised-by-provider-id was the wider half of the same test, and is
+    /// equally not evidence about the picture.
+    func testAnimeProviderIDBackdropIsNotTreatedAsTitled() {
+        let byID = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            fallbackArtworkURL: url("https://example.test/b.jpg"),
+            providerIDs: ["AniList": "12345"]
+        )
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: byID)
+                .contains(.remote(url("https://example.test/b.jpg")))
+        )
+    }
+
+    /// Live action was never affected, and still isn't — the rule that survives
+    /// is about slots, and a backdrop slot is a backdrop slot either way.
+    func testLiveActionBackdropIsUnaffected() {
+        let liveAction = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            genres: ["Drama"],
+            fallbackArtworkURL: url("https://example.test/series-backdrop.jpg")
+        )
+        XCTAssertFalse(
+            PosterCardPresentation.titleBearingArtwork(for: liveAction)
+                .contains(.remote(url("https://example.test/series-backdrop.jpg")))
+        )
+    }
+
+    /// What does survive: an anime's *poster* still names itself, exactly as a
+    /// live-action one does. The slot rule is unchanged by the revert.
+    func testAnimePosterIsStillTitleBearing() {
+        let withPoster = MediaItem(
+            id: "e", title: "Episode 7", kind: .episode,
+            genres: ["Anime"],
+            seriesPosterURL: url("https://example.test/series-poster.jpg")
+        )
+        XCTAssertTrue(
+            PosterCardPresentation.titleBearingArtwork(for: withPoster)
+                .contains(.remote(url("https://example.test/series-poster.jpg")))
+        )
+    }
+}
+
+/// Continue Watching draws the show's logo over the show's picture, so it wants a
+/// picture with no lettering in it. Since no metadata field says whether a given
+/// backdrop has words baked in, the card asks for art that is textless by
+/// construction instead of guessing — these pin how that answer is used.
+final class TextlessBackdropPreferenceTests: XCTestCase {
+
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    private var ladder: [ArtworkReference] {
+        [
+            .remote(url("https://server.test/backdrop.jpg")),
+            .remote(url("https://server.test/poster.jpg")),
+        ]
+    }
+
+    /// No answer yet is the common case on a cold launch, and must cost nothing:
+    /// the card falls back to exactly the ladder it had before.
+    func testNoTextlessAnswerLeavesTheLadderUntouched() {
+        XCTAssertEqual(PosterCardPresentation.preferringTextless(nil, over: ladder), ladder)
+    }
+
+    /// The clean picture leads, and the server's art stays behind it — "textless"
+    /// describes the URL we resolved, not a promise that it loads, and a blank
+    /// card is worse than a doubled title.
+    func testTextlessLeadsButServerArtIsKeptAsBackup() {
+        let clean = url("https://tmdb.test/textless.jpg")
+        let ordered = PosterCardPresentation.preferringTextless(clean, over: ladder)
+        XCTAssertEqual(ordered.first, .remote(clean))
+        XCTAssertEqual(ordered.count, ladder.count + 1)
+        for reference in ladder {
+            XCTAssertTrue(ordered.contains(reference), "dropped \(reference)")
+        }
+    }
+
+    /// The resolved backdrop is sometimes the very picture the server was already
+    /// serving. Naming it twice would make the retry loop try it twice before
+    /// moving on, turning one dead URL into two wasted passes.
+    func testAnAnswerAlreadyInTheLadderIsNotListedTwice() {
+        let shared = url("https://server.test/backdrop.jpg")
+        let ordered = PosterCardPresentation.preferringTextless(shared, over: ladder)
+        XCTAssertEqual(ordered.first, .remote(shared))
+        XCTAssertEqual(ordered.count, ladder.count)
+        XCTAssertEqual(ordered.filter { $0 == .remote(shared) }.count, 1)
+    }
+}
+
+/// Continue Watching is one card per show, so the store has to answer per show.
+@MainActor
+final class TextlessBackdropStoreKeyTests: XCTestCase {
+
+    /// Keying an episode by its own id would ask the router once per episode for
+    /// one answer that belongs to the series — and would miss the cache every
+    /// time the viewer advanced an episode.
+    func testEpisodesAreKeyedByTheirSeries() {
+        let first = MediaItem(id: "ep1", title: "E1", kind: .episode, seriesID: "show")
+        let second = MediaItem(id: "ep2", title: "E2", kind: .episode, seriesID: "show")
+        XCTAssertEqual(TextlessBackdropStore.key(for: first), "show")
+        XCTAssertEqual(TextlessBackdropStore.key(for: second), "show")
+    }
+
+    /// An episode with no series id still has to key to something stable.
+    func testAnOrphanEpisodeFallsBackToItsOwnID() {
+        let orphan = MediaItem(id: "ep1", title: "E1", kind: .episode)
+        XCTAssertEqual(TextlessBackdropStore.key(for: orphan), "ep1")
+    }
+
+    /// A movie or series already *is* the show, so it keys to itself.
+    func testAMovieKeysToItself() {
+        let movie = MediaItem(id: "m1", title: "Movie", kind: .movie)
+        XCTAssertEqual(TextlessBackdropStore.key(for: movie), "m1")
+    }
+
+    /// Nothing is published until the picture behind it is decoded, so a store
+    /// that has not been warmed answers nil rather than a URL a card would have
+    /// to wait on.
+    func testAnUnwarmedStoreAnswersNothing() {
+        let store = TextlessBackdropStore()
+        XCTAssertNil(store.backdrop(for: MediaItem(id: "m1", title: "Movie", kind: .movie)))
+    }
+}
+
+/// When no textless art exists anywhere, the picture we are left with is the
+/// server's promotional key art — which is where burned-in titles live.
+@MainActor
+final class TextlessBackdropSuppressionTests: XCTestCase {
+
+    private func anime() -> MediaItem {
+        MediaItem(id: "s1", title: "Some Anime", kind: .series, genres: ["Anime"])
+    }
+
+    private func liveAction() -> MediaItem {
+        MediaItem(id: "s2", title: "Some Drama", kind: .series, genres: ["Drama"])
+    }
+
+    /// The whole point of the tri-state. "Haven't heard back" must never license
+    /// taking a logo away — that is indistinguishable from a slow network, and
+    /// acting on it is how a card loses a logo it should have kept.
+    func testAnUnansweredShowKeepsItsLogo() {
+        let store = TextlessBackdropStore()
+        XCTAssertFalse(store.suppressesLogo(for: anime()))
+    }
+
+    /// Live action is out of scope whatever its artwork situation, so the mass
+    /// logo loss from the reverted genre rule cannot recur through this path.
+    func testLiveActionKeepsItsLogoEvenWithNoTextlessArt() {
+        let store = TextlessBackdropStore()
+        store.recordForTesting(.none, for: liveAction())
+        XCTAssertFalse(store.suppressesLogo(for: liveAction()))
+    }
+
+    /// A show with clean art keeps its logo — this is the condition that protects
+    /// Arcane, which the genre test alone got wrong.
+    func testAnimeWithTextlessArtKeepsItsLogo() {
+        let store = TextlessBackdropStore()
+        store.recordForTesting(.available(URL(string: "https://tmdb.test/clean.jpg")!), for: anime())
+        XCTAssertFalse(store.suppressesLogo(for: anime()))
+    }
+
+    /// Both conditions together: the narrow case the row actually has.
+    func testAnimeWithNoTextlessArtAnywhereDropsItsLogo() {
+        let store = TextlessBackdropStore()
+        store.recordForTesting(.none, for: anime())
+        XCTAssertTrue(store.suppressesLogo(for: anime()))
+    }
+
+    /// The answer is derived, never memoized. An outcome only moves from unknown
+    /// to conclusive and never back, so this cannot oscillate — and memoizing it
+    /// would freeze a first-encounter guess, which is what left a newly seen show
+    /// showing a doubled title for the whole session.
+    func testALateAnswerIsAdoptedRatherThanFrozenOut() {
+        let store = TextlessBackdropStore()
+        XCTAssertFalse(store.suppressesLogo(for: anime()), "nothing known yet")
+        store.recordForTesting(.none, for: anime())
+        XCTAssertTrue(
+            store.suppressesLogo(for: anime()),
+            "the conclusive answer must be used the moment it exists"
+        )
+    }
+}
+
+/// The whole value of persisting these answers is that they are present on the
+/// FIRST frame. Without it the row's first screenful renders before the router
+/// can reply, paints the server's titled art, memoizes "keep the logo", and then
+/// holds that for the session — correcting only when scrolling far enough tears
+/// the card down and rebuilds it, which is what made the fault look like it was
+/// fixing itself at random.
+@MainActor
+final class TextlessBackdropIndexTests: XCTestCase {
+
+    private var directory: URL!
+
+    override func setUp() {
+        super.setUp()
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("textless-index-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: directory)
+        super.tearDown()
+    }
+
+    private func anime(_ id: String) -> MediaItem {
+        MediaItem(id: id, title: "Anime \(id)", kind: .series, genres: ["Anime"])
+    }
+
+    /// A conclusive miss survives a relaunch, so the second launch suppresses the
+    /// logo on its first frame instead of a scroll later.
+    func testAConclusiveMissIsKnownOnTheNextLaunchsFirstFrame() {
+        let index = TextlessBackdropIndex(directory: directory)
+        let first = TextlessBackdropStore(store: index)
+        first.recordForTesting(.none, for: anime("s1"))
+        index.flushForTesting()
+
+        let relaunched = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertTrue(
+            relaunched.suppressesLogo(for: anime("s1")),
+            "the answer must be readable synchronously, before any async work can run"
+        )
+    }
+
+    /// The URL survives too, so the card leads with clean art from frame one
+    /// rather than painting the server's titled art and pinning it.
+    func testAResolvedBackdropIsKnownOnTheNextLaunchsFirstFrame() {
+        let url = URL(string: "https://tmdb.test/clean.jpg")!
+        let index = TextlessBackdropIndex(directory: directory)
+        let first = TextlessBackdropStore(store: index)
+        first.recordForTesting(.available(url), for: anime("s2"))
+        index.flushForTesting()
+
+        let relaunched = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertEqual(relaunched.backdrop(for: anime("s2")), url)
+        XCTAssertFalse(relaunched.suppressesLogo(for: anime("s2")))
+    }
+
+    /// Nothing on disk is still "not answered", never a conclusive miss — the
+    /// distinction the whole design rests on.
+    func testAnEmptyIndexAnswersUnknownRatherThanNone() {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertNil(store.backdrop(for: anime("s3")))
+        XCTAssertFalse(store.suppressesLogo(for: anime("s3")))
+    }
+
+    /// A corrupt file must degrade to "unknown" and re-resolve, not crash and not
+    /// be read as a miss that silently strips logos.
+    func testACorruptIndexIsTreatedAsUnknown() {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? Data("not json".utf8).write(to: directory.appendingPathComponent("index.json"))
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertFalse(store.suppressesLogo(for: anime("s4")))
+    }
+}
+
+/// A card must know which picture to draw before it draws one. Textless art is
+/// this feature's primary source and the server's art is its fallback, so
+/// painting the server's first and correcting later has the relationship
+/// backwards — and left a newly seen show visibly wrong until a scroll happened
+/// to rebuild the card.
+@MainActor
+final class TextlessAnswerReadinessTests: XCTestCase {
+
+    private func directory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    private func show() -> MediaItem {
+        MediaItem(id: "s1", title: "Anime", kind: .series, genres: ["Anime"])
+    }
+
+    /// A show nobody has looked up yet is not ready, so the card waits rather than
+    /// committing to art it may be about to replace.
+    func testAnUnknownShowIsNotReady() {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        XCTAssertFalse(store.hasAnswer(for: show()))
+    }
+
+    /// "There is none" is an answer. The card can proceed straight to the
+    /// server's art, which is exactly what the fallback is for.
+    func testAConclusiveMissCountsAsAnAnswer() {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        store.recordForTesting(.none, for: show())
+        XCTAssertTrue(store.hasAnswer(for: show()))
+    }
+
+    /// The path that has to cost nothing: on every launch after a show's first
+    /// appearance the answer is read back from disk synchronously, so the card is
+    /// ready on its first frame and never shows a placeholder at all.
+    func testAPreviouslyAnsweredShowIsReadyOnTheFirstFrame() {
+        let directory = directory()
+        let index = TextlessBackdropIndex(directory: directory)
+        let first = TextlessBackdropStore(store: index)
+        first.recordForTesting(.available(URL(string: "https://tmdb.test/clean.jpg")!), for: show())
+        index.flushForTesting()
+
+        let relaunched = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory))
+        XCTAssertTrue(
+            relaunched.hasAnswer(for: show()),
+            "the answer must be readable before any async work can run"
+        )
+    }
+
+    /// A card waiting on a show is woken when the answer lands. Without this the
+    /// answer reaches a dictionary no view is watching, and the card goes on
+    /// drawing what it chose before the answer existed.
+    func testAWaitingCardIsWokenWhenTheAnswerArrives() async {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        let waiting = Task { await store.answerSettled(for: show()) }
+        // Let the waiter register before the answer lands.
+        await Task.yield()
+        store.recordForTesting(.none, for: show())
+        await waiting.value
+        XCTAssertTrue(store.hasAnswer(for: show()))
+    }
+
+    /// Already-answered shows must not suspend at all, or every card on a warm
+    /// launch would wait a turn for nothing.
+    func testAnAlreadyAnsweredShowDoesNotSuspend() async {
+        let store = TextlessBackdropStore(store: TextlessBackdropIndex(directory: directory()))
+        store.recordForTesting(.none, for: show())
+        await store.answerSettled(for: show())
+    }
+}

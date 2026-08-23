@@ -45,10 +45,24 @@ import UIKit
 public final class TextlessBackdropStore {
     public static let shared = TextlessBackdropStore()
 
-    /// Series key → decoded, resident textless backdrop.
-    private var resolved: [String: URL] = [:]
+    /// What the router had to say about a show's clean wide art.
+    enum Outcome: Equatable {
+        /// A textless backdrop, already fetched and decoded.
+        case available(URL)
+        /// The router looked and there is none. This is the *conclusive* answer,
+        /// distinct from having no entry at all, and it is the only thing that
+        /// licenses suppressing a logo.
+        case none
+    }
+
+    /// Series key → what we know. Absent means "not answered yet", which is not
+    /// the same as ``Outcome/none`` and must never be treated as it.
+    private var outcomes: [String: Outcome] = [:]
     /// In flight or already answered, so a row that re-appears never re-asks.
     private var attempted: Set<String> = []
+    /// First logo decision made for a show, kept for the session. See
+    /// ``suppressesLogo(for:)``.
+    private var logoDecisions: [String: Bool] = [:]
 
     public init() {}
 
@@ -58,16 +72,55 @@ public final class TextlessBackdropStore {
     /// `nil` here is not "there is none" — it is "not in time", which the caller
     /// must treat as final for that card rather than waiting.
     public func backdrop(for item: MediaItem) -> URL? {
-        resolved[Self.key(for: item)]
+        guard case .available(let url) = outcomes[Self.key(for: item)] else { return nil }
+        return url
+    }
+
+    /// Whether this card should leave its logo off because the picture it is about
+    /// to draw almost certainly has the title in it already.
+    ///
+    /// Two conditions, and both are required:
+    ///
+    /// 1. The router **conclusively** found no textless backdrop. Not "hasn't
+    ///    answered" — actually looked and came back empty. When a source that
+    ///    labels its own textless art has none, the art we are left with is the
+    ///    server's promotional key art, which is where burned-in titles live.
+    /// 2. The item is anime.
+    ///
+    /// Condition 2 on its own was tried and reverted: it took Arcane's logo away
+    /// along with every other anime's. What makes it safe here is that it is
+    /// second. Arcane fails condition 1 — TMDb has clean art for it — so it never
+    /// reaches the anime test at all, and neither does any other show with a
+    /// textless backdrop to its name. And because condition 1 comes first, no
+    /// live-action show is affected whatever its artwork situation, so the mass
+    /// logo loss cannot recur. What is left is the narrow case the row actually
+    /// has: niche anime, no clean art anywhere, title baked into the only picture
+    /// there is.
+    ///
+    /// ### Decided once per show per session
+    ///
+    /// Body runs constantly on tvOS — every focus move re-renders the row — so a
+    /// decision that could flip mid-life would take a logo off a card the viewer
+    /// is looking at. The first answer is memoized and kept. A card that renders
+    /// before the router replies therefore keeps its logo for this session and
+    /// corrects on the next launch, when the answer is already on disk. That is
+    /// the same bargain the artwork makes, and for the same reason: being right
+    /// one launch late is much cheaper than changing under the viewer.
+    func suppressesLogo(for item: MediaItem) -> Bool {
+        let key = Self.key(for: item)
+        if let decided = logoDecisions[key] { return decided }
+        let decision = outcomes[key] == Outcome.none && ContentClassifier.isAnime(item)
+        logoDecisions[key] = decision
+        return decision
     }
 
     /// Resolves and warms `item`'s textless backdrop, once per show per session.
     ///
     /// Called from the row's existing forward-window prefetch, so the work is
     /// already done by the time the card is reached. The first-ever launch is the
-    /// only one that pays a network cost: the router memoizes the URL to disk, so
-    /// every later launch resolves it locally and only the picture is fetched —
-    /// and that is usually already in the image cache too.
+    /// only one that pays a network cost: the router memoizes the URL to disk —
+    /// *and memoizes the misses too*, which is what makes condition 1 above cheap
+    /// on every later launch.
     public func warm(for item: MediaItem, variant: ArtworkImageVariant) {
         #if canImport(UIKit)
         let key = Self.key(for: item)
@@ -75,24 +128,45 @@ public final class TextlessBackdropStore {
         attempted.insert(key)
         let seriesItem = Self.seriesItem(for: item)
         Task { [weak self] in
+            var cancelled = false
             let url = await ArtworkSession.artworkResolveLimiter.run { () -> URL? in
-                if Task.isCancelled { return nil }
+                if Task.isCancelled { cancelled = true; return nil }
                 return await ArtworkRouter.shared.artworkURL(.hero, for: seriesItem)
             }
-            guard let url else { return }
+            // A cancelled resolve proves nothing about what exists, so it must not
+            // be recorded as a conclusive miss — that would suppress a logo on the
+            // strength of a scroll that happened to interrupt us.
+            guard !cancelled else { self?.forget(key); return }
+            guard let url else { self?.record(.none, for: key); return }
             // Decode before publishing — see the type's note. `background: true`
             // keeps the decode off the main thread so a scrolling row never
             // stutters for art no card is waiting on.
             guard await ArtworkImageCache.shared.image(
                 for: url, variant: variant, background: true
-            ) != nil else { return }
-            self?.publish(url, for: key)
+            ) != nil else {
+                // The art exists, we just could not load it this time. Also not a
+                // miss: leave it unknown so a later launch retries.
+                self?.forget(key)
+                return
+            }
+            self?.record(.available(url), for: key)
         }
         #endif
     }
 
-    private func publish(_ url: URL, for key: String) {
-        resolved[key] = url
+    private func record(_ outcome: Outcome, for key: String) {
+        outcomes[key] = outcome
+    }
+
+    /// Seeds an outcome without going near the network, so the decision table
+    /// above can be exercised directly.
+    func recordForTesting(_ outcome: Outcome, for item: MediaItem) {
+        record(outcome, for: Self.key(for: item))
+    }
+
+    /// Drops an inconclusive attempt so the next appearance tries again.
+    private func forget(_ key: String) {
+        attempted.remove(key)
     }
 
     /// Continue Watching is one card per *show*, so an episode's art is keyed by

@@ -851,8 +851,8 @@ public struct PosterCardView: View {
             neutralPlaceholder
         }
         // A logo drawn over art that already shows the title says it twice — see
-        // ``titleBearingArtwork``.
-        .overlay { if !artworkAlreadyCarriesTitle { seriesLogo } }
+        // ``titleBearingArtwork`` and ``TextlessBackdropStore/suppressesLogo(for:)``.
+        .overlay { if !suppressesSeriesLogo { seriesLogo } }
         // The show's name moved onto the artwork (as a logo, which carries no text
         // for VoiceOver), and out of the caption — which now reads "S2 · E5". Name
         // the artwork so the card still announces WHAT it is, not just where in it
@@ -863,6 +863,13 @@ public struct PosterCardView: View {
 
     private var titleBearingArtwork: Set<ArtworkReference> {
         PosterCardPresentation.titleBearingArtwork(for: item)
+    }
+
+    /// Whether to leave the logo off entirely, for either reason: the winning
+    /// candidate is a slot that names itself, or no textless art exists anywhere
+    /// for a show whose only art is titled promotional key art.
+    private var suppressesSeriesLogo: Bool {
+        artworkAlreadyCarriesTitle || TextlessBackdropStore.shared.suppressesLogo(for: item)
     }
 
     /// For an episode this is the spoiler-safe series ladder (never the episode's

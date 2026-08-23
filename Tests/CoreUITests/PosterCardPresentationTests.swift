@@ -344,3 +344,60 @@ final class TextlessBackdropStoreKeyTests: XCTestCase {
         XCTAssertNil(store.backdrop(for: MediaItem(id: "m1", title: "Movie", kind: .movie)))
     }
 }
+
+/// When no textless art exists anywhere, the picture we are left with is the
+/// server's promotional key art — which is where burned-in titles live.
+@MainActor
+final class TextlessBackdropSuppressionTests: XCTestCase {
+
+    private func anime() -> MediaItem {
+        MediaItem(id: "s1", title: "Some Anime", kind: .series, genres: ["Anime"])
+    }
+
+    private func liveAction() -> MediaItem {
+        MediaItem(id: "s2", title: "Some Drama", kind: .series, genres: ["Drama"])
+    }
+
+    /// The whole point of the tri-state. "Haven't heard back" must never license
+    /// taking a logo away — that is indistinguishable from a slow network, and
+    /// acting on it is how a card loses a logo it should have kept.
+    func testAnUnansweredShowKeepsItsLogo() {
+        let store = TextlessBackdropStore()
+        XCTAssertFalse(store.suppressesLogo(for: anime()))
+    }
+
+    /// Live action is out of scope whatever its artwork situation, so the mass
+    /// logo loss from the reverted genre rule cannot recur through this path.
+    func testLiveActionKeepsItsLogoEvenWithNoTextlessArt() {
+        let store = TextlessBackdropStore()
+        store.recordForTesting(.none, for: liveAction())
+        XCTAssertFalse(store.suppressesLogo(for: liveAction()))
+    }
+
+    /// A show with clean art keeps its logo — this is the condition that protects
+    /// Arcane, which the genre test alone got wrong.
+    func testAnimeWithTextlessArtKeepsItsLogo() {
+        let store = TextlessBackdropStore()
+        store.recordForTesting(.available(URL(string: "https://tmdb.test/clean.jpg")!), for: anime())
+        XCTAssertFalse(store.suppressesLogo(for: anime()))
+    }
+
+    /// Both conditions together: the narrow case the row actually has.
+    func testAnimeWithNoTextlessArtAnywhereDropsItsLogo() {
+        let store = TextlessBackdropStore()
+        store.recordForTesting(.none, for: anime())
+        XCTAssertTrue(store.suppressesLogo(for: anime()))
+    }
+
+    /// Body runs on every focus move, so a decision that could flip mid-life would
+    /// pull a logo off a card being looked at. First answer wins for the session.
+    func testTheFirstDecisionIsKeptEvenWhenTheAnswerArrivesLater() {
+        let store = TextlessBackdropStore()
+        XCTAssertFalse(store.suppressesLogo(for: anime()))
+        store.recordForTesting(.none, for: anime())
+        XCTAssertFalse(
+            store.suppressesLogo(for: anime()),
+            "a late conclusive miss must not retro-actively strip a logo already on screen"
+        )
+    }
+}

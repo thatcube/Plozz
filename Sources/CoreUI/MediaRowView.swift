@@ -824,13 +824,25 @@ public enum MediaArtworkPrefetchPolicy {
             guard item.kind == .episode else { return item.artworkCandidates(for: style) }
             return seriesArtworkCandidates(for: item, style: style)
         }
-        if spoilerSettings.mode == .placeholder,
-           spoilerSettings.shouldHideThumbnail(for: item) {
-            // Mirrors `PosterCardView.placeholderArtworkReferences`: series-level
-            // art only, ordered for the card's shape. Kept in step with that
-            // ladder so the image warmed here is the one the card actually paints
-            // — warming only `fallbackArtworkURL` meant Plex and direct-share
-            // cards prefetched nothing at all, since neither ever set it.
+        if item.kind == .episode,
+           spoilerSettings.shouldHideThumbnail(for: item),
+           spoilerSettings.mode == .placeholder || style == .poster {
+            // Mirrors `PosterCardView`'s two spoiler-safe paths: `.placeholder`
+            // mode on any shape, and every poster-shaped episode card regardless
+            // of mode (see `showsSpoilerSafePoster` — those draw series art sharp
+            // rather than blurring it). Series-level art only, ordered for the
+            // card's shape. Kept in step with that ladder so the image warmed here
+            // is the one the card actually paints — warming only
+            // `fallbackArtworkURL` meant Plex and direct-share cards prefetched
+            // nothing at all, since neither ever set it.
+            //
+            // The `.episode` test is redundant today (`shouldHideThumbnail` only
+            // ever answers true for an episode) and is here anyway, because the
+            // view's `showsSpoilerSafePoster` checks it independently. Without it
+            // the two sides are only correct by coupling: widen the spoiler rule
+            // to another kind — as `shouldHideRatings` was widened to series and
+            // seasons — and this would warm series art for a movie whose own
+            // poster the card is still drawing.
             return seriesArtworkCandidates(for: item, style: style)
         }
         return item.artworkCandidates(for: style)

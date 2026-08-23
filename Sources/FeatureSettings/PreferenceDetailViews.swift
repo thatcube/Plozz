@@ -150,7 +150,11 @@ struct SpoilerRowsBuilder {
             SettingsSplitRow(
                 id: "spoilers",
                 title: "Spoilers",
-                description: "Hide unwatched episodes and ratings until you've seen them.",
+                description: LocalizedStringResource(
+                    "settings.spoilers.description",
+                    defaultValue: "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them.",
+                    comment: "Description under the Spoilers heading in tvOS Settings, explaining what the switches below it do. 'Press' is the Apple TV remote's Select button."
+                ),
             ) {
                 VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
                     SettingsRevealSection(

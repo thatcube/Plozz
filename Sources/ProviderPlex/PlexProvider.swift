@@ -1171,6 +1171,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             seasonNumber: isEpisode ? dto.parentIndex : (kind == .season ? dto.index : nil),
             episodeNumber: isEpisode ? dto.index : nil,
             productionYear: dto.year,
+            releaseDate: Self.releaseDate(from: dto.originallyAvailableAt),
             officialRating: dto.contentRating,
             genres: dto.Genre?.compactMap(\.tag) ?? [],
             people: people(from: dto),
@@ -1720,6 +1721,12 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     private func isTextSubtitleCodec(_ codec: String?) -> Bool {
         guard let codec = codec?.lowercased() else { return false }
         return ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text", "ttml", "smi", "sami"].contains(codec)
+    }
+
+    /// Anchored to UTC because Plex's `originallyAvailableAt` is a bare calendar
+    /// day with no zone; see ``MediaItem/calendarDayReleaseDate(from:)``.
+    static func releaseDate(from originallyAvailableAt: String?) -> Date? {
+        MediaItem.calendarDayReleaseDate(from: originallyAvailableAt)
     }
 
     private static func kind(forItemType type: String?) -> MediaItemKind {

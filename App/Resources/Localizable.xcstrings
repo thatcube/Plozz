@@ -112781,6 +112781,7 @@
       }
     },
     "Episode titles, summaries, and artwork can be hidden until you watch them." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -130977,6 +130978,7 @@
       }
     },
     "Hide unwatched episodes and ratings until you've seen them." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -220230,6 +220232,227 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "評分"
+          }
+        }
+      }
+    },
+    "Ratings are hidden until you've watched this. Reveals them anyway." : {
+      "comment" : "Accessibility hint on the control that lifts the spoiler blur over a title's ratings.",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "التقييمات مخفية حتى تشاهده. يكشفها على أي حال."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Оценките са скрити, докато не изгледате това. Показва ги въпреки това."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Les valoracions estan amagades fins que ho vegis. Les mostra igualment."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hodnocení je skryté, dokud to nezhlédnete. Přesto je odhalí."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bedømmelser er skjult, indtil du har set denne. Viser dem alligevel."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bewertungen sind ausgeblendet, bis du das gesehen hast. Zeigt sie trotzdem an."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Οι βαθμολογίες είναι κρυμμένες μέχρι να το παρακολουθήσετε. Τις εμφανίζει έτσι κι αλλιώς."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Las puntuaciones están ocultas hasta que lo hayas visto. Las muestra de todos modos."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "امتیازها تا زمانی که این را تماشا نکرده باشید پنهان می‌مانند. با این حال آنها را نمایش می‌دهد."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Arviot on piilotettu, kunnes olet katsonut tämän. Näyttää ne silti."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Les notes sont masquées jusqu’à ce que vous ayez regardé ce titre. Les affiche quand même."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הדירוגים מוסתרים עד שתצפה בו. מציג אותם בכל זאת."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "इसे देखने तक रेटिंग छिपी रहती हैं. फिर भी उन्हें दिखाता है."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ocjene su skrivene dok ovo ne pogledate. Svejedno ih otkriva."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Az értékelések rejtve vannak, amíg ezt meg nem nézi. Ennek ellenére megjeleníti őket."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Penilaian disembunyikan hingga Anda menontonnya. Tetap menampilkannya."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Le valutazioni sono nascoste finché non lo guardi. Le mostra comunque."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "視聴するまで評価は非表示になっています。それでも表示します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "이 항목을 시청할 때까지 평점이 숨겨집니다. 그래도 평점을 표시합니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Penilaian disembunyikan sehingga anda menonton tajuk ini. Tetap mendedahkannya."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vurderinger er skjult til du har sett dette. Viser dem likevel."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Beoordelingen zijn verborgen totdat je dit hebt bekeken. Onthult ze toch."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Oceny są ukryte, dopóki tego nie obejrzysz. Odsłania je mimo to."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "As avaliações ficam ocultas até você assistir a este título. Revela-as mesmo assim."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Evaluările sunt ascunse până când vizionezi acest titlu. Le dezvăluie oricum."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Рейтинги скрыты, пока вы это не посмотрите. Всё равно раскрывает их."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hodnotenia sú skryté, kým si toto nepozriete. Aj tak ich odkryje."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ocene so skrite, dokler tega ne pogledate. Vseeno jih razkrije."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ocene su skrivene dok ovo ne odgledate. Svejedno ih otkriva."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Betygen är dolda tills du har sett det här. Visar dem ändå."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "คะแนนถูกซ่อนไว้จนกว่าคุณจะได้ดูเรื่องนี้ แสดงคะแนนแม้ยังไม่ได้ดู"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Siz bunu izleyene kadar puanlar gizli kalır. Yine de puanları gösterir."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Оцінки приховані, доки ви це не переглянете. Усе одно показує їх."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Xếp hạng bị ẩn cho đến khi bạn đã xem mục này. Vẫn hiện xếp hạng."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "评分在您观看此内容前会被隐藏。仍会显示评分。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "評分在您觀看此內容前會隱藏。仍會顯示評分。"
           }
         }
       }
@@ -367044,12 +367267,6 @@
       "comment" : "Continue Watching card style option in Settings: artwork with the title laid over it as a logo.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Logo & Artwork"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367090,6 +367307,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Λογότυπο και εικαστικό"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Logo & Artwork"
           }
         },
         "es" : {
@@ -367272,12 +367495,6 @@
       "comment" : "One-line explanation of the Logo & Artwork option for Continue Watching cards.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Title and details on the artwork."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367318,6 +367535,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τίτλος και λεπτομέρειες πάνω στην εικόνα."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Title and details on the artwork."
           }
         },
         "es" : {
@@ -367500,12 +367723,6 @@
       "comment" : "Stand-in wordmark drawn inside the Continue Watching card preview, in place of a real title's logo.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "LOGO"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367545,6 +367762,12 @@
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
+            "value" : "LOGO"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
             "value" : "LOGO"
           }
         },
@@ -367728,12 +367951,6 @@
       "comment" : "Continue Watching card style option in Settings: plain artwork with the title written underneath.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Thumbnail & Title"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367774,6 +367991,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Μικρογραφία και τίτλος"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Thumbnail & Title"
           }
         },
         "es" : {
@@ -367956,12 +368179,6 @@
       "comment" : "One-line explanation of the Thumbnail & Title option for Continue Watching cards.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Title and details below the artwork."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -368002,6 +368219,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τίτλος και λεπτομέρειες κάτω από την εικόνα."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Title and details below the artwork."
           }
         },
         "es" : {
@@ -383594,6 +383817,462 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "已加入觀看列表"
+          }
+        }
+      }
+    },
+    "mediaDetail.fact.released" : {
+      "comment" : "Label on a movie or episode's detail page beside the date it first came out. A noun-style field label ('Released: 14 Apr 2019'), not a verb or a status.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Released"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "الإصدار"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Издаване"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Llançament"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vydání"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Udgivelse"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Veröffentlichung"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Κυκλοφορία"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lanzamiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "انتشار"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Julkaisu"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sortie"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הפצה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "रिलीज़"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Izlazak"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Megjelenés"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rilis"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uscita"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "公開日"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "출시일"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tarikh keluaran"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Utgivelsesdato"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Releasedatum"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Data wydania"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lançamento"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Data lansării"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Дата выхода"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dátum vydania"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Datum izida"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Datum izlaska"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Utgivningsdatum"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "วันที่เผยแพร่"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Yayınlanma tarihi"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Дата виходу"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ngày phát hành"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "发行日期"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "發行日期"
+          }
+        }
+      }
+    },
+    "mediaDetail.ratings.reveal" : {
+      "comment" : "Button over the blurred Ratings section of a title's detail page; pressing it reveals scores that spoiler protection is hiding.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show Ratings"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إظهار التقييمات"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Покажи оценките"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mostra les valoracions"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zobrazit hodnocení"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vis bedømmelser"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bewertungen anzeigen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Εμφάνιση βαθμολογιών"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mostrar puntuaciones"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "نمایش امتیازها"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Näytä arviot"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Afficher les notes"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הצג דירוגים"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "रेटिंग दिखाएं"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prikaži ocjene"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Értékelések megjelenítése"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tampilkan penilaian"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mostra valutazioni"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "評価を表示"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "평점 표시"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tunjukkan penilaian"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vis vurderinger"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Beoordelingen tonen"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pokaż oceny"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mostrar avaliações"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Arată evaluările"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Показать рейтинги"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zobraziť hodnotenia"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pokaži ocene"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prikaži ocene"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Visa betyg"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "แสดงคะแนน"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Puanları göster"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Показати оцінки"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hiện xếp hạng"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "显示评分"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "顯示評分"
           }
         }
       }
@@ -410398,6 +411077,462 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "音軌與字幕"
+          }
+        }
+      }
+    },
+    "settings.spoilers.description" : {
+      "comment" : "Description under the Spoilers heading in tvOS Settings, explaining what the switches below it do. 'Press' is the Apple TV remote's Select button.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إخفاء الحلقات غير المشاهدة والتقييمات حتى تشاهدها. تظهر التقييمات المموّهة عند الضغط عليها."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Скрий негледаните епизоди и оценки докато ги видиш. Размазаните оценки се показват, когато ги натиснеш."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Amaga els episodis no vistos i les valoracions fins que els vegis. Les valoracions difuminades es mostren quan les prems."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrýt nezhlédnuté díly a hodnocení, dokud je neuvidíte. Rozmazané hodnocení se zobrazí, když je stisknete."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skjul usete episoder og bedømmelser, indtil du har set dem. Slørede bedømmelser vises, når du trykker på dem."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Blendet ungesehene Folgen und Bewertungen aus, bis du sie gesehen hast. Weichgezeichnete Bewertungen werden angezeigt, wenn du sie drückst."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Απόκρυψη μη παρακολουθημένων επεισοδίων και βαθμολογιών μέχρι να τα δείτε. Οι θολές βαθμολογίες εμφανίζονται όταν τις πατήσετε."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ocultar episodios no vistos y valoraciones hasta que los veas. Las puntuaciones difuminadas se muestran cuando las pulsas."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "پنهان کردن قسمت‌های دیده نشده و امتیازها تا زمانی که آنها را ببینید. امتیازهای غیر واضح وقتی آن‌ها را فشار می‌دهید آشکار می‌شوند."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Piilota katsomattomat jaksot ja arviot, kunnes olet nähnyt ne. Sumennetut arviot tulevat näkyviin, kun painat niitä."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Masquer les épisodes non vus et les notes tant que vous ne les avez pas regardés. Les notes floutées s’affichent lorsque vous appuyez dessus."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הסתר פרקים ודירוגים שלא נצפו עד שתצפה בהם. דירוגים מטושטשים מוצגים כשאתה לוחץ עליהם."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "जिन एपिसोड को आपने नहीं देखा है, उन्हें और उनकी रेटिंग को आपके देखने तक छिपाएं. धुंधली रेटिंग को दबाने पर वे दिखाई देती हैं."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sakrij neodgledane epizode i ocjene dok ih ne pogledate. Zamućene ocjene otkrivaju se kada ih pritisnete."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A megtekintetlen epizódok és értékelések elrejtése, amíg nem nézte meg őket. Az elmosott értékelések megjelennek, ha megnyomja őket."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sembunyikan episode yang belum ditonton dan penilaian hingga Anda menontonnya. Penilaian yang diburamkan akan ditampilkan saat Anda menekannya."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nascondi gli episodi non visti e le valutazioni finché non li hai guardati. Le valutazioni sfocate vengono rivelate quando le premi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "視聴するまで未視聴エピソードと評価を非表示にします。ぼかされた評価は、押すと表示されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "시청하지 않은 에피소드와 평점을 시청할 때까지 숨깁니다. 흐리게 처리된 평점은 누르면 나타납니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sembunyikan episod dan penilaian belum ditonton sehingga anda menontonnya. Penilaian yang dikaburkan akan didedahkan apabila anda menekannya."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skjul usette episoder og vurderinger til du har sett dem. Uskarpe vurderinger vises når du velger dem."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verberg niet-bekeken afleveringen en beoordelingen totdat je ze hebt gezien. Vervaagde beoordelingen worden zichtbaar wanneer je erop drukt."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ukryj nieobejrzane odcinki i oceny do czasu obejrzenia. Rozmyte oceny zostaną odsłonięte, gdy je naciśniesz."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Oculta episódios não assistidos e avaliações até você assistir. As avaliações desfocadas são reveladas quando você as pressiona."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ascunde episoadele nevizionate și evaluările până după ce le vezi. Evaluările estompate se dezvăluie când le apeși."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Скрывать непросмотренные эпизоды и рейтинги, пока вы их не посмотрите. Размытые рейтинги раскрываются, когда вы на них нажимаете."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skryje nepozreté diely a hodnotenia, kým si ich nepozriete. Rozmazané hodnotenia sa odkryjú, keď ich stlačíte."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrij neogledane epizode in ocene, dokler jih ne pogledate. Zamegljene ocene se razkrijejo, ko jih pritisnete."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sakrij negledane epizode i ocene dok ih ne odgledate. Zamućene ocene se otkrivaju kada ih pritisnete."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dölj osedda avsnitt och betyg tills du har sett dem. Suddiga betyg visas när du väljer dem."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ซ่อนตอนที่ยังไม่ได้ดูและคะแนนจนกว่าคุณจะดูแล้ว คะแนนที่เบลอจะแสดงเมื่อคุณกด"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzlemediğiniz bölümleri ve puanları siz izleyene kadar gizleyin. Bulanık puanlar bastığınızda görünür."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сховати непереглянуті епізоди та рейтинги, поки ви їх не побачите. Розмиті рейтинги показуються, коли ви їх натискаєте."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ẩn các tập chưa xem và xếp hạng cho đến khi bạn đã xem. Xếp hạng bị làm mờ sẽ hiện ra khi bạn nhấn vào."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在您观看前隐藏未观看剧集和评分。模糊的评分会在您按下时显示。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在觀看前先隱藏未看集數與評分。模糊的評分會在您按一下時顯示。"
+          }
+        }
+      }
+    },
+    "settings.spoilers.footer" : {
+      "comment" : "Footer under the Spoilers settings group on iPhone/iPad, explaining what the switches above it do.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Episode titles, summaries, and artwork can be hidden until you watch them. Hidden ratings are blurred on a title's page — tap to reveal them."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "يمكن إخفاء عناوين الحلقات والملخصات والرسوم التوضيحية حتى تشاهدها. تكون التقييمات المخفية مموّهة في صفحة العنوان — المسها لكشفها."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Заглавията, описанията и обложките на епизодите могат да бъдат скрити, докато не ги гледате. Скритите оценки са размазани на страницата на заглавието — докоснете, за да ги разкриете."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Els títols, resums i cartells dels episodis es poden amagar fins que els vegis. Les valoracions amagades es difuminen a la pàgina del títol — toca-les per mostrar-les."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Názvy dílů, shrnutí a grafika mohou zůstat skryté, dokud je nezhlédnete. Skryté hodnocení je na stránce titulu rozmazané – klepnutím ho odhalíte."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Episodetitler, resuméer og coverbilleder kan skjules, indtil du har set episoderne. Skjulte bedømmelser er slørede på titlens side – berør dem for at vise dem."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Titel, Zusammenfassungen und Bilder von Folgen können ausgeblendet werden, bis du sie gesehen hast. Ausgeblendete Bewertungen werden auf der Seite eines Titels weichgezeichnet – tippe darauf, um sie anzuzeigen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Οι τίτλοι, οι περιλήψεις και τα γραφικά των επεισοδίων μπορούν να κρύβονται μέχρι να τα παρακολουθήσετε. Οι κρυμμένες βαθμολογίες εμφανίζονται θολές στη σελίδα ενός τίτλου — αγγίξτε τις για να τις αποκαλύψετε."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Los títulos, resúmenes e imágenes de los episodios se pueden ocultar hasta que los veas. Las puntuaciones ocultas aparecen difuminadas en la página de un título — toca para mostrarlas."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "عناوین قسمت‌ها، خلاصه‌ها و هنرهای گرافیکی تا زمانی که آن‌ها را تماشا نکرده باشید پنهان خواهند ماند. امتیازهای پنهان در صفحهٔ عنوان به‌صورت غیر واضح نمایش داده می‌شوند. برای آشکار کردن آن‌ها ضربه بزنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jaksojen nimet, kuvaukset ja kuvitus voidaan piilottaa, kunnes olet katsonut ne. Piilotetut arviot näytetään sumennettuina nimikkeen sivulla – paljasta ne napauttamalla."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Les titres, résumés et illustrations des épisodes peuvent être masqués jusqu’à ce que vous les regardiez. Les notes masquées apparaissent floutées sur la fiche d’un titre — touchez-les pour les afficher."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ניתן להסתיר כותרות פרקים, תקצירים ותמונות עד שתצפה בהם. דירוגים מוסתרים מטושטשים בעמוד הכותרת. הקש כדי להציג אותם."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "एपिसोड के शीर्षक, सारांश और आर्टवर्क को आपके देखने तक छिपाया जा सकता है. छिपाई गई रेटिंग किसी टाइटल के पेज पर धुंधली दिखती हैं — उन्हें दिखाने के लिए टैप करें."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Naslovi epizoda, sažeci i grafika mogu se sakriti dok ih ne pogledate. Skrivene ocjene zamućene su na stranici naslova — dodirnite ih da biste ih otkrili."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Az epizódcímek, összefoglalók és borítóképek elrejthetők, amíg meg nem nézi őket. A rejtett értékelések el vannak mosva a cím oldalán — koppintson rájuk a felfedésükhöz."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Judul, ringkasan, dan gambar episode dapat disembunyikan sampai Anda menontonnya. Penilaian yang disembunyikan tampil buram di halaman judul — ketuk untuk menampilkannya."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Titoli, riepiloghi e immagini degli episodi possono essere nascosti fino a quando non li guardi. Le valutazioni nascoste sono sfocate nella pagina di un titolo — tocca per rivelarle."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "エピソードのタイトル、あらすじ、アートワークは視聴するまで非表示にできます。非表示にした評価はタイトルのページでぼかされ、タップすると表示されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "에피소드 제목, 요약 및 아트워크는 시청할 때까지 숨겨질 수 있습니다. 숨겨진 평점은 작품 페이지에서 흐리게 표시되며, 탭하면 나타납니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tajuk episod, ringkasan, dan karya seni boleh disembunyikan sehingga anda menontonnya. Penilaian tersembunyi dikaburkan pada halaman tajuk — ketik untuk mendedahkannya."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Episodetitler, sammendrag og omslagsbilder kan skjules til du har sett episodene. Skjulte vurderinger vises uskarpt på tittelsiden – trykk for å vise dem."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Titels, samenvattingen en afbeeldingen van afleveringen kunnen verborgen blijven totdat je ze kijkt. Verborgen beoordelingen worden vervaagd op de pagina van een titel – tik om ze te onthullen."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tytuły odcinków, opisy i grafiki mogą być ukryte do czasu obejrzenia. Ukryte oceny są rozmyte na stronie tytułu – stuknij, aby je odsłonić."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Títulos, resumos e imagens dos episódios podem ficar ocultos até você assisti-los. As avaliações ocultas ficam desfocadas na página de um título — toque para revelá-las."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Titlurile, rezumatele și ilustrațiile episoadelor pot fi ascunse până când le vizionezi. Evaluările ascunse sunt estompate pe pagina unui titlu — atinge pentru a le dezvălui."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Названия эпизодов, описания и изображения можно скрывать, пока вы их не посмотрите. Скрытые рейтинги отображаются размытыми на странице — коснитесь, чтобы показать их."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Názvy dielov, zhrnutia a grafika môžu zostať skryté, kým si ich nepozriete. Skryté hodnotenia sú na stránke titulu rozmazané – ťuknutím ich odkryjete."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Naslovi epizod, povzetki in grafika so lahko skriti, dokler jih ne pogledate. Skrite ocene so na strani naslova zamegljene – tapnite, da jih razkrijete."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Naslovi epizoda, sažeci i slike mogu da budu skriveni dok ih ne odgledate. Skrivene ocene su zamućene na stranici naslova – dodirnite da biste ih otkrili."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Avsnittstitlar, sammanfattningar och bilder kan döljas tills du har sett dem. Dolda betyg visas suddiga på en titels sida – tryck för att visa dem."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "สามารถซ่อนชื่อตอน เรื่องย่อ และภาพประกอบได้จนกว่าคุณจะรับชม คะแนนที่ซ่อนไว้จะถูกเบลอในหน้าของเรื่อง แตะเพื่อแสดงคะแนน"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bölüm başlıkları, özetleri ve görselleri siz izleyene kadar gizlenebilir. Gizli puanlar bir yapımın sayfasında bulanıklaştırılır — görüntülemek için dokunun."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Назви епізодів, описи й обкладинки можна приховати, доки ви їх не переглянете. Приховані оцінки розмиваються на сторінці твору — торкніться, щоб показати їх."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tiêu đề tập phim, tóm tắt, và tác phẩm nghệ thuật có thể được che giấu cho đến khi bạn xem chúng. Xếp hạng bị ẩn sẽ được làm mờ trên trang của tựa đề — chạm để hiện chúng."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "剧集标题、简介和图片可在观看前隐藏。隐藏的评分会在作品页面上模糊显示，轻点即可显示。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "集數標題、簡介與圖像可在觀看前先隱藏。隱藏的評分會在作品頁面上模糊顯示，輕點即可顯示。"
           }
         }
       }

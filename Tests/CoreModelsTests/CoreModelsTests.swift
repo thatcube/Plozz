@@ -249,9 +249,30 @@ final class SpoilerSettingsTests: XCTestCase {
         XCTAssertTrue(ratingsHidden.shouldHideRatings(for: episode(resume: 120)))
     }
 
-    func testHideRatingsNeverAppliesToSeriesOrSeason() {
-        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: MediaItem(id: "s", title: "Show", kind: .series)))
-        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: MediaItem(id: "se", title: "Season 1", kind: .season)))
+    func testHideRatingsAppliesToSeriesAndSeason() {
+        // A series page is what you read BEFORE starting a show, so its aggregate
+        // score is the most spoiling number on screen, not an exempt one.
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: MediaItem(id: "s", title: "Show", kind: .series)))
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: MediaItem(id: "se", title: "Season 1", kind: .season)))
+    }
+
+    func testHideRatingsRevealsFinishedSeriesAndSeason() {
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "s", title: "Show", kind: .series, isPlayed: true)
+        ))
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "se", title: "Season 1", kind: .season, isPlayed: true)
+        ))
+    }
+
+    func testHideRatingsSkipsKindsWithNoWatchedState() {
+        // Nothing to finish, so hiding would be permanent rather than deferred.
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "c", title: "Marvel", kind: .collection)
+        ))
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(
+            for: MediaItem(id: "f", title: "Movies", kind: .folder)
+        ))
     }
 
     func testDecodesLegacyPayloadWithoutHideRatingsKey() throws {
@@ -266,6 +287,195 @@ final class SpoilerSettingsTests: XCTestCase {
         let settings = SpoilerSettings(isEnabled: true, mode: .blur, hideRatingsUntilWatched: true)
         let data = try JSONEncoder().encode(settings)
         XCTAssertEqual(try JSONDecoder().decode(SpoilerSettings.self, from: data), settings)
+    }
+}
+
+/// `MediaItem.releaseDate` — the day a title came out, which every backend
+/// reports differently and only one of them reports cleanly.
+final class MediaItemReleaseDateTests: XCTestCase {
+    /// The stored contract: UTC midnight on the day in question.
+    private func utcDay(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar.date(from: components)!
+    }
+
+    // MARK: Bare calendar days (Plex `originallyAvailableAt`, TMDb via Seerr)
+
+    func testParsesABareCalendarDayAtUTCMidnight() {
+        XCTAssertEqual(
+            MediaItem.calendarDayReleaseDate(from: "2019-04-14"),
+            utcDay(2019, 4, 14)
+        )
+        XCTAssertEqual(
+            MediaItem.calendarDayReleaseDate(from: "2024-02-29"),
+            utcDay(2024, 2, 29),
+            "leap day"
+        )
+    }
+
+    /// Some agents write a full timestamp into the same attribute; the leading
+    /// ten characters are the calendar day either way.
+    func testParsesACalendarDayOutOfALongerTimestamp() {
+        XCTAssertEqual(
+            MediaItem.calendarDayReleaseDate(from: "2019-04-14T00:00:00Z"),
+            utcDay(2019, 4, 14)
+        )
+        XCTAssertEqual(
+            MediaItem.calendarDayReleaseDate(from: "  2019-04-14  "),
+            utcDay(2019, 4, 14)
+        )
+    }
+
+    func testRejectsUnusableCalendarDays() {
+        XCTAssertNil(MediaItem.calendarDayReleaseDate(from: nil))
+        XCTAssertNil(MediaItem.calendarDayReleaseDate(from: ""))
+        XCTAssertNil(MediaItem.calendarDayReleaseDate(from: "2019"))
+        XCTAssertNil(MediaItem.calendarDayReleaseDate(from: "not-a-date"))
+        XCTAssertNil(MediaItem.calendarDayReleaseDate(from: "20190414"), "no separators")
+    }
+
+    // MARK: Shifted midnights (Jellyfin `PremiereDate`)
+
+    /// Jellyfin stamps a bare air date with the SERVER's zone before converting
+    /// to UTC, so the same premiere arrives as a different instant — and for an
+    /// eastern server, a different UTC day — depending on where the server sits.
+    /// Every one of these means 14 April 2019.
+    func testSnapsAServerZoneShiftedMidnightBackToItsIntendedDay() {
+        let intended = utcDay(2019, 4, 14)
+        let cases: [(offsetHours: Int, label: String)] = [
+            (0, "UTC"),
+            (-5, "US Eastern"),
+            (-8, "US Pacific"),
+            (-11, "American Samoa"),
+            (1, "Central Europe"),
+            (5, "Pakistan"),
+            (10, "Australian Eastern"),
+            (12, "New Zealand, standard time")
+        ]
+        for (offsetHours, label) in cases {
+            // What the server transmits: local midnight expressed in UTC.
+            let transmitted = intended.addingTimeInterval(TimeInterval(-offsetHours * 3600))
+            XCTAssertEqual(
+                MediaItem.calendarDayReleaseDate(snapping: transmitted),
+                intended,
+                "\(label) (UTC\(offsetHours >= 0 ? "+" : "")\(offsetHours))"
+            )
+        }
+    }
+
+    /// A half-hour and three-quarter-hour zone is still a shifted midnight.
+    func testSnapsOffsetsThatAreNotWholeHours() {
+        let intended = utcDay(2019, 4, 14)
+        for offsetMinutes in [330, -210, 345, 570] {   // India, Newfoundland, Nepal, Australia/Eucla
+            let transmitted = intended.addingTimeInterval(TimeInterval(-offsetMinutes * 60))
+            XCTAssertEqual(
+                MediaItem.calendarDayReleaseDate(snapping: transmitted),
+                intended,
+                "UTC\(offsetMinutes >= 0 ? "+" : "")\(offsetMinutes)m"
+            )
+        }
+    }
+
+    func testSnappingLeavesACleanUTCMidnightAlone() {
+        // The NFO path: Jellyfin reads those with AssumeUniversal, so they were
+        // already right and the snap has to be a fixed point for them.
+        XCTAssertEqual(
+            MediaItem.calendarDayReleaseDate(snapping: utcDay(2019, 4, 14)),
+            utcDay(2019, 4, 14)
+        )
+        XCTAssertNil(MediaItem.calendarDayReleaseDate(snapping: nil))
+    }
+
+    /// Exactly half a day in is a tie, and it resolves to the LATER day. That is
+    /// a deliberate trade, not an oversight: the tie is where a UTC+12 midnight
+    /// lands (New Zealand, Fiji, Kamchatka, the Marshall Islands — millions of
+    /// people, fixed by this) and equally where a UTC−12 one lands (Baker and
+    /// Howland Islands — nobody, broken by this). Flip the comparison to `>` and
+    /// you swap which of those two is correct.
+    func testSnappingResolvesTheMiddayTieToTheLaterDay() {
+        let midday = utcDay(2019, 4, 14).addingTimeInterval(12 * 60 * 60)
+        XCTAssertEqual(
+            MediaItem.calendarDayReleaseDate(snapping: midday),
+            utcDay(2019, 4, 15)
+        )
+        // One second earlier is not a tie, and stays on the earlier day.
+        XCTAssertEqual(
+            MediaItem.calendarDayReleaseDate(snapping: midday.addingTimeInterval(-1)),
+            utcDay(2019, 4, 14)
+        )
+    }
+
+    /// Pre-1970 instants are negative, so the floor has to go the same direction
+    /// there as it does after the epoch — truncation would round them up.
+    func testSnapsInstantsBeforeTheEpoch() {
+        let intended = utcDay(1942, 8, 13)   // Bambi
+        for offsetHours in [-8, 0, 10] {
+            let transmitted = intended.addingTimeInterval(TimeInterval(-offsetHours * 3600))
+            XCTAssertEqual(
+                MediaItem.calendarDayReleaseDate(snapping: transmitted),
+                intended,
+                "UTC\(offsetHours >= 0 ? "+" : "")\(offsetHours)"
+            )
+        }
+    }
+
+    // MARK: Display
+
+    func testFormatsTheStoredDayInUTCRegardlessOfDeviceZone() {
+        // The point of storing and formatting in UTC: the label must not change
+        // with where the viewer is standing.
+        let label = MediaItem.releaseDateLabel(for: utcDay(2019, 4, 14))
+        XCTAssertNotNil(label)
+        XCTAssertTrue(label?.contains("2019") == true, label ?? "nil")
+        XCTAssertNil(MediaItem.releaseDateLabel(for: nil))
+    }
+
+    func testItemLabelMirrorsTheStaticFormatter() {
+        var item = MediaItem(id: "m", title: "Film", kind: .movie)
+        XCTAssertNil(item.releaseDateLabel)
+        item.releaseDate = utcDay(2019, 4, 14)
+        XCTAssertEqual(item.releaseDateLabel, MediaItem.releaseDateLabel(for: item.releaseDate))
+    }
+
+    func testReleaseDateSurvivesACodableRoundTrip() throws {
+        var item = MediaItem(id: "m", title: "Film", kind: .movie)
+        item.releaseDate = utcDay(2019, 4, 14)
+        let decoded = try JSONDecoder().decode(
+            MediaItem.self,
+            from: JSONEncoder().encode(item)
+        )
+        XCTAssertEqual(decoded.releaseDate, item.releaseDate)
+    }
+
+    /// Payloads cached before the field existed must still decode.
+    func testDecodesLegacyPayloadWithoutAReleaseDate() throws {
+        let legacy = #"{"id":"m","title":"Film","kind":"movie"}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(MediaItem.self, from: legacy)
+        XCTAssertNil(decoded.releaseDate)
+        XCTAssertEqual(decoded.title, "Film")
+    }
+
+    /// Folding two copies of one title must not lose a date only one of them had.
+    func testFoldingDonatesAReleaseDateToACopyThatLacksOne() {
+        var survivor = MediaItem(id: "a", title: "Film", kind: .movie)
+        var donor = MediaItem(id: "b", title: "Film", kind: .movie)
+        donor.releaseDate = utcDay(2019, 4, 14)
+        survivor.fillingMissingPresentation(from: donor)
+        XCTAssertEqual(survivor.releaseDate, donor.releaseDate)
+    }
+
+    func testFoldingNeverOverwritesADateTheSurvivorAlreadyHad() {
+        var survivor = MediaItem(id: "a", title: "Film", kind: .movie)
+        survivor.releaseDate = utcDay(2019, 4, 14)
+        var donor = MediaItem(id: "b", title: "Film", kind: .movie)
+        donor.releaseDate = utcDay(1999, 1, 1)
+        survivor.fillingMissingPresentation(from: donor)
+        XCTAssertEqual(survivor.releaseDate, utcDay(2019, 4, 14))
     }
 }
 

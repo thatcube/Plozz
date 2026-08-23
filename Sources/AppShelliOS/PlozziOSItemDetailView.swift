@@ -492,7 +492,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         : options.versions.first {
                             $0.id == options.selectedVersionID
                         } ?? MediaVersion.synthesized(from: heroTarget),
-                    externalAvailability: detail.externalAvailability
+                    externalAvailability: detail.externalAvailability,
+                    spoilerSettings: appModel.settings.spoilers.settings
                 )
             }
             // No trailing padding here. The information band is the last thing in

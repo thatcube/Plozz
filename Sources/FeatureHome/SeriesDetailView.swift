@@ -564,7 +564,8 @@ struct SeriesDetailView: View {
                         },
                         relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
                         relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
-                        onSelectRelated: onSelectRelated
+                        onSelectRelated: onSelectRelated,
+                        spoilerSettings: spoilerSettings
                     )
                         // A real layout gap, not a transform: it has to be
                         // truthful for the focus engine at both ends. Resting it

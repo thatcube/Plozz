@@ -1406,6 +1406,13 @@ public struct JellyfinProvider: MediaProvider {
             seasonNumber: kind == .season ? dto.IndexNumber : dto.ParentIndexNumber,
             episodeNumber: dto.IndexNumber,
             productionYear: dto.ProductionYear,
+            // Snapped, not taken at face value: Jellyfin transmits a bare premiere
+            // DAY as an instant already shifted by the server's own zone, so an
+            // eastern server's 14 April arrives as 13 April in UTC. See
+            // `MediaItem.calendarDayReleaseDate(snapping:)`.
+            releaseDate: MediaItem.calendarDayReleaseDate(
+                snapping: Self.parseDate(dto.PremiereDate)
+            ),
             officialRating: dto.OfficialRating,
             genres: dto.Genres ?? [],
             people: Self.people(from: dto, client: client),

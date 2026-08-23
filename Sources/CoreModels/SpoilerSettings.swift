@@ -38,10 +38,11 @@ public struct SpoilerSettings: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     /// How hidden thumbnails are presented.
     public var mode: Mode
-    /// When enabled, external ratings (IMDb, Rotten Tomatoes, …) are hidden for
-    /// a movie or episode until it has been fully watched, so the score can't
-    /// bias the viewer beforehand. Independent of `isEnabled` — it's its own
-    /// opt-in switch. Off by default.
+    /// When enabled, external ratings (IMDb, Rotten Tomatoes, …) are hidden until
+    /// a title has been fully watched, so the score can't bias the viewer
+    /// beforehand — on shows and seasons as well as movies and episodes, since
+    /// "how good is this" is exactly the question a series page is consulted for.
+    /// Independent of `isEnabled` — it's its own opt-in switch. Off by default.
     public var hideRatingsUntilWatched: Bool
 
     public init(
@@ -131,14 +132,22 @@ public extension SpoilerSettings {
         )
     }
 
-    /// Hide external ratings for a movie or episode until it has been fully
-    /// watched, so the score doesn't bias the viewer before they see it. Series
-    /// and seasons carry aggregate ratings and are never hidden. In-progress
-    /// items still hide their ratings — they're only revealed once finished.
+    /// Hide external ratings until the title has been fully watched, so the score
+    /// doesn't bias the viewer before they see it.
+    ///
+    /// Applies to containers as much as to the things inside them: a series page
+    /// *is* the page you look at before deciding to start a show, and "how good is
+    /// this" is precisely what the setting is asked to withhold. So a series or
+    /// season is covered until it is finished, exactly like the movie or episode
+    /// it stands in for. In-progress items stay hidden too — the score is revealed
+    /// on finishing, not on starting.
+    ///
+    /// Kinds with no meaningful watched state (collections, folders) are never
+    /// hidden: there is nothing to finish, so they would be hidden forever.
     func shouldHideRatings(for item: MediaItem) -> Bool {
         guard hideRatingsUntilWatched else { return false }
         switch item.kind {
-        case .movie, .episode:
+        case .movie, .episode, .series, .season, .video:
             return !item.isPlayed
         default:
             return false

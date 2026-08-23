@@ -68,6 +68,9 @@ enum SeerMapper {
             kind: kind,
             overview: result.overview,
             productionYear: year(from: result.releaseDate ?? result.firstAirDate),
+            releaseDate: MediaItem.calendarDayReleaseDate(
+                from: result.releaseDate ?? result.firstAirDate
+            ),
             posterURL: imageURL(path: result.posterPath, size: posterSize),
             backdropURL: imageURL(path: result.backdropPath, size: backdropSize),
             heroBackdropURL: imageURL(path: result.backdropPath, size: heroBackdropSize),

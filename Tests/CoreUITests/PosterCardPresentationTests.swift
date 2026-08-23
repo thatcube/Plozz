@@ -474,3 +474,39 @@ final class TextlessBackdropIndexTests: XCTestCase {
         XCTAssertFalse(store.suppressesLogo(for: anime("s4")))
     }
 }
+
+/// The logo memo is scoped to a foreground session, not to the process, because
+/// on tvOS reopening the app almost always resumes a suspended process rather
+/// than starting a new one. A process-scoped memo would keep a first-encounter
+/// guess alive across every later visit, with the real answer sitting on disk,
+/// already read, and still unused.
+@MainActor
+final class TextlessBackdropForegroundResetTests: XCTestCase {
+
+    private func anime() -> MediaItem {
+        MediaItem(id: "s1", title: "Anime", kind: .series, genres: ["Anime"])
+    }
+
+    /// The exact resume case: guessed "keep the logo" before the answer arrived,
+    /// then the answer lands. Returning to the app must act on it.
+    func testReturningToTheAppAdoptsAnAnswerThatArrivedTooLate() {
+        let store = TextlessBackdropStore(
+            store: TextlessBackdropIndex(
+                directory: FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            )
+        )
+        XCTAssertFalse(store.suppressesLogo(for: anime()), "no answer yet, so keep the logo")
+        store.recordForTesting(.none, for: anime())
+        XCTAssertFalse(
+            store.suppressesLogo(for: anime()),
+            "still mid-session: the decision must not flip under the viewer"
+        )
+
+        store.resetLogoDecisionsForTesting()
+        XCTAssertTrue(
+            store.suppressesLogo(for: anime()),
+            "on return the conclusive answer is available and must be used"
+        )
+    }
+}

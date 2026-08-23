@@ -60,8 +60,8 @@ public final class TextlessBackdropStore {
     private var outcomes: [String: Outcome] = [:]
     /// In flight or already answered, so a row that re-appears never re-asks.
     private var attempted: Set<String> = []
-    /// First logo decision made for a show, kept for the session. See
-    /// ``suppressesLogo(for:)``.
+    /// First logo decision made for a show, kept for the rest of the *foreground
+    /// session*. See ``suppressesLogo(for:)``.
     private var logoDecisions: [String: Bool] = [:]
     /// Where last session's answers are kept, so this session starts knowing them.
     private let store: TextlessBackdropIndex
@@ -69,9 +69,41 @@ public final class TextlessBackdropStore {
     /// rather than done in `init` so constructing the shared instance costs
     /// nothing, and the read lands with the first card that actually needs it.
     private var didSeed = false
+    private var foregroundObserver: (any NSObjectProtocol)?
 
     public init(store: TextlessBackdropIndex = .sharedIndex) {
         self.store = store
+        observeForeground()
+    }
+
+    deinit {
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
+        }
+    }
+
+    /// Re-decides every show's logo when the app comes back to the foreground.
+    ///
+    /// The memo below is scoped to a *foreground session*, not to the process,
+    /// because on tvOS those are rarely the same thing: reopening the app almost
+    /// always resumes a suspended process rather than starting a new one. A memo
+    /// scoped to the process would therefore keep a first-encounter guess alive
+    /// across every subsequent visit — the answer would be sitting on disk,
+    /// already read, and still not used.
+    ///
+    /// Safe to clear here precisely because it is not mid-scroll: the viewer has
+    /// been away, the row re-renders on return anyway, and what replaces the
+    /// guess is the conclusive answer.
+    private func observeForeground() {
+        #if canImport(UIKit)
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.logoDecisions.removeAll() }
+        }
+        #endif
     }
 
     /// Reads last session's answers in, once.
@@ -192,6 +224,12 @@ public final class TextlessBackdropStore {
     private func record(_ outcome: Outcome, for key: String) {
         outcomes[key] = outcome
         store.save(outcome, for: key)
+    }
+
+    /// Clears the per-foreground-session memo. Exposed for tests, which cannot
+    /// post a real lifecycle notification.
+    func resetLogoDecisionsForTesting() {
+        logoDecisions.removeAll()
     }
 
     /// Seeds an outcome without going near the network, so the decision table

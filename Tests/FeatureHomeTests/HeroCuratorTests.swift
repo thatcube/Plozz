@@ -1408,6 +1408,116 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
 
         XCTAssertTrue(resolved.isEmpty)
     }
+
+    func testALoadedHeroKeepsRenderingWhileTheNextCurationRuns() {
+        // The whole point: Home re-curates for reasons the viewer never asked for
+        // (a silent re-aggregation, a warmed identity index, a share scan), and a
+        // full re-curation takes seconds. Dropping to the placeholder for each of
+        // those is what made the hero look like it reloaded constantly.
+        let settings = settings(
+            sources: [.continueWatching, .randomFromLibrary],
+            hideWatched: false
+        )
+        let loadedContent = HomeViewModel.Content(
+            continueWatching: [item("a")]
+        )
+        let runtime = HomeHeroRuntimeState()
+        runtime.items = [item("a"), item("random")]
+        runtime.completedKey = key(settings, content: loadedContent)
+
+        // Home republished with different content — a brand-new recompute key,
+        // not merely an external watch-history refresh.
+        let republished = HomeViewModel.Content(
+            continueWatching: [item("a"), item("b")]
+        )
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(settings, content: republished),
+            settings: settings,
+            continueWatching: republished.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertEqual(resolved.map(\.id), ["a", "random"])
+    }
+
+    func testAWatchedTitleStillLeavesARetainedHero() {
+        let settings = settings(hideWatched: true)
+        let loadedContent = HomeViewModel.Content(continueWatching: [item("a")])
+        let runtime = HomeHeroRuntimeState()
+        runtime.items = [item("a"), item("b", hasBeenPlayed: true)]
+        runtime.completedKey = key(settings, content: loadedContent)
+        runtime.hasHydratedDurableMutations = true
+
+        let republished = HomeViewModel.Content(
+            continueWatching: [item("a"), item("c")]
+        )
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(settings, content: republished),
+            settings: settings,
+            continueWatching: republished.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertEqual(resolved.map(\.id), ["a"])
+    }
+
+    func testChangingTheHeroSConfigurationRetiresTheLoadedSetAtOnce() {
+        // A configuration change is a direct instruction, not the world moving.
+        let loadedSettings = settings(
+            sources: [.continueWatching, .randomFromLibrary],
+            hideWatched: false
+        )
+        let content = HomeViewModel.Content(continueWatching: [item("a")])
+        let runtime = HomeHeroRuntimeState()
+        runtime.items = [item("a"), item("random")]
+        runtime.completedKey = key(loadedSettings, content: content)
+
+        let chosen = settings(sources: [.continueWatching], hideWatched: false)
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(chosen, content: content),
+            settings: chosen,
+            continueWatching: content.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertTrue(resolved.isEmpty)
+    }
+
+    func testALoadedHeroSurvivesArrivingAtTheCachedLaunchSnapshotAgain() {
+        // `awaitingLiveHome` flips the key, but a hero that already curated has
+        // nothing to protect — the fresh curation folds into it.
+        let settings = settings(hideWatched: false)
+        let content = HomeViewModel.Content(continueWatching: [item("a")])
+        let runtime = HomeHeroRuntimeState()
+        runtime.items = [item("a")]
+        runtime.completedKey = HeroRecomputeKey(
+            content: content,
+            settings: settings,
+            randomLibraries: []
+        )
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: HeroRecomputeKey(
+                content: content,
+                settings: settings,
+                randomLibraries: [],
+                awaitingLiveHome: true
+            ),
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertEqual(resolved.map(\.id), ["a"])
+    }
 }
 
 final class HeroRandomLibrarySelectionTests: XCTestCase {

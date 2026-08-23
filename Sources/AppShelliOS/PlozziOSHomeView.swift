@@ -26,6 +26,21 @@ struct PlozziOSHomeView: View {
     @State private var viewModel: HomeViewModel
     @State private var featuredItems: [MediaItem] = []
     @State private var heroItems: [MediaItem] = []
+    /// The slides on screen — the fronted one, plus whatever a committed swipe is
+    /// landing on — so a background curation folds new media into a free slot
+    /// instead of over one of them.
+    @State private var heroPinnedItemIDs: Set<String> = []
+    /// Which hero configuration `heroItems` was curated for. A change to it is a
+    /// direct instruction from the viewer, so the carousel restarts from the fresh
+    /// curation instead of folding into the old one.
+    @State private var heroCuratedConfiguration: HeroConfigurationKey?
+    /// How many consecutive curations have failed to offer each retained title,
+    /// so a deleted or un-watchlisted one eventually leaves. See `HeroLiveMerge`.
+    @State private var heroRetainedMisses: [String: Int] = [:]
+    /// The Random source's retained draw, so a background recomputation reuses the
+    /// titles already on screen instead of re-shuffling every library on every
+    /// connected server. See ``HeroRandomRollStore``.
+    @State private var heroRandomRolls = HeroRandomRollStore()
     @State private var playbackRequest: PlozziOSPlaybackRequest?
     @State private var isRequestingHero = false
     @State private var heroRequestStatuses: [String: MediaAvailabilityStatus] = [:]
@@ -73,6 +88,18 @@ struct PlozziOSHomeView: View {
                 mediaItemActionHandler: appModel.mediaItemActionHandler
             )
         )
+        // Paint last session's hero in the first frame instead of a skeleton. It
+        // holds no Continue Watching slides (see `HeroCurationResult.durableItems`),
+        // and the fresh curation folds into it rather than replacing it, so the
+        // slides on screen keep their slots when it lands. Same policy as tvOS.
+        let settings = appModel.settings.hero.settings
+        if settings.isActive,
+           let seed = _viewModel.wrappedValue.cachedHeroItems(for: settings) {
+            _heroItems = State(initialValue: seed)
+            _heroCuratedConfiguration = State(
+                initialValue: HeroConfigurationKey(settings: settings)
+            )
+        }
     }
 
     var body: some View {
@@ -253,7 +280,14 @@ struct PlozziOSHomeView: View {
             // per-card laziness that actually matters (artwork loading) lives in
             // the inner LazyHStacks, which are untouched.
             VStack(alignment: .leading, spacing: 30) {
-                if heroItems.isEmpty {
+                // Retire a carousel the viewer's own settings just invalidated
+                // WITHOUT waiting for the async re-curation, exactly as tvOS's
+                // `HomeHeroDisplayResolver` does. Otherwise sources they just
+                // switched off keep rendering for the whole refresh.
+                let heroConfiguration = HeroConfigurationKey(
+                    settings: appModel.settings.hero.settings
+                )
+                if heroItems.isEmpty || heroCuratedConfiguration != heroConfiguration {
                     // Reserve the hero's height while it resolves, so the rows
                     // below don't get shoved down when it lands (tvOS has had
                     // HomeHeroSkeletonView for this).
@@ -269,6 +303,7 @@ struct PlozziOSHomeView: View {
                         requestStatus: { heroRequestStatuses[$0.id] },
                         onRequest: beginHeroRequest,
                         onRequestSeasons: beginHeroSeasonRequest,
+                        onPinnedItemsChanged: { heroPinnedItemIDs = $0 },
                         pullModel: heroPullModel
                     )
                 }
@@ -667,7 +702,18 @@ struct PlozziOSHomeView: View {
         }
         let featured = featuredItems
         let pendingMutations = await viewModel.pendingHeroWatchMutations()
-        let curated = await HeroCurator().curate(
+        let rolls = heroRandomRolls
+        let rollKey = HeroRandomRollStore.Key(
+            libraries: randomLibraries,
+            limit: settings.maxItems,
+            hideWatched: settings.hideWatched,
+            // The draw belongs to one profile's servers. Without this, switching
+            // profile could keep serving the previous one's titles for the rest of
+            // the lifetime whenever the resolved library set happened to match.
+            scope: appModel.profiles.activeNamespace ?? ""
+        )
+        let curator = HeroCurator()
+        let result = await curator.curateResult(
             settings: settings,
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
@@ -677,10 +723,61 @@ struct PlozziOSHomeView: View {
             featuredProvider: { limit in
                 Array(featured.prefix(limit))
             },
-            randomProvider: randomProvider
+            randomProvider: { libraries, limit in
+                await rolls.items(for: rollKey) {
+                    await randomProvider(libraries, limit)
+                }
+            }
         )
         guard !Task.isCancelled else { return }
-        heroItems = curated
+        let curated = result.items
+        // Fold the fresh curation into what is already on screen rather than
+        // replacing it, so a background refresh cannot reshuffle the carousel or
+        // move the slide the viewer is looking at. Identical policy to tvOS,
+        // including starting fresh when the viewer changed the hero's own
+        // configuration rather than reshaping the old set, and re-applying the
+        // current watched intent so a finished title can't be retained.
+        let configuration = HeroConfigurationKey(settings: settings)
+        let freshIsAuthoritative = HeroEmptyCuration.isAuthoritative(
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: content.watchlist,
+            recentlyAdded: content.latest,
+            randomLibraries: randomLibraries,
+            seerConnected: appModel.seerService.isConfigured
+        )
+        let foldsIntoLoadedSet = heroCuratedConfiguration == configuration
+        let showing = foldsIntoLoadedSet
+            ? curator.reconcile(
+                heroItems,
+                settings: settings,
+                watchMutations: pendingMutations
+            )
+            : []
+        let merge = HeroLiveMerge.merge(
+            showing: showing,
+            fresh: curated,
+            limit: settings.maxItems,
+            pinnedItemIDs: heroPinnedItemIDs,
+            misses: foldsIntoLoadedSet ? heroRetainedMisses : [:],
+            freshIsAuthoritative: freshIsAuthoritative
+        )
+        heroCuratedConfiguration = configuration
+        heroRetainedMisses = merge.misses
+        if merge.items != heroItems { heroItems = merge.items }
+        // What the next launch may repaint instead of a skeleton, re-checked
+        // against the final payload (see `HeroDurableSnapshot`).
+        // Gated on authority, not on the carousel being empty. `merge.items` is
+        // empty whenever nothing was showing and the curation returned nothing —
+        // including a transient failure right after a settings change, when
+        // `showing` is deliberately empty — and deleting the snapshot there is the
+        // very thing `saveHero`'s empty-write refusal exists to prevent.
+        let durable = HeroDurableSnapshot.filter(result.durableItems)
+        if durable.isEmpty, freshIsAuthoritative {
+            viewModel.clearCachedHeroItems()
+        } else {
+            viewModel.cacheHeroItems(durable, for: settings)
+        }
     }
 }
 
@@ -721,6 +818,12 @@ private struct PlozziOSHomeHeroCarousel: View {
     @Environment(HeroTrailerController.self) private var trailerController
     @State private var selectedItemID: String?
     @State private var dwellStart = Date()
+    /// Seconds of this slide's dwell spent showing a trailer, which the countdown
+    /// does not charge for. Everything else is derived from `dwellStart` — the
+    /// same clock the paging gauge reads — so the two can never disagree, and
+    /// restarting the countdown task (which a changed item set requires) resumes
+    /// it rather than discarding the seconds already served.
+    @State private var dwellTrailerSeconds = 0.0
     /// The slide `dwellStart` was set for. `selectedItemID` and the dwell reset
     /// on separate passes, so the id is the only reliable way to tell whether
     /// the clock on screen actually belongs to the slide being shown.
@@ -746,6 +849,9 @@ private struct PlozziOSHomeHeroCarousel: View {
     /// Per-season request handler for a featured **series** (item, chosen season
     /// numbers). When set, the series Request CTA becomes a season-picker menu.
     var onRequestSeasons: ((MediaItem, [Int]) -> Void)?
+    /// Reports the slides on screen, so a background curation can fold new media
+    /// in without displacing what the viewer is looking at (see `HeroLiveMerge`).
+    var onPinnedItemsChanged: (Set<String>) -> Void = { _ in }
     let pullModel: PlozziOSHomeHeroPullModel
 
     /// Loaded Seerr season-request availability for featured discovery series,
@@ -909,12 +1015,20 @@ private struct PlozziOSHomeHeroCarousel: View {
                 .offset(y: 10)
             }
         }
-        .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
-            if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
-                selectedItemID = itemIDs.first
-                dwellStart = .now
-                dwellItemID = itemIDs.first
+        .onChange(of: items.map(\.id), initial: true) { oldIDs, itemIDs in
+            guard selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") else {
+                return
             }
+            // Re-seat by POSITION, not to the front. A curation folding into the
+            // live set keeps every slot where it was (see `HeroLiveMerge`), so the
+            // slide at the same index is the one the viewer was on — jumping to
+            // the first slide would throw away their place in the carousel.
+            let slot = oldIDs.firstIndex(of: selectedItemID ?? "") ?? 0
+            let seated = itemIDs.indices.contains(slot) ? itemIDs[slot] : itemIDs.first
+            selectedItemID = seated
+            dwellStart = .now
+            dwellTrailerSeconds = 0
+            dwellItemID = seated
         }
         .task(
             id: PlozziOSHeroTimerID(
@@ -924,7 +1038,6 @@ private struct PlozziOSHomeHeroCarousel: View {
             )
         ) {
             guard autoAdvance, items.count > 1 else { return }
-            var elapsed = 0
             var countdownItemID = selectedItemID
             while !Task.isCancelled {
                 do {
@@ -934,24 +1047,32 @@ private struct PlozziOSHomeHeroCarousel: View {
                 }
                 if countdownItemID != selectedItemID {
                     countdownItemID = selectedItemID
-                    elapsed = 0
+                    dwellTrailerSeconds = 0
                 }
                 if let selectedItemID,
                    trailerController.isShowing(selectedItemID) {
+                    dwellTrailerSeconds += 1
                     continue
                 }
-                elapsed += 1
-                if elapsed >= autoAdvanceSeconds {
+                let elapsed = Date().timeIntervalSince(dwellStart)
+                    - dwellTrailerSeconds
+                if elapsed >= Double(autoAdvanceSeconds) {
                     page(forward: true)
                     countdownItemID = selectedItemID
-                    elapsed = 0
+                    dwellTrailerSeconds = 0
                 }
             }
         }
         .onChange(of: selectedItemID, initial: true) {
             dwellStart = .now
+            dwellTrailerSeconds = 0
             dwellItemID = selectedItemID
             installTrailerEndHandler()
+        }
+        // Both slides a committed swipe involves are on screen at once, so both
+        // are off-limits to a curation folding new media in.
+        .onChange(of: PlozziOSHeroPinnedIDs(selectedItemID, transitionTargetID), initial: true) { _, pinned in
+            onPinnedItemsChanged(pinned.ids)
         }
         .task(id: selectedItemID) {
             guard let currentItem else { return }
@@ -1392,7 +1513,25 @@ private struct PlozziOSHorizontalHeroDragGesture:
     }
 }
 
+/// The slides on screen at once: the fronted one, and the one a committed swipe
+/// is landing on. Equatable so the hero only reports a change when the pair
+/// genuinely moves.
+private struct PlozziOSHeroPinnedIDs: Equatable {
+    let ids: Set<String>
+
+    init(_ selected: String?, _ transitionTarget: String?) {
+        ids = Set([selected, transitionTarget].compactMap { $0 })
+    }
+}
+
 private struct PlozziOSHeroTimerID: Equatable {
+    /// The countdown task calls `page(forward:)`, which reads the `items` captured
+    /// when the task started — so it MUST restart when the set changes, or
+    /// auto-advance would keep cycling a stale array and could never reach a
+    /// newly admitted slide. The countdown itself is derived from `dwellStart`
+    /// rather than accumulated inside the task, so a restart resumes it instead of
+    /// resetting it: a curation folding new media in (see `HeroLiveMerge`) must
+    /// not keep the carousel from ever advancing.
     let itemIDs: [String]
     let autoAdvance: Bool
     let seconds: Int

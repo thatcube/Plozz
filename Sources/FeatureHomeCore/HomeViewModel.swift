@@ -622,16 +622,34 @@ public final class HomeViewModel {
         }
     }
 
+    /// Last session's curated hero, ready to paint in the first frame.
+    ///
+    /// Deliberately unconditional on which sources are enabled: a hero that starts
+    /// as a skeleton on every launch is the thing this exists to prevent. What
+    /// makes it safe is ``HeroDurableSnapshot`` — re-applied here on the way out,
+    /// not just on the way in, so a file written by a build that predates the rule
+    /// (or by one whose enrichment added a resumable source ref afterwards) cannot
+    /// repaint a stale playback position either.
     public func cachedHeroItems(for settings: HeroSettings) -> [MediaItem]? {
-        guard settings.isActive, settings.sources == [.featured] else { return nil }
-        return contentStore.loadHero(for: HomeHeroCacheKey(settings: settings))
+        guard settings.isActive else { return nil }
+        guard let stored = contentStore.loadHero(
+            for: HeroConfigurationKey(settings: settings)
+        ) else { return nil }
+        let durable = HeroDurableSnapshot.filter(stored)
+        return durable.isEmpty ? nil : durable
     }
 
     public func cacheHeroItems(_ items: [MediaItem], for settings: HeroSettings) {
-        guard settings.isActive, settings.isEnabled(.featured), !items.isEmpty else {
-            return
-        }
-        contentStore.saveHero(items, for: HomeHeroCacheKey(settings: settings))
+        guard settings.isActive, !items.isEmpty else { return }
+        contentStore.saveHero(items, for: HeroConfigurationKey(settings: settings))
+    }
+
+    /// Discards the launch snapshot, for a curation that authoritatively found
+    /// nothing. ``cacheHeroItems(_:for:)`` deliberately refuses to write an empty
+    /// set — otherwise a failed refresh would erase a good snapshot — so running
+    /// out of content needs to say so explicitly rather than by omission.
+    public func clearCachedHeroItems() {
+        contentStore.clearHero()
     }
 
     /// In-flight guard so a burst of resume ticks for a not-yet-loaded title

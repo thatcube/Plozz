@@ -113,7 +113,7 @@ final class HomeContentStoreTests: XCTestCase {
             autoAdvance: true,
             autoAdvanceSeconds: 10
         )
-        let key = HomeHeroCacheKey(settings: settings)
+        let key = HeroConfigurationKey(settings: settings)
         HomeContentStore(namespace: "hero", directory: tempDir)
             .saveHero(makeItems(3), for: key)
 
@@ -135,16 +135,19 @@ final class HomeContentStoreTests: XCTestCase {
         var changed = featured
         changed.sources = [.continueWatching]
         let store = HomeContentStore(namespace: "hero-a", directory: tempDir)
-        store.saveHero(makeItems(2), for: HomeHeroCacheKey(settings: featured))
+        store.saveHero(makeItems(2), for: HeroConfigurationKey(settings: featured))
 
-        XCTAssertNil(store.loadHero(for: HomeHeroCacheKey(settings: changed)))
+        XCTAssertNil(store.loadHero(for: HeroConfigurationKey(settings: changed)))
         XCTAssertNil(
             HomeContentStore(namespace: "hero-b", directory: tempDir)
-                .loadHero(for: HomeHeroCacheKey(settings: featured))
+                .loadHero(for: HeroConfigurationKey(settings: featured))
         )
     }
 
-    func testFeaturedCacheSurvivesAddingOtherHeroSources() {
+    func testChangingHeroSourcesInvalidatesTheLaunchSeed() {
+        // The seed is now the whole curated set, not just its Featured bucket, so a
+        // different source list describes a different carousel. Repainting the old
+        // one would show titles from a source the viewer just switched off.
         let featuredOnly = HeroSettings(
             isEnabled: true,
             sources: [.featured],
@@ -165,12 +168,157 @@ final class HomeContentStoreTests: XCTestCase {
         ]
         mixed.randomLibraryKeys = ["server:movies"]
         let store = HomeContentStore(namespace: "mixed-hero", directory: tempDir)
-        store.saveHero(makeItems(2), for: HomeHeroCacheKey(settings: featuredOnly))
+        store.saveHero(makeItems(2), for: HeroConfigurationKey(settings: featuredOnly))
+
+        XCTAssertNil(store.loadHero(for: HeroConfigurationKey(settings: mixed)))
+    }
+
+    func testPresentationSettingsDoNotInvalidateTheLaunchSeed() {
+        // Trailers and auto-advance change how the carousel behaves, not which
+        // titles can be in it, so flipping them must not cost a launch its hero.
+        let settings = HeroSettings(
+            isEnabled: true,
+            sources: [.featured, .watchlist],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: true,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        var restyled = settings
+        restyled.trailersEnabled = true
+        restyled.autoAdvance = false
+        restyled.autoAdvanceSeconds = 30
+        let store = HomeContentStore(namespace: "restyled-hero", directory: tempDir)
+        store.saveHero(makeItems(2), for: HeroConfigurationKey(settings: settings))
 
         XCTAssertEqual(
-            store.loadHero(for: HomeHeroCacheKey(settings: mixed))?.map(\.id),
+            store.loadHero(for: HeroConfigurationKey(settings: restyled))?.map(\.id),
             ["i0", "i1"]
         )
+    }
+
+    // MARK: - Reading a seed written by the previous release
+
+    /// `HeroConfigurationKey` replaced the narrower `HomeHeroCacheKey` inside the
+    /// persisted hero WITHOUT a schema-directory bump, so an install upgrading into
+    /// this build reads files the old build wrote. The old key had no
+    /// `randomLibraryKeys` and — importantly — collapsed *any* settings that merely
+    /// had Featured enabled down to `sources: [.featured]`, while storing only the
+    /// Featured bucket. These pin down that such a file can never be mistaken for a
+    /// seed of the full carousel.
+    private func writeLegacyHeroFile(
+        namespace: String?,
+        sources: [String],
+        maxItems: Int,
+        hideWatched: Bool,
+        itemIDs: [String]
+    ) throws {
+        let name = namespace.map { "home-content.\($0)" } ?? "home-content"
+        let safe = Data(name.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        // Locate the live schema directory by having the store write a throwaway
+        // file, so this test cannot drift from the current schema name.
+        let probe = HomeContentStore(namespace: "legacy-probe", directory: tempDir)
+        probe.saveHero(makeItems(1), for: HeroConfigurationKey(settings: nil))
+        let schemaDir = try XCTUnwrap(
+            FileManager.default
+                .contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+                .first { $0.hasDirectoryPath }
+        )
+        let items: [[String: Any]] = itemIDs.map {
+            ["id": $0, "title": $0, "kind": "movie"]
+        }
+        let stored: [String: Any] = [
+            "key": [
+                "sources": sources,
+                "maxItems": maxItems,
+                "hideWatched": hideWatched,
+            ],
+            "items": items,
+            "savedAt": Date().timeIntervalSinceReferenceDate,
+        ]
+        let json = try JSONSerialization.data(withJSONObject: stored)
+        try json.write(
+            to: schemaDir
+                .appendingPathComponent(safe + "-hero")
+                .appendingPathExtension("json")
+        )
+    }
+
+    func testALegacyFeaturedOnlySeedIsStillReadableForAFeaturedOnlyHero() throws {
+        // The one case where the old file is genuinely a seed of the whole
+        // carousel, because Featured was the only source.
+        try writeLegacyHeroFile(
+            namespace: "legacy-featured",
+            sources: ["featured"],
+            maxItems: 8,
+            hideWatched: true,
+            itemIDs: ["f0", "f1"]
+        )
+        let settings = HeroSettings(
+            isEnabled: true,
+            sources: [.featured],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: true,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        let store = HomeContentStore(namespace: "legacy-featured", directory: tempDir)
+
+        XCTAssertEqual(
+            store.loadHero(for: HeroConfigurationKey(settings: settings))?.map(\.id),
+            ["f0", "f1"]
+        )
+    }
+
+    func testALegacyFeaturedBucketIsNeverRepaintedAsAMixedHero() throws {
+        // The old key wrote `sources: [.featured]` even when the viewer had all
+        // five sources on, and stored ONLY the Featured bucket. Repainting that as
+        // the launch seed would silently drop four sources from the carousel.
+        try writeLegacyHeroFile(
+            namespace: "legacy-mixed",
+            sources: ["featured"],
+            maxItems: 8,
+            hideWatched: true,
+            itemIDs: ["f0", "f1"]
+        )
+        let mixed = HeroSettings(
+            isEnabled: true,
+            sources: HeroSourceKind.allCases,
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: true,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        let store = HomeContentStore(namespace: "legacy-mixed", directory: tempDir)
+
+        XCTAssertNil(store.loadHero(for: HeroConfigurationKey(settings: mixed)))
+    }
+
+    func testNarrowingTheRandomLibrarySelectionInvalidatesTheLaunchSeed() {        let settings = HeroSettings(
+            isEnabled: true,
+            sources: [.randomFromLibrary],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: true,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        var narrowed = settings
+        narrowed.randomLibraryKeys = ["server:movies"]
+        let store = HomeContentStore(namespace: "random-hero", directory: tempDir)
+        store.saveHero(makeItems(2), for: HeroConfigurationKey(settings: settings))
+
+        XCTAssertNil(store.loadHero(for: HeroConfigurationKey(settings: narrowed)))
     }
 
     func testExpiredCuratedHeroIsDropped() {
@@ -185,14 +333,14 @@ final class HomeContentStoreTests: XCTestCase {
             autoAdvanceSeconds: 10
         )
         let normal = HomeContentStore(namespace: "expired-hero", directory: tempDir)
-        normal.saveHero(makeItems(1), for: HomeHeroCacheKey(settings: settings))
+        normal.saveHero(makeItems(1), for: HeroConfigurationKey(settings: settings))
 
         let expired = HomeContentStore(
             namespace: "expired-hero",
             directory: tempDir,
             heroMaxAge: 0
         )
-        XCTAssertNil(expired.loadHero(for: HomeHeroCacheKey(settings: settings)))
+        XCTAssertNil(expired.loadHero(for: HeroConfigurationKey(settings: settings)))
     }
 
     func testSerializedSnapshotNeverContainsLocalArtworkPath() throws {

@@ -119,6 +119,7 @@ private final class UniversalWatchlistHomeStore:
         content = nil
         lock.unlock()
     }
-    func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? { nil }
-    func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {}
+    func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? { nil }
+    func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {}
+    func clearHero() {}
 }

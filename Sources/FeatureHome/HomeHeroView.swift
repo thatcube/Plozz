@@ -82,6 +82,10 @@ struct HomeHeroView: View {
     /// so Home can restore the full-screen hero and replay the enter transition.
     /// Not fired for interior button-to-button moves.
     var onFocusGained: () -> Void = {}
+    /// Reports the slides on screen, so a background curation can fold new media
+    /// in without ever displacing what the viewer is looking at (see
+    /// ``HeroLiveMerge``). Fires on appearance and on every page.
+    var onPinnedItemsChanged: (Set<String>) -> Void = { _ in }
     /// Leaf-owned recede state. Passing the model reference keeps the high-frequency
     /// animation state out of `HomeView`'s observation surface, so moving between
     /// the hero and Continue Watching no longer invalidates every Home row.
@@ -533,21 +537,39 @@ struct HomeHeroView: View {
             artworkSetToken &+= 1
             let oldIdx = index
             let frontedID = oldIDs.indices.contains(index) ? oldIDs[index] : nil
+            let frontedSurvived: Bool
             if let frontedID, let newIdx = newIDs.firstIndex(of: frontedID) {
                 index = newIdx
+                frontedSurvived = true
             } else {
                 index = min(index, max(0, newIDs.count - 1))
+                frontedSurvived = false
             }
-            HeroFocusDiagnostics.emit("items SET-SWAP count \(oldIDs.count)->\(newIDs.count) index \(oldIdx)->\(index) frontedSurvived=\(frontedID.map { newIDs.contains($0) } ?? false) | \(hfState())")
+            HeroFocusDiagnostics.emit("items SET-SWAP count \(oldIDs.count)->\(newIDs.count) index \(oldIdx)->\(index) frontedSurvived=\(frontedSurvived) | \(hfState())")
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
             trailerSourceCache = trailerSourceCache.filter { present.contains($0.key) }
             noFastTrailerIDs.formIntersection(present)
+            // Clamp the logical selection to the fronted slide's button count so it
+            // can never point past the last pill — the slide's own CTA can change
+            // (Request → Downloading → Play) even when the slide itself did not.
+            // Pure `@State`, so this never touches (or drops) focus.
+            if items.indices.contains(index) {
+                selectedButton = min(selectedButton, max(0, buttons(for: items[index]).count - 1))
+            }
             // A set swap is not a page: cancel any pending metadata fade-in and
             // show the (possibly relocated) current item. The backdrop tracks
             // `current`'s id, so if the fronted item survived the swap its art is
             // unchanged (no wipe); if it was clamped to a different item the
             // backdrop wipes to it (with whatever direction was last recorded).
+            //
+            // Only when the fronted slide actually CHANGED, though. Curation folds
+            // new media into the live set while the viewer sits on Home (see
+            // `HeroLiveMerge`), so this now fires for updates that leave the fronted
+            // slide exactly where it was. Restarting the dwell for those would reset
+            // the auto-advance gauge every time — and a refresh arriving more often
+            // than the dwell is long would stop the carousel advancing at all.
+            guard !frontedSurvived else { return }
             slideToken &+= 1
             metadataVisible = true
             // The set swap re-seats the fronted slide, so start a fresh dwell for
@@ -561,12 +583,11 @@ struct HomeHeroView: View {
             // recede pause. Kept coupled to `pausedAt` (not a bare `!receded` task
             // guard) so `resumeFromRecede()` still resumes cleanly on focus return.
             if receded { pauseWhileReceded() }
-            // Clamp the logical selection to the new slide's button count so it
-            // can never point past the last pill after a set swap. Pure `@State`,
-            // so this never touches (or drops) focus.
-            if items.indices.contains(index) {
-                selectedButton = min(selectedButton, max(0, buttons(for: items[index]).count - 1))
-            }
+        }
+        // Keep Home told which slide is on screen, so a curation landing in the
+        // background folds new media into a free slot rather than over this one.
+        .onChange(of: current?.id, initial: true) { _, id in
+            onPinnedItemsChanged(Set([id].compactMap { $0 }))
         }
         // Drop optimistic watchlist overrides once the AUTHORITY THE PILL FALLS
         // BACK TO agrees — not merely once Home's loaded watchlist row does.
@@ -802,8 +823,15 @@ struct HomeHeroView: View {
     /// the gauge stay in sync. Focus is deliberately NOT part of this — the
     /// carousel cycles whether or not the hero holds focus; only real remote input
     /// pauses it.
+    ///
+    /// `items.count` is in here for one specific reason: the fire returns
+    /// immediately while there is only one slide, and a curation folding a second
+    /// title in (see `HeroLiveMerge`) does not re-seat the fronted slide, so
+    /// nothing else in this key would move and the carousel would stay stationary
+    /// forever. Because the restart re-derives its sleep from `dwellStart`, an
+    /// ordinary set update resumes the countdown rather than restarting it.
     private var autoAdvanceKey: String {
-        "\(index)-\(advanceToken)-\(runEpoch)-\(slideToken)-\(activeTrailerDuration)"
+        "\(index)-\(advanceToken)-\(runEpoch)-\(slideToken)-\(activeTrailerDuration)-\(items.count)"
     }
 
     /// One continuous wall-clock timeline from initial still through trailer end.

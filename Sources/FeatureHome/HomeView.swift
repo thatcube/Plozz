@@ -16,13 +16,34 @@ import MetadataKit
 public final class HomeHeroRuntimeState {
     var items: [MediaItem] = []
     var completedKey: HeroRecomputeKey?
-    /// Last launch's fully curated set. Hydrated once from the profile-scoped Home
-    /// cache so Featured/Random can paint before Seerr, artwork validation, and
-    /// metadata enrichment finish.
+    /// Last launch's curated hero, hydrated once from the profile-scoped Home
+    /// cache so the carousel paints in the first frame instead of a skeleton —
+    /// before Seerr, the random draw, artwork validation and metadata enrichment
+    /// have done anything. Holds no Continue Watching slides; see
+    /// ``HeroCurationResult/durableItems``. Cleared once a real curation lands.
     var cachedItems: [MediaItem] = []
-    var cachedKey: HomeHeroCacheKey?
+    var cachedKey: HeroConfigurationKey?
     var hasHydratedCache = false
     var externalRefreshRevision = 0
+    /// The Random source's retained draw, so a background recomputation reuses the
+    /// titles already on screen instead of re-shuffling every library on every
+    /// connected server. See ``HeroRandomRollStore``.
+    @ObservationIgnored let randomRolls = HeroRandomRollStore()
+    /// Which profile/server scope the hero is currently built for. Part of the
+    /// random draw's key, so a scope change can't be raced by the curation it
+    /// triggers — the old draw simply stops matching.
+    @ObservationIgnored private(set) var scopeRevision = 0
+    /// The slides on screen: the fronted one, plus whatever a committed swipe is
+    /// landing on. Written by `HomeHeroView` as it pages, and read only when
+    /// folding a fresh curation in, so a slide the viewer is looking at is never
+    /// the one evicted, retired, or swapped for a different record.
+    /// Deliberately unobserved: it changes on every page and nothing renders from
+    /// it, so observing it would invalidate Home for no reason.
+    @ObservationIgnored var pinnedItemIDs: Set<String> = []
+    /// How many consecutive curations have failed to offer each retained title, so
+    /// a deleted or un-watchlisted one eventually leaves rather than haunting the
+    /// carousel. See ``HeroLiveMerge``. Unobserved: only the fold reads it.
+    @ObservationIgnored var retainedMisses: [String: Int] = [:]
     /// Live, in-session watched/unwatched intents replayed onto the hero until the
     /// durable snapshot catches up. Kept bounded via ``registerWatchMutation(_:)``.
     var watchMutations: [MediaItemMutation] = []
@@ -42,7 +63,10 @@ public final class HomeHeroRuntimeState {
         cachedItems = []
         cachedKey = nil
         hasHydratedCache = false
+        pinnedItemIDs = []
+        retainedMisses = [:]
         externalRefreshRevision &+= 1
+        scopeRevision &+= 1
     }
 
     /// Records a live watched/unwatched intent for hero replay, collapsing any
@@ -254,7 +278,7 @@ public struct HomeView: View {
             heroRuntime.hasHydratedCache = true
             if let settings = heroSettings?.settings,
                let cached = viewModel.cachedHeroItems(for: settings) {
-                heroRuntime.cachedKey = HomeHeroCacheKey(settings: settings)
+                heroRuntime.cachedKey = HeroConfigurationKey(settings: settings)
                 heroRuntime.cachedItems = cached
             }
         }
@@ -414,6 +438,7 @@ public struct HomeView: View {
                                         heroScrollProxy.scrollTo(Self.heroTopID, anchor: .top)
                                     }
                                 },
+                                onPinnedItemsChanged: { heroRuntime.pinnedItemIDs = $0 },
                                 recedeModel: heroRecedeModel
                             )
                             .id(Self.heroTopID)
@@ -700,11 +725,16 @@ public struct HomeView: View {
             heroRuntime.completedKey = key
             return
         }
-        if key.awaitingLiveHome, settings.sources != [.featured] {
-            // Any hero that includes a local source must be composed from the fresh
-            // multi-server Home aggregate. Keep the fixed skeleton until then; an
-            // intermediate Featured-only or stale-local carousel would reshuffle
-            // underneath the viewer when the remaining sources arrived.
+        if key.awaitingLiveHome, settings.sources != [.featured],
+           heroRuntime.items.isEmpty {
+            // Nothing curated yet this session and Home is still painting last
+            // launch's cached rows. Any hero that includes a local source must be
+            // composed from the fresh multi-server aggregate, so wait: curating
+            // from cached rows would spend a full pass on an answer the live
+            // aggregate is about to replace. The viewer sees last session's hero
+            // meanwhile (see `HomeHeroDisplayResolver`), not a skeleton, and the
+            // curation folds into it when it lands. Once a curation *has* completed
+            // there is nothing left to wait for.
             return
         }
 
@@ -744,10 +774,26 @@ public struct HomeView: View {
         guard !Task.isCancelled else { return }
         heroRuntime.durableWatchMutations = durableWatchMutations
         heroRuntime.hasHydratedDurableMutations = true
-        let cachedFeatured =
-            heroRuntime.cachedKey == HomeHeroCacheKey(settings: settings)
-                ? heroRuntime.cachedItems
-                : []
+        // The seed's own slides stand in for Seerr while it is unreachable. Only
+        // the ones it actually supplied: a watchlist title handed to the Featured
+        // source would arrive with no availability and render the wrong CTA.
+        let seedMatchesConfiguration =
+            heroRuntime.cachedKey == HeroConfigurationKey(settings: settings)
+        let cachedFeatured = seedMatchesConfiguration
+            ? heroRuntime.cachedItems.filter { $0.availability != nil }
+            : []
+        // Reuse the Random source's retained draw. Recomputation is triggered by
+        // things the viewer never asked for, and re-shuffling every visible library
+        // on every connected server for each of them is both the slowest part of a
+        // curation and the reason the carousel's contents kept moving on their own.
+        let randomRolls = heroRuntime.randomRolls
+        let rollKey = HeroRandomRollStore.Key(
+            libraries: randomLibraries,
+            limit: settings.maxItems,
+            hideWatched: settings.hideWatched,
+            scope: String(heroRuntime.scopeRevision)
+        )
+        let retainedRandomProvider = heroRandomProvider
         let result = await HomePerfDiagnostics.measureCurate {
             await heroCurator.curateResult(
                 settings: settings,
@@ -762,7 +808,11 @@ public struct HomeView: View {
                         ? Array(cachedFeatured.prefix(limit))
                         : fresh
                 },
-                randomProvider: heroRandomProvider,
+                randomProvider: { libraries, limit in
+                    await randomRolls.items(for: rollKey) {
+                        await retainedRandomProvider(libraries, limit)
+                    }
+                },
                 artworkProvider: heroArtworkProvider,
                 artworkValidator: heroArtworkValidator
             )
@@ -773,13 +823,25 @@ public struct HomeView: View {
             PlozzLog.boot("HomeHero.curate CANCEL ms=\(elapsedMS)")
             return
         }
-        let cacheKey = HomeHeroCacheKey(settings: settings)
+        let cacheKey = HeroConfigurationKey(settings: settings)
+        let freshIsAuthoritative = HeroEmptyCuration.isAuthoritative(
+            settings: settings,
+            continueWatching: content.continueWatching,
+            watchlist: content.watchlist,
+            recentlyAdded: content.latest,
+            randomLibraries: randomLibraries,
+            seerConnected: heroSeerConnected
+        )
         if items.isEmpty,
+           !freshIsAuthoritative,
            heroRuntime.cachedKey == cacheKey,
            !heroRuntime.cachedItems.isEmpty {
             // Featured/Random are network sources. A transient empty refresh must
             // not tear down a good launch snapshot; retain it for this session and
-            // try again on the next cold launch.
+            // try again on the next cold launch. Gated on the emptiness being
+            // inconclusive: when every enabled source genuinely has nothing left,
+            // the snapshot is wrong and keeping it would repaint titles the viewer
+            // no longer has, on this launch and every one after it.
             heroRuntime.completedKey = key
             let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
             PlozzLog.boot("HomeHero.curate KEEP-CACHED ms=\(elapsedMS)")
@@ -791,20 +853,67 @@ public struct HomeView: View {
         let enriched = await heroMetadataEnricher(items)
         guard !Task.isCancelled else { return }
         let stableItems = heroCurator.deduplicating(enriched)
-        heroRuntime.items = stableItems
+        // Fold the fresh curation into whatever is already on screen instead of
+        // replacing it, so a background refresh the viewer never asked for cannot
+        // reshuffle the carousel, wipe the backdrop or move what they were looking
+        // at. Titles already showing keep their slot; new media takes spare
+        // capacity first and only then the stalest slot that isn't fronted.
+        //
+        // What is on screen is last session's seed at launch and a curated set
+        // thereafter; both fold the same way, which is exactly what lets the seed
+        // be shown at all — the slides the viewer can already browse keep their
+        // slots instead of being swapped out from under them.
+        //
+        // Nothing is folded into when the viewer changed the hero's own
+        // configuration: that is a direct instruction, the display has already
+        // retired the old set (see `HomeHeroDisplayResolver`), and the answer is
+        // the fresh curation rather than a reshaped old one.
+        let foldsIntoLoadedSet =
+            heroRuntime.completedKey?.matchesConfiguration(key) ?? false
+        let onScreen = foldsIntoLoadedSet && !heroRuntime.items.isEmpty
+            ? heroRuntime.items
+            : (seedMatchesConfiguration ? heroRuntime.cachedItems : [])
+        let showing = heroCurator.reconcile(
+            onScreen,
+            settings: settings,
+            watchMutations: durableWatchMutations + heroRuntime.watchMutations
+        )
+        let merge = HeroLiveMerge.merge(
+            showing: showing,
+            fresh: stableItems,
+            limit: settings.maxItems,
+            pinnedItemIDs: heroRuntime.pinnedItemIDs,
+            misses: foldsIntoLoadedSet ? heroRuntime.retainedMisses : [:],
+            freshIsAuthoritative: freshIsAuthoritative
+        )
+        heroRuntime.retainedMisses = merge.misses
+        if merge.items != heroRuntime.items { heroRuntime.items = merge.items }
         heroRuntime.cachedItems = []
         heroRuntime.cachedKey = nil
         heroRuntime.completedKey = key
+        // Persist what the next launch may repaint instead of a skeleton: the
+        // curated set minus its Continue Watching slides, whose resume positions go
+        // stale the moment anything is watched anywhere.
         let enrichedByID = Dictionary(
             stableItems.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let enrichedFeatured = result.featuredItems.map {
-            enrichedByID[$0.id] ?? $0
+        let enrichedDurable = HeroDurableSnapshot.filter(
+            result.durableItems.map { enrichedByID[$0.id] ?? $0 }
+        )
+        if enrichedDurable.isEmpty, freshIsAuthoritative {
+            // Nothing durable left to promise the next launch. Saying so takes an
+            // explicit clear: `cacheHeroItems` refuses to write an empty set, so
+            // that a failed refresh can never erase a good snapshot.
+            viewModel.clearCachedHeroItems()
+        } else {
+            viewModel.cacheHeroItems(enrichedDurable, for: settings)
         }
-        viewModel.cacheHeroItems(enrichedFeatured, for: settings)
         let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
-        PlozzLog.boot("HomeHero.curate DONE ms=\(elapsedMS) items=\(stableItems.count)")
+        PlozzLog.boot(
+            "HomeHero.curate DONE ms=\(elapsedMS) items=\(merge.items.count)"
+                + " new=\(merge.admitted.count) retired=\(merge.retired.count)"
+        )
     }
 
     /// Interval between in-place featured-status refreshes while Home is visible.
@@ -979,6 +1088,9 @@ struct HeroRecomputeKey: Equatable {
     let sources: [HeroSourceKind]
     let maxItems: Int
     let hideWatched: Bool
+    /// What the viewer chose, separated from what the world supplied. See
+    /// ``HeroConfigurationKey``.
+    let configuration: HeroConfigurationKey
     let externalRefreshRevision: Int
     let awaitingLiveHome: Bool
 
@@ -993,6 +1105,7 @@ struct HeroRecomputeKey: Equatable {
         self.sources = activeSources
         self.maxItems = activeSources.isEmpty ? 0 : settings?.maxItems ?? 0
         self.hideWatched = activeSources.isEmpty ? false : settings?.hideWatched ?? false
+        self.configuration = HeroConfigurationKey(settings: settings)
         let includeSourceIDs = settings?.hideWatched == true
         self.continueWatching = activeSources.contains(.continueWatching)
             ? content.continueWatching.map {
@@ -1030,6 +1143,13 @@ struct HeroRecomputeKey: Equatable {
             && maxItems == other.maxItems
             && hideWatched == other.hideWatched
             && awaitingLiveHome == other.awaitingLiveHome
+    }
+
+    /// Whether both keys describe the same hero *configuration* — see
+    /// ``HeroConfigurationKey``. Content moving through an unchanged configuration
+    /// keeps the loaded hero on screen; a configuration change retires it at once.
+    func matchesConfiguration(_ other: HeroRecomputeKey) -> Bool {
+        configuration == other.configuration
     }
 }
 
@@ -1092,14 +1212,27 @@ enum HomeHeroSlotState: Equatable {
 /// in isolation, exactly like ``HomeHeroSlotState/resolve(isConfigured:hasItems:recomputeComplete:)``.
 ///
 /// Priority:
-/// 1. If the runtime holds items for the current key — or one that differs only
-///    by an in-flight external-history refresh — reconcile them against the live
-///    watch overlays and show those. This keeps the async Featured/Random slides
-///    and preserves focus while a just-watched title still drops out.
-/// 2. Otherwise, only a Featured-only configuration may use its persisted seed.
-///    Every mixed/local configuration keeps the fixed hero placeholder until the
-///    complete fresh curation is ready, preventing stale cards or partial source
-///    sets from reshuffling underneath the viewer.
+/// 1. **A completed curation keeps rendering while the next one runs.** Home
+///    re-curates for reasons the viewer never asked for — a silent
+///    re-aggregation, a warmed identity index, a watch mutation, a share scan —
+///    and a full re-curation takes seconds. Dropping back to the placeholder for
+///    each of those is what made the hero look like it reloaded constantly, most
+///    of all with several servers connected. So the loaded set stays on screen,
+///    reconciled against the live watch overlays so a just-watched title still
+///    drops out, and the fresh curation folds in when it lands (see
+///    ``HeroLiveMerge``) rather than replacing what is showing.
+///
+///    The one thing that *does* retire it immediately is the viewer changing the
+///    hero's own configuration — sources, size, Hide Watched, or the Random
+///    library selection. That is a direct instruction, and it must be obeyed at
+///    once rather than after a re-curation.
+/// 2. Otherwise, last session's persisted hero paints instead of a skeleton, so a
+///    launch looks like the app was never closed. It holds no Continue Watching
+///    slides (see ``HeroCurationResult/durableItems``), because a resume position
+///    restored from disk can offer to resume something already finished — the
+///    same reason Home does not repaint its cached Continue Watching row. The
+///    fresh curation folds into this seed rather than replacing it, so the slides
+///    the viewer can already see do not move when it lands.
 enum HomeHeroDisplayResolver {
     @MainActor
     static func resolve(
@@ -1112,10 +1245,9 @@ enum HomeHeroDisplayResolver {
         curator: HeroCurator
     ) -> [MediaItem] {
         let watchMutations = runtime.durableWatchMutations + runtime.watchMutations
-        let hasCurrentAsyncItems = runtime.completedKey == key && !runtime.items.isEmpty
-        let canReuseLoadedItems = runtime.completedKey?.matchesIgnoringExternalRefresh(key) == true
+        let canReuseLoadedItems = runtime.completedKey?.matchesConfiguration(key) == true
             && !runtime.items.isEmpty
-        if hasCurrentAsyncItems || canReuseLoadedItems {
+        if canReuseLoadedItems {
             let reconciled = curator.reconcile(
                 runtime.items,
                 settings: settings,
@@ -1124,8 +1256,7 @@ enum HomeHeroDisplayResolver {
             if !reconciled.isEmpty { return reconciled }
         }
         guard let settings,
-              settings.sources == [.featured],
-              runtime.cachedKey == HomeHeroCacheKey(settings: settings),
+              runtime.cachedKey == HeroConfigurationKey(settings: settings),
               !runtime.cachedItems.isEmpty else {
             return []
         }

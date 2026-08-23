@@ -4,15 +4,21 @@ import CoreUI
 import FeatureSyncSetup
 
 extension View {
-    /// Primary call-to-action styling for the Sync & Setup flow. The app's
+    /// Primary call-to-action styling for the Sync & Setup flow.
+    ///
+    /// This used to pin an explicit brand-blue fill with a white label, because a
+    /// bare `.borderedProminent` renders white-on-white here — the app's
     /// `AccentColor` asset is intentionally empty and the Settings detail context
-    /// tints `.borderedProminent` buttons white, so a bare prominent button renders
-    /// white-on-white (invisible) here. Pin an explicit on-brand blue fill + white
-    /// label so these CTAs are always readable wherever the flow is presented.
+    /// tints prominent buttons white. That worked, but it fixed the problem for
+    /// this one flow while every other CTA in the app kept hitting it, and it
+    /// ignored the theme.
+    ///
+    /// It now forwards to ``PlozzActionButtonStyle``, which solves it for real:
+    /// the fill comes from the palette and the label from `onAccent`, so the two
+    /// are chosen together and cannot disagree. Kept as a named wrapper so the
+    /// seven call sites in this flow keep reading as one intent.
     func syncPrimaryButtonStyle() -> some View {
-        buttonStyle(.borderedProminent)
-            .tint(ThemePalette.brandBlue)
-            .foregroundStyle(.white)
+        plozzActionButton()
     }
 }
 

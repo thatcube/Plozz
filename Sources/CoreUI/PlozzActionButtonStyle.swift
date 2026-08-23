@@ -95,6 +95,11 @@ public extension View {
     /// `.bordered`, which cannot see the palette — see ``PlozzActionButtonStyle``.
     func plozzActionButton(role: PlozzActionButtonStyle.Role = .primary) -> some View {
         buttonStyle(PlozzActionButtonStyle(role: role))
+            // The style draws its own focus treatment (the bright fill and dark
+            // label tvOS expects, plus the lift), so the platform's ring would sit
+            // on top of a control that has already answered focus. Matches
+            // `plozzGlassPillButton`, which disables it for the same reason.
+            .focusEffectDisabled()
     }
 }
 #endif

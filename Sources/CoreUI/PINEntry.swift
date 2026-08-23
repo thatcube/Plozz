@@ -219,6 +219,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                         VStack(spacing: 24) {
                             padColumn
                             Button("Cancel", action: onCancel)
+                                .plozzActionButton(role: .secondary)
                         }
                     }
                     // Centre the COMPOSITION, not each column independently.
@@ -233,6 +234,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                         padColumn
                         Spacer(minLength: 0)
                         Button("Cancel", action: onCancel)
+                            .plozzActionButton(role: .secondary)
                             .padding(.bottom, 24)
                     }
                     .padding(.horizontal, PINMetrics.horizontalPadding)

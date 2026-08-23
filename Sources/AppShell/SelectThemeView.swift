@@ -79,11 +79,9 @@ struct SelectThemeView: View {
                     onContinue()
                 } label: {
                     Text("Continue")
-                        .fontWeight(.semibold)
                         .frame(minWidth: 360)
-                        .padding(.vertical, 8)
                 }
-                .buttonStyle(.borderedProminent)
+                .plozzActionButton()
                 .focused($focus, equals: .continueButton)
             }
             .frame(maxWidth: .infinity)

@@ -58,18 +58,16 @@ struct FirstRunProfileView: View {
                         .frame(minWidth: 240)
                         .padding(.vertical, 8)
                 }
-                .buttonStyle(.bordered)
+                .plozzActionButton(role: .secondary)
                 .focused($focus, equals: .edit)
 
                 Button {
                     appState.confirmFirstRunProfile()
                 } label: {
                     Text("Looks good")
-                        .fontWeight(.semibold)
                         .frame(minWidth: 280)
-                        .padding(.vertical, 8)
                 }
-                .buttonStyle(.borderedProminent)
+                .plozzActionButton()
                 .focused($focus, equals: .confirm)
             }
 

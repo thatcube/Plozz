@@ -81,11 +81,16 @@ public struct ContinueWatchingArtworkSwatch: View {
             // A little air under the caption so the last bar isn't flush with the
             // slot's edge.
             let bottomInset = height * 0.04
-            let cardHeight = min(
-                height - captionHeight - gap - bottomInset,
-                width * 0.94 * 9.0 / 16.0
+            let available = height - captionHeight - gap - bottomInset
+            // The two options are now different SHAPES — the logo card is taller,
+            // because it reserves a band under its picture for the chrome. Size
+            // both from one shared width (so the pair still reads as one scale,
+            // not two zoom levels) and from what the TALLER of them can fit.
+            let cardWidth = min(
+                width * 0.94,
+                available * ContinueWatchingCardShape.aspectRatio
             )
-            let cardWidth = cardHeight * 16.0 / 9.0
+            let cardHeight = cardWidth / cardAspectRatio
             VStack(spacing: gap) {
                 card(width: cardWidth, height: cardHeight)
                 caption(width: cardWidth, barHeight: barHeight, spacing: height * 0.025)
@@ -95,12 +100,24 @@ public struct ContinueWatchingArtworkSwatch: View {
         }
     }
 
+    /// The logo option stands taller than its 16:9 picture; the thumbnail option
+    /// is the picture and nothing else.
+    private var cardAspectRatio: CGFloat {
+        switch style {
+        case .logoAndArtwork: return ContinueWatchingCardShape.aspectRatio
+        case .thumbnail: return 16.0 / 9.0
+        }
+    }
+
     private func card(width: CGFloat, height: CGFloat) -> some View {
         let radius = min(cornerRadius, width * 0.06)
         return ZStack {
             artwork(width: width, height: height)
             if style == .logoAndArtwork {
                 wordmark(width: width)
+                    // Centred on the PICTURE, matching the real card: the band
+                    // beneath it belongs to the chrome.
+                    .offset(y: -height * (1 - ContinueWatchingCardShape.mirrorLine) / 2)
             }
             chip(width: width, height: height)
         }
@@ -139,23 +156,28 @@ public struct ContinueWatchingArtworkSwatch: View {
     private func artwork(width: CGFloat, height: CGFloat) -> some View {
         switch style {
         case .logoAndArtwork:
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.10, green: 0.20, blue: 0.46),
-                        Color(red: 0.38, green: 0.16, blue: 0.48)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // A wide, even glow — poster lighting, not a photograph.
-                RadialGradient(
-                    colors: [Color(red: 0.45, green: 0.72, blue: 1.0).opacity(0.38), .clear],
-                    center: .init(x: 0.5, y: 0.42),
-                    startRadius: 0,
-                    endRadius: width * 0.62
-                )
-            }
+            // Drawn through the real card's own fill, so the preview can't drift
+            // from what the card actually does — including the mirrored band that
+            // carries the chrome.
+            ExtendedArtworkFill(
+                picture: ZStack {
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.10, green: 0.20, blue: 0.46),
+                            Color(red: 0.38, green: 0.16, blue: 0.48)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    // A wide, even glow — poster lighting, not a photograph.
+                    RadialGradient(
+                        colors: [Color(red: 0.45, green: 0.72, blue: 1.0).opacity(0.38), .clear],
+                        center: .init(x: 0.5, y: 0.42),
+                        startRadius: 0,
+                        endRadius: width * 0.62
+                    )
+                }
+            )
         case .thumbnail:
             ZStack {
                 // A dusk horizon. A landscape reads as a *photograph of
@@ -196,35 +218,40 @@ public struct ContinueWatchingArtworkSwatch: View {
     }
 
     /// The resume chip along the bottom — present in both, since it isn't what
-    /// the choice is about.
+    /// the choice is about. Its scrim covers the band the chip sits in: on the
+    /// logo card that is the mirrored band under the picture, so the picture
+    /// itself stays clear.
     private func chip(width: CGFloat, height: CGFloat) -> some View {
-        VStack(spacing: 0) {
+        let scrimHeight = style == .logoAndArtwork
+            ? height * (1 - ContinueWatchingCardShape.scrimStart)
+            : height * 0.40
+        return VStack(spacing: 0) {
             Spacer(minLength: 0)
             LinearGradient(
                 colors: [.clear, .black.opacity(0.6)],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: height * 0.40)
+            .frame(height: scrimHeight)
             .overlay(alignment: .bottomLeading) {
                 HStack(spacing: width * 0.022) {
                     PlayGlyph()
                         .fill(.white)
-                        .frame(width: height * 0.10, height: height * 0.12)
+                        .frame(width: width * 0.056, height: width * 0.067)
                     Capsule()
                         .fill(.white.opacity(0.45))
-                        .frame(width: width * 0.19, height: height * 0.045)
+                        .frame(width: width * 0.19, height: width * 0.025)
                         .overlay(alignment: .leading) {
                             Capsule()
                                 .fill(.white)
-                                .frame(width: width * 0.19 * 0.42, height: height * 0.045)
+                                .frame(width: width * 0.19 * 0.42, height: width * 0.025)
                         }
                     Capsule()
                         .fill(.white.opacity(0.9))
-                        .frame(width: width * 0.20, height: height * 0.05)
+                        .frame(width: width * 0.20, height: width * 0.028)
                 }
                 .padding(.leading, width * 0.05)
-                .padding(.bottom, height * 0.075)
+                .padding(.bottom, width * 0.042)
             }
         }
     }

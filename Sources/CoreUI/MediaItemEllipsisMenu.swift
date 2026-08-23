@@ -104,10 +104,18 @@ public struct MediaItemEllipsisMenu: View {
 public struct MediaArtworkChromeScrim: View {
     private let hasTopChrome: Bool
     private let hasBottomChrome: Bool
+    private let bottomStart: CGFloat
 
-    public init(top: Bool, bottom: Bool) {
+    /// - Parameter bottomStart: where the bottom ramp begins, as a fraction of
+    ///   the artwork's height. The default half-way point suits a card whose
+    ///   chrome sits directly on the picture. A card that reserves a band under
+    ///   its picture for the chrome (Continue Watching — see
+    ///   ``ExtendedArtworkFill``) passes that band's top edge instead, so the
+    ///   darkening lands on the band and leaves the picture alone.
+    public init(top: Bool, bottom: Bool, bottomStart: CGFloat = 0.52) {
         self.hasTopChrome = top
         self.hasBottomChrome = bottom
+        self.bottomStart = min(0.95, max(0.34, bottomStart))
     }
 
     public var body: some View {
@@ -124,8 +132,8 @@ public struct MediaArtworkChromeScrim: View {
     private var stops: [Gradient.Stop] {
         [
             .init(color: .black.opacity(hasTopChrome ? 0.5 : 0), location: 0),
-            .init(color: .clear, location: 0.34),
-            .init(color: .clear, location: 0.52),
+            .init(color: .clear, location: min(0.34, bottomStart)),
+            .init(color: .clear, location: bottomStart),
             .init(color: .black.opacity(hasBottomChrome ? 0.78 : 0), location: 1),
         ]
     }

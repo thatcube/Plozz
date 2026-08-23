@@ -60,6 +60,29 @@ public enum PlozzTheme {
         public static let landscapeWidth: CGFloat = 480
         public static let landscapeHeight: CGFloat = 270
 
+        // MARK: Continue Watching (logo & artwork) card shape
+
+        /// Shape (width ÷ height) of a Continue Watching card that carries the
+        /// show's logo over its artwork.
+        ///
+        /// Deliberately TALLER than the 16:9 art it holds. A show's wide art is
+        /// the only thing naming the card, so the chrome along the bottom — the
+        /// play glyph, progress bar and "S1, E12 · 17m" — used to sit *on* the
+        /// picture, over the very region a backdrop tends to put its subject in.
+        /// Giving the card extra height below the picture moves that chrome off
+        /// the image entirely (see ``continueWatchingArtworkSideCrop`` for how
+        /// the shortfall is filled), and the taller card carries a bigger logo.
+        public static let continueWatchingCardAspectRatio: CGFloat = 1.38
+        /// Fraction of the artwork's width trimmed from **each** side of a
+        /// Continue Watching card.
+        ///
+        /// The picture keeps its own 16:9 shape and is never squashed. Trimming a
+        /// sliver off each side scales it up, so it stands taller in the card and
+        /// less of the card is left to fill underneath it — 3% a side costs
+        /// nothing anyone can see on a backdrop (whose subject is centred) and
+        /// buys back roughly a fifth of the fill band.
+        public static let continueWatchingArtworkSideCrop: CGFloat = 0.03
+    
         // MARK: Circular tile sizes (round avatars: artists, cast)
 
         /// Diameter of an artist's circular tile — kept close to a music card's

@@ -107,7 +107,16 @@ public struct PosterCardView: View {
         case .poster:
             return CGSize(width: metrics.posterWidth, height: metrics.posterHeight)
         case .landscape:
-            return CGSize(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
+            // A series-artwork card stands taller than the 16:9 art it carries so
+            // its chrome has a band of its own beneath the picture. See
+            // ``ExtendedArtworkFill``.
+            guard showsSeriesArtwork else {
+                return CGSize(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
+            }
+            return CGSize(
+                width: metrics.landscapeWidth,
+                height: (metrics.landscapeWidth / ContinueWatchingCardShape.aspectRatio).rounded()
+            )
         }
     }
 
@@ -383,7 +392,10 @@ public struct PosterCardView: View {
     private var borderlessAspectRatio: CGFloat {
         switch style {
         case .poster: return 2.0 / 3.0
-        case .landscape: return 16.0 / 9.0
+        // Matches `size`: series-artwork cards are taller than their picture.
+        case .landscape: return showsSeriesArtwork
+            ? ContinueWatchingCardShape.aspectRatio
+            : 16.0 / 9.0
         }
     }
 
@@ -503,7 +515,13 @@ public struct PosterCardView: View {
                 // rather than in a caption under the card, so one glance covers
                 // which show (the logo), which episode, and how much is left.
                 detailText: showsSeriesArtwork ? item.seasonEpisodeLabel : nil,
-                showsPlayGlyphWhenIdle: showsSeriesArtwork
+                showsPlayGlyphWhenIdle: showsSeriesArtwork,
+                // Concentrate the darkening on the reflection band the chip
+                // actually sits on. The shared default ramps from half-way up,
+                // which on a card that reserves a band for its chrome would dim
+                // the picture for no reason — and wash out the reflection that
+                // band exists to show.
+                bottomScrimStart: showsSeriesArtwork ? ContinueWatchingCardShape.scrimStart : nil
             )
         }
     }
@@ -775,7 +793,14 @@ public struct PosterCardView: View {
             references: seriesArtworkReferences,
             maxAspectRatio: posterAspectGuard,
             variant: artworkVariant,
-            asyncFallbackURL: seriesArtworkFallback
+            asyncFallbackURL: seriesArtworkFallback,
+            // The card is taller than the picture, so the picture is laid in at
+            // its own shape and the band left underneath is filled with a
+            // mirrored continuation of it — never by cropping the sides down to
+            // the card's shape, which on a backdrop means cutting a fifth of the
+            // frame off, and never by the blurred blow-up that costs the picture
+            // its whole lower half.
+            content: { ExtendedArtworkFill(image: $0) }
         ) {
             neutralPlaceholder
         }
@@ -812,7 +837,13 @@ public struct PosterCardView: View {
         GeometryReader { geo in
             let width = geo.size.width
             let height = geo.size.height
-            ZStack {
+            // The picture's own band. The chrome owns everything below it, so
+            // centring the logo here — rather than in the card — is what stops it
+            // sitting low and crowding the progress bar and "S1, E12 · 17m".
+            // Optically it also lands where a viewer expects a show's wordmark:
+            // the middle of the image, not the middle of the frame around it.
+            let stage = height * ContinueWatchingCardShape.mirrorLine
+            ZStack(alignment: .top) {
                 // Keeps a pale or busy backdrop from swallowing the logo. Kept
                 // light: the bottom chrome already lays down its own scrim, and
                 // stacking two reads as a muddy card.
@@ -820,8 +851,8 @@ public struct PosterCardView: View {
                 HeroLogoArtwork(
                     references: item.artworkReferences(for: .logo),
                     asyncFallbackURL: seriesLogoFallback,
-                    maxWidth: width * 0.66,
-                    maxHeight: height * 0.34,
+                    maxWidth: width * ContinueWatchingCardShape.logoWidthFraction,
+                    maxHeight: stage * ContinueWatchingCardShape.logoHeightFraction,
                     alignment: .center,
                     // No background sample is taken per card (that would be an
                     // image analysis per card while scrolling), so the halo is
@@ -833,6 +864,7 @@ public struct PosterCardView: View {
                 ) {
                     seriesLogoTextFallback(width: width)
                 }
+                .frame(width: width, height: stage)
             }
             .frame(width: width, height: height)
         }

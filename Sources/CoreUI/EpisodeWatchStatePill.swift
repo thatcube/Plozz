@@ -198,6 +198,7 @@ public struct ResumeChipOverlay: View {
     private let showsMenu: Bool
     private let detailText: String?
     private let showsPlayGlyphWhenIdle: Bool
+    private let bottomScrimStart: CGFloat?
 
     @Environment(\.plozzMetrics) private var metrics
 
@@ -210,18 +211,25 @@ public struct ResumeChipOverlay: View {
     ///   - detailText: a short qualifier shown before the duration (e.g. `S4 E1`).
     ///   - showsPlayGlyphWhenIdle: give the not-started form a play glyph and no
     ///     progress bar.
+    ///   - bottomScrimStart: where the legibility scrim starts darkening, as a
+    ///     fraction of the artwork's height. `nil` keeps the shared default,
+    ///     which suits chrome sitting directly on the picture. A card that
+    ///     reserves a band beneath its picture for this chrome passes that band's
+    ///     top edge, so the picture above it stays untouched.
     public init(
         item: MediaItem,
         downloadState: MediaDownloadBadgeState? = nil,
         showsMenu: Bool = false,
         detailText: String? = nil,
-        showsPlayGlyphWhenIdle: Bool = false
+        showsPlayGlyphWhenIdle: Bool = false,
+        bottomScrimStart: CGFloat? = nil
     ) {
         self.item = item
         self.downloadState = downloadState
         self.showsMenu = showsMenu
         self.detailText = detailText
         self.showsPlayGlyphWhenIdle = showsPlayGlyphWhenIdle
+        self.bottomScrimStart = bottomScrimStart
     }
 
     public var body: some View {
@@ -230,7 +238,11 @@ public struct ResumeChipOverlay: View {
         if hasBottomChrome || showsMenu {
             Color.clear
                 .overlay {
-                    MediaArtworkChromeScrim(top: showsMenu, bottom: hasBottomChrome)
+                    MediaArtworkChromeScrim(
+                        top: showsMenu,
+                        bottom: hasBottomChrome,
+                        bottomStart: bottomScrimStart ?? 0.52
+                    )
                 }
                 .overlay(alignment: .topLeading) {
                     if showsMenu {

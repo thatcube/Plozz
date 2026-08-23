@@ -17,29 +17,21 @@ import UIKit
 /// poster grid rejects "junk" provider art (a 16:9 episode still, or a
 /// stills-grid composite Plex grabbed for an unmatched movie) and falls back to
 /// the clean title placeholder instead of showing a wrong, wide image.
-public struct FallbackAsyncImage<Placeholder: View>: View {
+///
+/// `content` decides how the resolved image is laid out, and defaults to the
+/// crop-to-fill every card wants. A caller supplies its own when one image has
+/// to be drawn more than once — Continue Watching draws the picture *and* a
+/// mirrored continuation of it (see ``ExtendedArtworkFill``) — because taking
+/// the resolved `Image` here keeps that to a single decode and a single resolve
+/// task, where two `FallbackAsyncImage`s over the same URL would run two.
+public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
     private let references: [ArtworkReference]
     private let maxAspectRatio: CGFloat?
     private let variant: ArtworkImageVariant
     private let previewVariant: ArtworkImageVariant?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
+    private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
-
-    public init(
-        urls: [URL],
-        maxAspectRatio: CGFloat? = nil,
-        variant: ArtworkImageVariant = .original,
-        previewVariant: ArtworkImageVariant? = nil,
-        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
-        @ViewBuilder placeholder: @escaping () -> Placeholder
-    ) {
-        self.references = urls.map(ArtworkReference.remote)
-        self.maxAspectRatio = maxAspectRatio
-        self.variant = variant
-        self.previewVariant = previewVariant
-        self.asyncFallbackURL = asyncFallbackURL
-        self.placeholder = placeholder
-    }
 
     public init(
         references: [ArtworkReference],
@@ -47,6 +39,7 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
         variant: ArtworkImageVariant = .original,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.references = references
@@ -54,6 +47,7 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.content = content
         self.placeholder = placeholder
     }
 
@@ -65,6 +59,7 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            content: content,
             placeholder: placeholder
         )
         #else
@@ -73,16 +68,78 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
                 if case let .remote(url) = $0 { return url }
                 return nil
             },
+            content: content,
             placeholder: placeholder
         )
         #endif
     }
 }
 
+/// The layout every card wants for its artwork: resized to **fill** its slot,
+/// cropping whatever overflows.
+///
+/// A named type rather than an inline closure because it is the default
+/// `Content` of ``FallbackAsyncImage``, and a generic parameter can only be
+/// defaulted by constraining it to something nameable.
+public struct ArtworkFillImage: View {
+    private let image: Image
+
+    public init(_ image: Image) {
+        self.image = image
+    }
+
+    public var body: some View {
+        image
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+    }
+}
+
+extension FallbackAsyncImage where Content == ArtworkFillImage {
+    public init(
+        urls: [URL],
+        maxAspectRatio: CGFloat? = nil,
+        variant: ArtworkImageVariant = .original,
+        previewVariant: ArtworkImageVariant? = nil,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.init(
+            references: urls.map(ArtworkReference.remote),
+            maxAspectRatio: maxAspectRatio,
+            variant: variant,
+            previewVariant: previewVariant,
+            asyncFallbackURL: asyncFallbackURL,
+            content: ArtworkFillImage.init,
+            placeholder: placeholder
+        )
+    }
+
+    public init(
+        references: [ArtworkReference],
+        maxAspectRatio: CGFloat? = nil,
+        variant: ArtworkImageVariant = .original,
+        previewVariant: ArtworkImageVariant? = nil,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.init(
+            references: references,
+            maxAspectRatio: maxAspectRatio,
+            variant: variant,
+            previewVariant: previewVariant,
+            asyncFallbackURL: asyncFallbackURL,
+            content: ArtworkFillImage.init,
+            placeholder: placeholder
+        )
+    }
+}
+
 /// AsyncImage-based ordered fallback with no aspect filtering. Used wherever no
 /// aspect guard is required (e.g. landscape/backdrop art).
-private struct SequentialAsyncImage<Placeholder: View>: View {
+private struct SequentialAsyncImage<Content: View, Placeholder: View>: View {
     let urls: [URL]
+    let content: (Image) -> Content
     let placeholder: () -> Placeholder
 
     @State private var index = 0
@@ -93,7 +150,7 @@ private struct SequentialAsyncImage<Placeholder: View>: View {
             AsyncImage(url: urls[index]) { phase in
                 switch phase {
                 case let .success(image):
-                    image.resizable().aspectRatio(contentMode: .fill)
+                    content(image)
                 case .empty:
                     palette.fill
                 case .failure:
@@ -121,7 +178,7 @@ private struct SequentialAsyncImage<Placeholder: View>: View {
 /// Decoded results live in `ArtworkImageCache`, so a card scrolled back into view
 /// (or one whose art was prefetched ahead of scroll) seeds its image
 /// synchronously and renders with no gray placeholder frame.
-private struct FilteredArtworkImage<Placeholder: View>: View {
+private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     let references: [ArtworkReference]
     let maxAspectRatio: CGFloat?
     let variant: ArtworkImageVariant
@@ -139,6 +196,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
     /// small, and a second decode there would cost more than it saves.
     let previewVariant: ArtworkImageVariant?
     let asyncFallbackURL: (@Sendable () async -> URL?)?
+    let content: (Image) -> Content
     let placeholder: () -> Placeholder
 
     @State private var image: UIImage?
@@ -159,6 +217,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
         variant: ArtworkImageVariant,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)?,
+        @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.references = references
@@ -166,6 +225,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.content = content
         self.placeholder = placeholder
         // Seed synchronously from the decoded-image cache so an already-warmed card
         // renders its art on the very first frame — no async hop, no gray flash.
@@ -193,9 +253,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                content(Image(uiImage: image))
             } else if resolved {
                 placeholder()
             } else {

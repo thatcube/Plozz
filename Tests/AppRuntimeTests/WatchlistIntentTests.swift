@@ -166,6 +166,64 @@ final class WatchlistIntentTests: XCTestCase {
         XCTAssertTrue(durable.saved.contains(subject.id))
     }
 
+    /// One press must not make every OTHER title resolve again.
+    ///
+    /// This is the lag Brandon reported as "5-10 seconds the first time, much
+    /// faster after": the write discarded the whole membership memo, so the next
+    /// body pass re-ran the identity walk for every card on screen — dozens of
+    /// them on a series page — before the frame carrying the button's new state
+    /// could be drawn. Warm entries made later presses cheap, which is exactly the
+    /// signature of a cache being thrown away rather than updated.
+    func testOneWriteDoesNotInvalidateEveryOtherTitle() async {
+        let durable = DurableDouble()
+        var resolutions: [String: Int] = [:]
+        let coordinator = MediaItemActionCoordinator(
+            providerResolver: { _ in nil },
+            primaryAccountID: { nil },
+            crossServerWatchSyncEnabled: { false },
+            enqueueWatchMutation: { _ in },
+            universalWatchlistEnabled: { true },
+            watchlistMembership: { item in
+                resolutions[item.id, default: 0] += 1
+                return durable.saved.contains(item.id)
+            },
+            // A real revision: it moves when the durable set does, which is what
+            // made the memo discard everything on the next read.
+            watchlistMembershipRevision: { UInt64(durable.saved.count) },
+            performUniversalWatchlist: { adding, item in
+                await durable.apply(adding, item)
+            },
+            presentUniversalWatchlistFeedback: { _, _ in },
+            beginUniversalWatchlistFanOut: { _, _ in }
+        )
+
+        let pressed = MediaItem(id: "pressed", title: "Pressed", kind: .series)
+        let others = (0..<5).map {
+            MediaItem(id: "other-\($0)", title: "Other \($0)", kind: .series)
+        }
+
+        // Warm the memo, the way a rendered screen would.
+        _ = coordinator.isWatchlisted(pressed)
+        for item in others { _ = coordinator.isWatchlisted(item) }
+        let warmed = resolutions
+
+        coordinator.perform(.addToWatchlist, on: pressed, context: .none)
+        await settle { durable.writes.count == 1 }
+        // Let the change notification land before re-reading.
+        for _ in 0..<10 { await Task.yield() }
+
+        for item in others { _ = coordinator.isWatchlisted(item) }
+
+        for item in others {
+            XCTAssertEqual(
+                resolutions[item.id],
+                warmed[item.id],
+                "Pressing one title must not force \(item.id) to resolve again — that re-resolution is the lag."
+            )
+        }
+        XCTAssertTrue(coordinator.isWatchlisted(pressed))
+    }
+
     /// Yields until `condition` holds, so tests wait on the coordinator's own
     /// Task rather than on a fixed sleep.
     private func settle(

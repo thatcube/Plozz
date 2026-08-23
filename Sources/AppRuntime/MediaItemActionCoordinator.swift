@@ -95,6 +95,17 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// and keeps going until it has written what the viewer last asked for.
     private var watchlistWriters: Set<String> = []
 
+    /// Watchlist notifications this coordinator is itself about to cause.
+    ///
+    /// A successful local write posts `universalWatchlistDidChange`, and the
+    /// observer below answers that by discarding the whole membership memo. For
+    /// a change we made ourselves that is pure waste — we already patched the one
+    /// entry that moved — and it is expensive waste, because every remaining entry
+    /// then has to be resolved again from cold while the viewer waits for the
+    /// button to move. Our own echo is counted here and skipped; a change from
+    /// anywhere else still discards the memo, which is what that observer is for.
+    private var expectedSelfWatchlistNotifications = 0
+
     /// The key both the read and the write use to talk about one title. Shared
     /// deliberately: the last three watchlist defects were all one truth reached
     /// by two paths that derived their key differently.
@@ -179,8 +190,14 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.membershipCache.removeAll(keepingCapacity: true)
-                self?.membershipRevision = nil
+                guard let self else { return }
+                // Our own write, already accounted for entry by entry.
+                if self.expectedSelfWatchlistNotifications > 0 {
+                    self.expectedSelfWatchlistNotifications -= 1
+                    return
+                }
+                self.membershipCache.removeAll(keepingCapacity: true)
+                self.membershipRevision = nil
             }
         }
     }
@@ -396,7 +413,13 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
                 // Keep writing until what's on disk is what the viewer last asked
                 // for. Re-read each pass: they may have pressed again mid-write.
                 while let desired = self.watchlistIntents[key] {
+                    // A successful write posts exactly one notification; claim it
+                    // before it can be delivered.
+                    self.expectedSelfWatchlistNotifications += 1
                     guard await performUniversalWatchlist(desired, item) else {
+                        // It failed, so nothing was posted — give the claim back
+                        // rather than swallow someone else's change later.
+                        self.expectedSelfWatchlistNotifications -= 1
                         // Take the acknowledgement back rather than leaving a
                         // confirmation standing for something that did not happen,
                         // and drop the intent so the button falls back to the truth
@@ -412,11 +435,25 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
                         )
                         return
                     }
-                    // The viewer just changed this; don't make the heart wait for a
-                    // count to move. Clearing outright also covers a same-count swap,
-                    // which is the one case the O(1) revision cannot see.
-                    self.membershipCache.removeAll(keepingCapacity: true)
-                    self.membershipRevision = nil
+                    // Patch the one title that changed; do NOT throw the memo away.
+                    //
+                    // Discarding it made the press expensive in proportion to how
+                    // much was on screen. Every entry had to be resolved again from
+                    // cold on the next body pass, and resolving one is the identity
+                    // graph walk this memo exists to avoid — on a series page, with
+                    // a hero and a full episode rail asking `actions(for:)`, that is
+                    // dozens of walks standing between the press and the frame that
+                    // would show its result. It was worst on the FIRST press, when
+                    // nothing was warm yet, which is exactly the shape Brandon saw:
+                    // five to ten seconds cold, quick every time after.
+                    //
+                    // Adopting the new revision alongside the patch is the point: the
+                    // count moved, so the next read would otherwise treat every entry
+                    // as stale and discard them all anyway. One local toggle changes
+                    // one title, and we know which and what to, so the rest of the
+                    // memo is still true.
+                    self.membershipRevision = self.watchlistMembershipRevision()
+                    self.membershipCache[key] = desired
                     beginFanOut(desired, item)
 
                     // Pressed again while that was in flight? Write the new answer.

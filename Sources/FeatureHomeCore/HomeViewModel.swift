@@ -564,6 +564,28 @@ public final class HomeViewModel {
     /// Re-resolves the durable alias-ordered Watchlist against already-loaded
     /// presentation candidates. No provider creation, disk read, or network work.
     private var durableWatchlistSaveTask: Task<Void, Never>?
+    private var durableWatchlistRefreshTask: Task<Void, Never>?
+
+    /// Re-folds Home's watchlist row shortly after a change, rather than during it.
+    ///
+    /// `refreshDurableWatchlist` re-resolves universal identity for every loaded
+    /// card, which is the expensive graph walk the membership memo exists to avoid
+    /// — and it ran synchronously the moment a watchlist notification arrived.
+    /// Home stays mounted behind a pushed detail page, so pressing the watchlist
+    /// button on a show ran all of that on the main thread before the frame that
+    /// would show the button's new state could be drawn.
+    ///
+    /// Nothing here is urgent: it refreshes a row the viewer is not looking at,
+    /// and the control they ARE looking at already answers from intent. Deferring
+    /// lets the press paint first, and coalescing means a burst re-folds once.
+    public func scheduleDurableWatchlistRefresh() {
+        durableWatchlistRefreshTask?.cancel()
+        durableWatchlistRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, let self else { return }
+            self.refreshDurableWatchlist()
+        }
+    }
 
     public func refreshDurableWatchlist() {
         guard case var .loaded(content) = state,

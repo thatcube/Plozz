@@ -158,7 +158,7 @@ struct PlozziOSHomeView: View {
                 for: .universalWatchlistDidChange
             )
         ) { _ in
-            viewModel.refreshDurableWatchlist()
+            viewModel.scheduleDurableWatchlistRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             viewModel.scheduleReenrich()

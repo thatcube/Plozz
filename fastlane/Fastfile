@@ -254,12 +254,49 @@ end
 # ship (the `release` lane) is a full release and earns the green "Latest" badge.
 # The newest beta is still surfaced on the repo page via the README shields.io
 # badge (`include_prereleases`).
+# Tagging is not allowed to fail the lane — by the time it runs the build is
+# already uploaded, and a non-zero exit would invite a re-run that uploads twice.
+# But it is also not allowed to disappear, which is what happened to builds 25 and
+# 26: a `UI.important` five minutes into a ten-minute log is not a report anyone
+# reads. Failures are collected here and re-printed as the LAST thing the lane
+# says, with the command to finish the job by hand.
+def note_release_tagging_failure(message, manual_command)
+  @release_tagging_failures ||= []
+  @release_tagging_failures << [message, manual_command]
+  UI.error(message)
+  nil
+end
+
+def report_release_tagging_failures
+  return if @release_tagging_failures.nil? || @release_tagging_failures.empty?
+
+  UI.error("─" * 72)
+  UI.error("ACTION REQUIRED — the build shipped, but its release tag did not.")
+  @release_tagging_failures.each do |message, command|
+    UI.error("  • #{message}")
+    UI.error("    run: #{command}")
+  end
+  UI.error("─" * 72)
+  @release_tagging_failures = []
+end
+
 def tag_github_release(build_number, notes, prerelease)
   return UI.important("No build number available; skipping release tag.") if build_number.nil? || build_number.to_s.strip.empty?
 
-  # The host may inject `safe.bareRepository=explicit` (worktree checkouts); the
-  # override is harmless in a normal clone, so set it defensively for our git calls.
-  ENV["GIT_CONFIG_PARAMETERS"] ||= "'safe.bareRepository=all'"
+  # APPEND the override rather than `||=`-ing it. The host injects
+  # `safe.bareRepository=explicit` (and credential helpers) into this variable, so
+  # it is never nil and `||=` was silently a no-op — the override this line exists
+  # to apply never applied. Later entries win, so appending both overrides the
+  # restriction and preserves the credentials sharing the variable.
+  #
+  # This is a latent correctness fix, not a proven cause of the missing 025/026
+  # tags: a *linked worktree* is not a bare repo, so `explicit` does not actually
+  # block git here (verified). Why those two tags never appeared is unknown — the
+  # likeliest explanation is that they were uploaded outside `fastlane beta`. The
+  # reporting below is the part that makes the next occurrence visible.
+  ENV["GIT_CONFIG_PARAMETERS"] =
+    [ENV["GIT_CONFIG_PARAMETERS"], "'safe.bareRepository=all'"]
+      .compact.reject(&:empty?).join(" ")
   ident = "-c user.name='Brandon Moore' -c user.email='16313090+thatcube@users.noreply.github.com'"
   n = build_number.to_i
   tag = format("release/%03d", n)
@@ -269,7 +306,10 @@ def tag_github_release(build_number, notes, prerelease)
     sh("cd .. && git #{ident} tag -a -f #{tag} -m 'TestFlight build #{build_number}'")
     sh("cd .. && git push origin -f #{tag}")
   rescue => e
-    return UI.important("Release tagging failed (#{e.message}); ship succeeded, tag manually.")
+    return note_release_tagging_failure(
+      "Tagging #{tag} failed: #{e.message}",
+      "cd #{Dir.pwd}/.. && git #{ident} tag -a -f #{tag} -m 'TestFlight build #{build_number}' && git push origin -f #{tag}"
+    )
   end
 
   has_prev = (sh("cd .. && git rev-parse -q --verify refs/tags/#{prev_tag} >/dev/null 2>&1 && echo yes || echo no").strip == "yes")
@@ -308,7 +348,10 @@ def tag_github_release(build_number, notes, prerelease)
     sh("cd .. && gh release create #{tag} --verify-tag --title #{version.shellescape} --notes-file #{file.path.shellescape} #{flag}")
     UI.success("Created GitHub #{prerelease ? 'pre-release' : 'release'} #{tag} (#{version})")
   rescue => e
-    UI.important("gh release create failed (#{e.message}); the tag is pushed — create the release manually.")
+    note_release_tagging_failure(
+      "GitHub release for #{tag} failed: #{e.message} (the tag IS pushed)",
+      "cd #{Dir.pwd}/.. && gh release create #{tag} --verify-tag --title #{version.shellescape} #{flag}"
+    )
   ensure
     file.unlink
   end
@@ -402,6 +445,7 @@ lane :beta do
   # Tag the shipped commit and open a GitHub PRE-release (TestFlight beta) with the
   # changelog + tester notes.
   tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes, true)
+  report_release_tagging_failures
 end
 
 desc "Build and upload tvOS plus iOS/iPadOS to the App Store"
@@ -429,4 +473,5 @@ lane :release do
   # Tag the shipped commit and open a full GitHub release (marked "Latest") with the
   # changelog and any notes — this is a production App Store ship, not a beta.
   tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], whats_new, false)
+  report_release_tagging_failures
 end

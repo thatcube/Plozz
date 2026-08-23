@@ -615,6 +615,13 @@ public struct MediaRowView: View {
                 HeroLogoPipeline.shared.prefetch(
                     references: candidate.artworkReferences(for: .logo)
                 )
+                // ...and a clean, textless backdrop to draw that logo over, since
+                // the server's own art often has the title baked in and would
+                // print the name twice. Resolved here rather than at the card so
+                // it is already decoded when the card is reached — the store
+                // publishes nothing until it is, so a card can only ever see art
+                // it can draw on the same frame.
+                TextlessBackdropStore.shared.warm(for: candidate, variant: variant)
             }
         }
         #endif

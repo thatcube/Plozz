@@ -31,6 +31,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
     private let previewVariant: ArtworkImageVariant?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
     private let onResolveReference: ((ArtworkReference?) -> Void)?
+    private let pinIdentity: String?
     private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
 
@@ -41,6 +42,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
         onResolveReference: ((ArtworkReference?) -> Void)? = nil,
+        pinIdentity: String? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -50,6 +52,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
         self.onResolveReference = onResolveReference
+        self.pinIdentity = pinIdentity
         self.content = content
         self.placeholder = placeholder
     }
@@ -63,6 +66,7 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
             onResolveReference: onResolveReference,
+            pinIdentity: pinIdentity,
             content: content,
             placeholder: placeholder
         )
@@ -206,6 +210,19 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// got and not merely that it got some. `nil` when the async fallback supplied
     /// it, which is outside the ordered list.
     let onResolveReference: ((ArtworkReference?) -> Void)?
+    /// Identity this view's picture belongs to (a show, a track). When set, a
+    /// *change to the candidate list alone* is ignored once full-quality art is on
+    /// screen — the picture is already right, and re-resolving would swap it under
+    /// the viewer for no gain.
+    ///
+    /// This exists because Continue Watching's candidate list is genuinely
+    /// late-binding: ``TextlessBackdropStore`` may publish a clean backdrop after
+    /// the card is built. Taking it while the card is still blank is free and is
+    /// the whole point; taking it after the card has painted is the "art changes
+    /// as I scroll past" fault. Keyed on identity rather than being a plain flag
+    /// so a *recycled* view — same view, different show — still reloads: pinning
+    /// on identity alone would leave the previous show's art on screen.
+    let pinIdentity: String?
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
 
@@ -214,6 +231,9 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// Whether `image` is the cheap pass, and so still owes a full-quality swap.
     @State private var isPreviewQuality = false
     @Environment(\.themePalette) private var palette
+    /// The identity `image` was produced for, so the pin above can tell "new
+    /// candidates for the show already on screen" from "a different show".
+    @State private var pinnedIdentity: String?
     /// The `.task` id the current `image`/`resolved` state was produced for. Lets
     /// `resolve()` tell "same inputs, keep the result" apart from "the urls
     /// changed (e.g. the player advanced to a new track), re-resolve" — the view
@@ -228,6 +248,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)?,
         onResolveReference: ((ArtworkReference?) -> Void)? = nil,
+        pinIdentity: String? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -237,6 +258,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
         self.onResolveReference = onResolveReference
+        self.pinIdentity = pinIdentity
         self.content = content
         self.placeholder = placeholder
         // Seed synchronously from the decoded-image cache so an already-warmed card
@@ -256,6 +278,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         _loadedKey = State(initialValue: seeded?.index == references.startIndex
             ? Self.makeKey(references: references, variant: variant, maxAspectRatio: maxAspectRatio)
             : nil)
+        _pinnedIdentity = State(initialValue: seeded != nil ? pinIdentity : nil)
     }
 
     private var taskKey: String {
@@ -282,6 +305,12 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // Same inputs we already resolved for — keep the current result rather
         // than wiping it back to gray and re-resolving.
         if loadedKey == key, image != nil, !isPreviewQuality { return }
+        // Different candidates, but for the show already on screen and already
+        // drawn at full quality: the picture up is correct, so leave it. Swapping
+        // it here is precisely the "art changes as I move along the row" fault.
+        if let pinIdentity, pinnedIdentity == pinIdentity, image != nil, !isPreviewQuality {
+            return
+        }
         // The urls changed (or this is the first run). Prefer a synchronous cache
         // hit for the *new* urls so a warmed image shows with no flash.
         let seeded = Self.cachedUsableImage(
@@ -294,6 +323,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             image = seeded.image
             resolved = true
             isPreviewQuality = false
+            pinnedIdentity = pinIdentity
             onResolveReference?(references.indices.contains(seeded.index) ? references[seeded.index] : nil)
             if seeded.index == references.startIndex {
                 loadedKey = key
@@ -338,6 +368,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                pinnedIdentity = pinIdentity
                 onResolveReference?(reference)
                 return
             }
@@ -349,6 +380,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                pinnedIdentity = pinIdentity
                 onResolveReference?(nil)
                 return
             }

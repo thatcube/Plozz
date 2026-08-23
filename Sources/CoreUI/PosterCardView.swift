@@ -835,6 +835,11 @@ public struct PosterCardView: View {
                 // likely candidate of all to carry a title — treat it as clean.
                 artworkAlreadyCarriesTitle = reference.map(titleBearingArtwork.contains) ?? false
             },
+            // The candidate list is late-binding here: a clean backdrop may be
+            // published by ``TextlessBackdropStore`` after this card is built.
+            // Taking it while the card is blank is the whole point; taking it
+            // after the card has painted would change the art under the viewer.
+            pinIdentity: item.id,
             // The card is taller than the picture, so the picture is laid in at
             // its own shape and the band left underneath is filled with a
             // mirrored continuation of it — never by cropping the sides down to
@@ -863,8 +868,19 @@ public struct PosterCardView: View {
     /// For an episode this is the spoiler-safe series ladder (never the episode's
     /// own frame). A movie or series already *is* the show, so it keeps its own
     /// art.
+    ///
+    /// A known-textless backdrop leads, because this card draws the show's logo
+    /// over its picture and the server's own art frequently has the title baked
+    /// in — which prints the name twice. See ``TextlessBackdropStore`` for why the
+    /// answer is fetched rather than inferred, and why reading it here (during
+    /// body, synchronously) is what keeps the switch invisible.
     private var seriesArtworkReferences: [ArtworkReference] {
-        item.kind == .episode ? placeholderArtworkReferences : artworkReferences
+        let ladder = item.kind == .episode ? placeholderArtworkReferences : artworkReferences
+        guard showsSeriesArtwork else { return ladder }
+        return PosterCardPresentation.preferringTextless(
+            TextlessBackdropStore.shared.backdrop(for: item),
+            over: ladder
+        )
     }
 
     private var seriesArtworkFallback: (@Sendable () async -> URL?)? {
@@ -1066,7 +1082,24 @@ enum PosterCardPresentation {
         return titled
     }
 
-    /// Which title a series-artwork card draws over its artwork.
+    /// Puts a known-textless backdrop at the head of the candidate ladder.
+    ///
+    /// The server's art stays in the list rather than being replaced: "textless"
+    /// is a claim about the URL we resolved, not a promise that it will load, and
+    /// a card that fails to a blank is worse than one that shows a doubled title.
+    /// It is de-duplicated because the server's backdrop and the resolved one are
+    /// occasionally the same picture, and a list that names it twice would make
+    /// the retry loop try it twice before moving on.
+    static func preferringTextless(
+        _ textless: URL?,
+        over ladder: [ArtworkReference]
+    ) -> [ArtworkReference] {
+        guard let textless else { return ladder }
+        let clean = ArtworkReference.remote(textless)
+        return [clean] + ladder.filter { $0 != clean }
+    }
+
+
     enum SeriesArtworkTitleSource: Equatable {
         /// The owning series' name (`parentTitle`).
         case seriesTitle

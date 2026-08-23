@@ -263,3 +263,84 @@ final class AnimeBackdropKeepsItsLogoTests: XCTestCase {
         )
     }
 }
+
+/// Continue Watching draws the show's logo over the show's picture, so it wants a
+/// picture with no lettering in it. Since no metadata field says whether a given
+/// backdrop has words baked in, the card asks for art that is textless by
+/// construction instead of guessing — these pin how that answer is used.
+final class TextlessBackdropPreferenceTests: XCTestCase {
+
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    private var ladder: [ArtworkReference] {
+        [
+            .remote(url("https://server.test/backdrop.jpg")),
+            .remote(url("https://server.test/poster.jpg")),
+        ]
+    }
+
+    /// No answer yet is the common case on a cold launch, and must cost nothing:
+    /// the card falls back to exactly the ladder it had before.
+    func testNoTextlessAnswerLeavesTheLadderUntouched() {
+        XCTAssertEqual(PosterCardPresentation.preferringTextless(nil, over: ladder), ladder)
+    }
+
+    /// The clean picture leads, and the server's art stays behind it — "textless"
+    /// describes the URL we resolved, not a promise that it loads, and a blank
+    /// card is worse than a doubled title.
+    func testTextlessLeadsButServerArtIsKeptAsBackup() {
+        let clean = url("https://tmdb.test/textless.jpg")
+        let ordered = PosterCardPresentation.preferringTextless(clean, over: ladder)
+        XCTAssertEqual(ordered.first, .remote(clean))
+        XCTAssertEqual(ordered.count, ladder.count + 1)
+        for reference in ladder {
+            XCTAssertTrue(ordered.contains(reference), "dropped \(reference)")
+        }
+    }
+
+    /// The resolved backdrop is sometimes the very picture the server was already
+    /// serving. Naming it twice would make the retry loop try it twice before
+    /// moving on, turning one dead URL into two wasted passes.
+    func testAnAnswerAlreadyInTheLadderIsNotListedTwice() {
+        let shared = url("https://server.test/backdrop.jpg")
+        let ordered = PosterCardPresentation.preferringTextless(shared, over: ladder)
+        XCTAssertEqual(ordered.first, .remote(shared))
+        XCTAssertEqual(ordered.count, ladder.count)
+        XCTAssertEqual(ordered.filter { $0 == .remote(shared) }.count, 1)
+    }
+}
+
+/// Continue Watching is one card per show, so the store has to answer per show.
+@MainActor
+final class TextlessBackdropStoreKeyTests: XCTestCase {
+
+    /// Keying an episode by its own id would ask the router once per episode for
+    /// one answer that belongs to the series — and would miss the cache every
+    /// time the viewer advanced an episode.
+    func testEpisodesAreKeyedByTheirSeries() {
+        let first = MediaItem(id: "ep1", title: "E1", kind: .episode, seriesID: "show")
+        let second = MediaItem(id: "ep2", title: "E2", kind: .episode, seriesID: "show")
+        XCTAssertEqual(TextlessBackdropStore.key(for: first), "show")
+        XCTAssertEqual(TextlessBackdropStore.key(for: second), "show")
+    }
+
+    /// An episode with no series id still has to key to something stable.
+    func testAnOrphanEpisodeFallsBackToItsOwnID() {
+        let orphan = MediaItem(id: "ep1", title: "E1", kind: .episode)
+        XCTAssertEqual(TextlessBackdropStore.key(for: orphan), "ep1")
+    }
+
+    /// A movie or series already *is* the show, so it keys to itself.
+    func testAMovieKeysToItself() {
+        let movie = MediaItem(id: "m1", title: "Movie", kind: .movie)
+        XCTAssertEqual(TextlessBackdropStore.key(for: movie), "m1")
+    }
+
+    /// Nothing is published until the picture behind it is decoded, so a store
+    /// that has not been warmed answers nil rather than a URL a card would have
+    /// to wait on.
+    func testAnUnwarmedStoreAnswersNothing() {
+        let store = TextlessBackdropStore()
+        XCTAssertNil(store.backdrop(for: MediaItem(id: "m1", title: "Movie", kind: .movie)))
+    }
+}

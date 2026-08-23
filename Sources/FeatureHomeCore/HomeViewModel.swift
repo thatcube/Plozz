@@ -622,16 +622,20 @@ public final class HomeViewModel {
         }
     }
 
+    /// Last session's curated hero, ready to paint in the first frame.
+    ///
+    /// Deliberately unconditional on which sources are enabled: a hero that starts
+    /// as a skeleton on every launch is the thing this exists to prevent. What
+    /// makes it safe is *what* was persisted — see ``HeroCurationResult/durableItems``,
+    /// which excludes the Continue Watching slides whose resume positions go stale.
     public func cachedHeroItems(for settings: HeroSettings) -> [MediaItem]? {
-        guard settings.isActive, settings.sources == [.featured] else { return nil }
-        return contentStore.loadHero(for: HomeHeroCacheKey(settings: settings))
+        guard settings.isActive else { return nil }
+        return contentStore.loadHero(for: HeroConfigurationKey(settings: settings))
     }
 
     public func cacheHeroItems(_ items: [MediaItem], for settings: HeroSettings) {
-        guard settings.isActive, settings.isEnabled(.featured), !items.isEmpty else {
-            return
-        }
-        contentStore.saveHero(items, for: HomeHeroCacheKey(settings: settings))
+        guard settings.isActive, !items.isEmpty else { return }
+        contentStore.saveHero(items, for: HeroConfigurationKey(settings: settings))
     }
 
     /// In-flight guard so a burst of resume ticks for a not-yet-loaded title

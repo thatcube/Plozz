@@ -58,11 +58,79 @@ final class HeroCuratorTests: XCTestCase {
         )
     }
 
+    // MARK: - The launch seed
+
+    /// The single safety property behind painting last session's hero at launch:
+    /// nothing that claims a playback position is ever persisted. A resume goes
+    /// stale the moment anything is watched anywhere, and a slide restored from
+    /// disk offering to resume a finished episode is worse than a skeleton.
+    func testDurableSnapshotExcludesEveryResumableSlide() async {
+        var resumable = item("resuming")
+        resumable.resumePosition = 620
+        var episode = item("ep", kind: .episode)
+        episode.seriesID = "show"
+        episode.parentTitle = "The Show"
+
+        let result = await HeroCurator().curateResult(
+            settings: settings(
+                sources: [.continueWatching, .watchlist, .recentlyAdded],
+                hideWatched: false
+            ),
+            continueWatching: [episode],
+            watchlist: [resumable, item("saved")],
+            recentlyAdded: [item("new")]
+        )
+
+        XCTAssertEqual(
+            Set(result.items.map(\.id)),
+            ["ep", "resuming", "saved", "new"]
+        )
+        XCTAssertEqual(Set(result.durableItems.map(\.id)), ["saved", "new"])
+    }
+
+    func testDurableSnapshotKeepsTheOrderTheViewerSaw() async {
+        let result = await HeroCurator().curateResult(
+            settings: settings(sources: [.watchlist, .recentlyAdded], hideWatched: false),
+            continueWatching: [],
+            watchlist: [item("w1"), item("w2")],
+            recentlyAdded: [item("r1"), item("r2")]
+        )
+
+        XCTAssertEqual(result.durableItems.map(\.id), result.items.map(\.id))
+        XCTAssertEqual(result.durableItems.map(\.id), ["w1", "r1", "w2", "r2"])
+    }
+
+    /// A show offered by both Continue Watching and the watchlist collapses to one
+    /// slide. Which copy won decides whether it is durable, so attribution has to
+    /// be by the winning bucket rather than by mere membership.
+    func testAShowTheWatchlistCopyWonIsStillDurable() async {
+        var resuming = item("ep", kind: .episode)
+        resuming.seriesID = "show"
+        resuming.parentTitle = "The Show"
+        resuming.resumePosition = 300
+        let series = item("show", kind: .series)
+
+        let watchlistFirst = await HeroCurator().curateResult(
+            settings: settings(sources: [.watchlist, .continueWatching], hideWatched: false),
+            continueWatching: [resuming],
+            watchlist: [series]
+        )
+        XCTAssertEqual(watchlistFirst.items.map(\.id), ["show"])
+        XCTAssertEqual(watchlistFirst.durableItems.map(\.id), ["show"])
+
+        let continueWatchingFirst = await HeroCurator().curateResult(
+            settings: settings(sources: [.continueWatching, .watchlist], hideWatched: false),
+            continueWatching: [resuming],
+            watchlist: [series]
+        )
+        XCTAssertEqual(continueWatchingFirst.items.map(\.id), ["ep"])
+        XCTAssertTrue(continueWatchingFirst.durableItems.isEmpty)
+    }
+
     func testInactiveSettingsYieldNothing() async {
         let curator = HeroCurator()
         let result = await curator.curate(
-            settings: settings(sources: []),
-            continueWatching: [item("a")],
+            settings: settings(sources: []),            continueWatching: [item("a")],
             watchlist: [item("b")]
         )
         XCTAssertTrue(result.isEmpty)
@@ -1200,7 +1268,7 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
         let settings = settings(sources: [.featured], hideWatched: false)
         let content = HomeViewModel.Content()
         let runtime = HomeHeroRuntimeState()
-        runtime.cachedKey = HomeHeroCacheKey(settings: settings)
+        runtime.cachedKey = HeroConfigurationKey(settings: settings)
         runtime.cachedItems = [item("cached-featured")]
 
         let resolved = HomeHeroDisplayResolver.resolve(
@@ -1215,52 +1283,30 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
         XCTAssertEqual(resolved.map(\.id), ["cached-featured"])
     }
 
-    func testLaunchSourceMatrixNeverUsesCachedContinueWatching() {
-        let cachedFeatured = item("cached-featured")
+    func testEveryConfigurationPaintsItsLaunchSeedInsteadOfASkeleton() {
+        // A hero that starts as a skeleton on every launch is the thing the seed
+        // exists to prevent, so this is NOT limited to a Featured-only hero. What
+        // keeps it safe is what got persisted: see
+        // `HeroCuratorTests.testDurableSnapshotExcludesEveryResumableSlide`.
+        let seed = item("seed")
         let staleContinueWatching = item("stale-cw")
-        let cachedWatchlist = item("cached-watchlist")
-        let cachedRecent = item("cached-recent")
         let cachedContent = HomeViewModel.Content(
             continueWatching: [staleContinueWatching],
-            latest: [cachedRecent],
-            watchlist: [cachedWatchlist]
+            latest: [item("cached-recent")],
+            watchlist: [item("cached-watchlist")]
         )
         let launchContent = HomeHeroLaunchPolicy.content(
             cachedContent,
             awaitingLiveContinueWatching: true
         )
         XCTAssertTrue(launchContent.continueWatching.isEmpty)
-        XCTAssertEqual(launchContent.watchlist.map(\.id), ["cached-watchlist"])
-        XCTAssertEqual(launchContent.latest.map(\.id), ["cached-recent"])
 
-        let cases: [([HeroSourceKind], [String])] = [
-            ([.featured], ["cached-featured"]),
-            ([.continueWatching], []),
-            ([.featured, .continueWatching], []),
-            ([.continueWatching, .featured], []),
-            ([.featured, .watchlist], []),
-            ([.watchlist, .featured], []),
-            ([.featured, .recentlyAdded], []),
-            ([.randomFromLibrary], []),
-            (
-                [
-                    .featured,
-                    .continueWatching,
-                    .recentlyAdded,
-                    .randomFromLibrary,
-                    .watchlist,
-                ],
-                []
-            ),
-        ]
-
-        for (sources, expected) in cases {
+        for sources in allSourceOrders() {
             let settings = settings(sources: sources, hideWatched: false)
             let runtime = HomeHeroRuntimeState()
-            if sources.contains(.featured) {
-                runtime.cachedKey = HomeHeroCacheKey(settings: settings)
-                runtime.cachedItems = [cachedFeatured]
-            }
+            runtime.cachedKey = HeroConfigurationKey(settings: settings)
+            runtime.cachedItems = [seed]
+
             let resolved = HomeHeroDisplayResolver.resolve(
                 runtime: runtime,
                 key: key(settings, content: launchContent),
@@ -1271,12 +1317,31 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
                 curator: HeroCurator()
             )
 
-            XCTAssertEqual(resolved.map(\.id), expected, "sources: \(sources)")
+            XCTAssertEqual(resolved.map(\.id), ["seed"], "sources: \(sources)")
             XCTAssertFalse(
-                resolved.contains(where: { $0.id == "stale-cw" }),
+                resolved.contains { $0.id == "stale-cw" },
                 "sources: \(sources)"
             )
         }
+    }
+
+    func testALaunchSeedFromADifferentConfigurationIsIgnored() {
+        let seedSettings = settings(sources: [.watchlist], hideWatched: false)
+        let current = settings(sources: [.continueWatching], hideWatched: false)
+        let runtime = HomeHeroRuntimeState()
+        runtime.cachedKey = HeroConfigurationKey(settings: seedSettings)
+        runtime.cachedItems = [item("seed")]
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(current, content: HomeViewModel.Content()),
+            settings: current,
+            continueWatching: [],
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertTrue(resolved.isEmpty)
     }
 
     func testFreshContinueWatchingJoinsHeroAfterLiveAggregate() {
@@ -1321,7 +1386,7 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
             let settings = settings(sources: sources, hideWatched: false)
             let runtime = HomeHeroRuntimeState()
             if sources.contains(.featured) {
-                runtime.cachedKey = HomeHeroCacheKey(settings: settings)
+                runtime.cachedKey = HeroConfigurationKey(settings: settings)
                 runtime.cachedItems = [cachedFeatured]
             }
 
@@ -1334,7 +1399,9 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
                 recentlyAdded: launch.latest,
                 curator: HeroCurator()
             )
-            let expectedLaunch = sources == [.featured] ? ["featured"] : []
+            // The seed paints for every configuration; only a hero that never had
+            // one falls back to the placeholder.
+            let expectedLaunch = sources.contains(.featured) ? ["featured"] : []
             XCTAssertEqual(
                 launchResolved.map(\.id),
                 expectedLaunch,
@@ -1375,7 +1442,7 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
         let currentSettings = settings(sources: [.continueWatching], hideWatched: false)
         let content = HomeViewModel.Content(continueWatching: [item("live-seed")])
         let runtime = HomeHeroRuntimeState()
-        runtime.cachedKey = HomeHeroCacheKey(settings: cachedSettings)
+        runtime.cachedKey = HeroConfigurationKey(settings: cachedSettings)
         runtime.cachedItems = [item("stale-featured")]
 
         let resolved = HomeHeroDisplayResolver.resolve(

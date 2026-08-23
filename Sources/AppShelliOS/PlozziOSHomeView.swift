@@ -88,6 +88,18 @@ struct PlozziOSHomeView: View {
                 mediaItemActionHandler: appModel.mediaItemActionHandler
             )
         )
+        // Paint last session's hero in the first frame instead of a skeleton. It
+        // holds no Continue Watching slides (see `HeroCurationResult.durableItems`),
+        // and the fresh curation folds into it rather than replacing it, so the
+        // slides on screen keep their slots when it lands. Same policy as tvOS.
+        let settings = appModel.settings.hero.settings
+        if settings.isActive,
+           let seed = _viewModel.wrappedValue.cachedHeroItems(for: settings) {
+            _heroItems = State(initialValue: seed)
+            _heroCuratedConfiguration = State(
+                initialValue: HeroConfigurationKey(settings: settings)
+            )
+        }
     }
 
     var body: some View {
@@ -690,7 +702,7 @@ struct PlozziOSHomeView: View {
             hideWatched: settings.hideWatched
         )
         let curator = HeroCurator()
-        let curated = await curator.curate(
+        let result = await curator.curateResult(
             settings: settings,
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
@@ -707,6 +719,7 @@ struct PlozziOSHomeView: View {
             }
         )
         guard !Task.isCancelled else { return }
+        let curated = result.items
         // Fold the fresh curation into what is already on screen rather than
         // replacing it, so a background refresh cannot reshuffle the carousel or
         // move the slide the viewer is looking at. Identical policy to tvOS,
@@ -739,6 +752,8 @@ struct PlozziOSHomeView: View {
         heroCuratedConfiguration = configuration
         heroRetainedMisses = merge.misses
         if merge.items != heroItems { heroItems = merge.items }
+        // What the next launch may repaint instead of a skeleton.
+        viewModel.cacheHeroItems(result.durableItems, for: settings)
     }
 }
 

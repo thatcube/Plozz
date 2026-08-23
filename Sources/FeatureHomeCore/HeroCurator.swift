@@ -23,13 +23,33 @@ public enum HeroArtworkValidator {
 public struct HeroCurationResult: Sendable, Equatable {
     public var items: [MediaItem]
     public var featuredItems: [MediaItem]
+    /// The curated set with the volatile Continue Watching slides removed, in the
+    /// order they were composed.
+    ///
+    /// This is what a launch may safely repaint. A resume position goes stale the
+    /// moment the viewer watches anything anywhere, so a Continue Watching slide
+    /// restored from disk can offer to resume a finished episode — which is why
+    /// Home also refuses to repaint its cached Continue Watching row. Every other
+    /// source describes a title rather than a position, so last session's
+    /// selection is still a true answer and can be shown instantly while the fresh
+    /// curation folds in behind it.
+    public var durableItems: [MediaItem]
 
-    public init(items: [MediaItem], featuredItems: [MediaItem]) {
+    public init(
+        items: [MediaItem],
+        featuredItems: [MediaItem],
+        durableItems: [MediaItem] = []
+    ) {
         self.items = items
         self.featuredItems = featuredItems
+        self.durableItems = durableItems
     }
 
-    public static let empty = HeroCurationResult(items: [], featuredItems: [])
+    public static let empty = HeroCurationResult(
+        items: [],
+        featuredItems: [],
+        durableItems: []
+    )
 }
 
 /// Builds the ordered list of items the Home **hero** carousel rotates through,
@@ -142,9 +162,25 @@ public struct HeroCurator: Sendable {
         let featuredBuckets = zip(settings.sources, eligible).compactMap {
             $0.0 == .featured ? $0.1 : nil
         }
+        let items = strategy.compose(eligible, limit: limit)
+        // Attribute by which bucket actually WON each slot, not by which buckets
+        // contained the title. A show offered by both Continue Watching and the
+        // watchlist collapses to one slide; if the watchlist's copy won it, that
+        // copy is a title rather than a position and is safe to persist. The
+        // resume check then catches the rest: any slide that claims a playback
+        // position at all is excluded, whichever source supplied it.
+        let continueWatchingIDs = Set(
+            zip(settings.sources, eligible)
+                .filter { $0.0 == .continueWatching }
+                .flatMap { $0.1 }
+                .map(\.id)
+        )
         return HeroCurationResult(
-            items: strategy.compose(eligible, limit: limit),
-            featuredItems: strategy.compose(featuredBuckets, limit: limit)
+            items: items,
+            featuredItems: strategy.compose(featuredBuckets, limit: limit),
+            durableItems: items.filter {
+                !continueWatchingIDs.contains($0.id) && $0.resumePosition == nil
+            }
         )
     }
 

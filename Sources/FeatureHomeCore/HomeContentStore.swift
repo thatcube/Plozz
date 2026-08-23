@@ -35,8 +35,8 @@ public protocol HomeContentStoring: Sendable {
     /// Last fully curated hero for the same profile and source configuration.
     /// Kept separate from Home rows because Featured/Random are asynchronous
     /// sources and are not part of ``HomeViewModel/Content``.
-    func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]?
-    func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey)
+    func loadHero(for key: HeroConfigurationKey) -> [MediaItem]?
+    func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey)
     /// Discards the snapshot entirely.
     ///
     /// `save` deliberately refuses to overwrite good content with an empty
@@ -47,33 +47,62 @@ public protocol HomeContentStoring: Sendable {
     func clear()
 }
 
-/// Settings that determine whether a cached Featured bucket is reusable.
+/// The part of ``HeroSettings`` that decides *what the hero contains* — as
+/// opposed to how it presents it.
 ///
-/// Visual-only settings (trailer behavior, auto-advance timing) are excluded:
-/// changing them does not invalidate which titles can appear. Other source
-/// selections are excluded too because only Featured is persisted; adding
-/// Continue Watching must not invalidate the still-usable Featured seed.
-public struct HomeHeroCacheKey: Codable, Equatable, Sendable {
+/// This is the line between "the world moved" and "the viewer changed their
+/// mind", and everything that has to draw it uses this one type: the persisted
+/// launch seed's validity, whether a loaded carousel survives a recomputation,
+/// and whether a fresh curation folds into what is showing or replaces it.
+/// Content moving is routine and constant; a change to one of these values is a
+/// direct instruction and retires what is on screen at once.
+///
+/// Visual-only settings (trailer behavior, auto-advance timing) are deliberately
+/// excluded: changing them does not change which titles can appear, and must not
+/// throw away a good carousel.
+public struct HeroConfigurationKey: Codable, Hashable, Sendable {
     public var sources: [HeroSourceKind]
     public var maxItems: Int
     public var hideWatched: Bool
+    /// The libraries the viewer restricted the Random source to. Empty means "all
+    /// currently-visible libraries". Included because narrowing it is a request
+    /// for different titles — unlike the *resolved* library list, which changes
+    /// whenever a server finishes loading and must not retire anything.
+    public var randomLibraryKeys: Set<String>
 
-    public init(settings: HeroSettings) {
-        let featured = settings.isActive && settings.isEnabled(.featured)
-        sources = featured ? [.featured] : []
-        maxItems = featured ? settings.maxItems : 0
-        hideWatched = featured ? settings.hideWatched : false
+    public init(settings: HeroSettings?) {
+        guard let settings, settings.isActive else {
+            sources = []
+            maxItems = 0
+            hideWatched = false
+            randomLibraryKeys = []
+            return
+        }
+        sources = settings.sources
+        maxItems = settings.maxItems
+        hideWatched = settings.hideWatched
+        randomLibraryKeys = settings.isEnabled(.randomFromLibrary)
+            ? settings.randomLibraryKeys
+            : []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sources, maxItems, hideWatched
+        case sources, maxItems, hideWatched, randomLibraryKeys
     }
 
+    /// Lenient, like ``HeroSettings``: a persisted key written before a field
+    /// existed reads as that field's default rather than failing the whole decode
+    /// and discarding an otherwise usable seed.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sources = try container.decode([HeroSourceKind].self, forKey: .sources)
         maxItems = try container.decode(Int.self, forKey: .maxItems)
         hideWatched = try container.decode(Bool.self, forKey: .hideWatched)
+        randomLibraryKeys =
+            ((try? container.decodeIfPresent(
+                Set<String>.self,
+                forKey: .randomLibraryKeys
+            )) ?? nil) ?? []
     }
 }
 
@@ -97,7 +126,7 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     }
 
     private struct StoredHero: Codable {
-        var key: HomeHeroCacheKey
+        var key: HeroConfigurationKey
         var items: [MediaItem]
         var savedAt: Date
     }
@@ -221,7 +250,7 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         Self.lock.unlock()
     }
 
-    public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? {
+    public func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? {
         guard let heroFileURL else { return nil }
         let path = heroFileURL.path
         Self.lock.lock()
@@ -249,7 +278,7 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         return stored.items
     }
 
-    public func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {
+    public func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {
         guard let heroFileURL, !items.isEmpty else { return }
         let stored = StoredHero(
             key: key,
@@ -307,7 +336,7 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
 public final class InMemoryHomeContentStore: HomeContentStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var content: HomeViewModel.Content?
-    private var hero: (key: HomeHeroCacheKey, items: [MediaItem])?
+    private var hero: (key: HeroConfigurationKey, items: [MediaItem])?
 
     public init(_ initial: HomeViewModel.Content? = nil) {
         self.content = initial
@@ -329,13 +358,13 @@ public final class InMemoryHomeContentStore: HomeContentStoring, @unchecked Send
         hero = nil
     }
 
-    public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? {
+    public func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? {
         lock.lock(); defer { lock.unlock() }
         guard hero?.key == key else { return nil }
         return hero?.items
     }
 
-    public func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {
+    public func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {
         lock.lock(); defer { lock.unlock() }
         hero = items.isEmpty ? nil : (key, items)
     }
@@ -347,7 +376,7 @@ public final class NoOpHomeContentStore: HomeContentStoring, @unchecked Sendable
     public init() {}
     public func load() -> HomeViewModel.Content? { nil }
     public func save(_ content: HomeViewModel.Content) {}
-    public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? { nil }
-    public func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {}
+    public func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? { nil }
+    public func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {}
     public func clear() {}
 }

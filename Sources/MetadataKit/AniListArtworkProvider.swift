@@ -13,6 +13,10 @@ import Foundation
 ///
 /// Resolution prefers a concrete id (`AniList id`, then `idMal`) and only falls
 /// back to a romaji/english title search, which is far less reliable for anime.
+/// An id lookup is authoritative and taken as-is; a **search** is a guess and is
+/// accepted only when the media it returns actually names the title asked for
+/// (``AnimeTitleMatch``). Without that check the search silently answers with the
+/// nearest thing in the catalogue, which is a different work.
 public struct AniListArtworkProvider: ArtworkProvider {
     public let id = "anilist"
     private let endpoint = URL(string: "https://graphql.anilist.co")!
@@ -51,23 +55,34 @@ public struct AniListArtworkProvider: ArtworkProvider {
             averageScore
             bannerImage
             coverImage { extraLarge large }
+            title { romaji english native }
+            synonyms
             nextAiringEpisode { airingAt episode }
           }
         }
         """
         var variables: [String: Any] = [:]
+        // An id names one work; a title merely resembles one. Only the latter
+        // needs its answer checked.
+        var resolvedByTitleSearch = false
         if let anilist = query.animeIDs.anilist {
             variables["id"] = anilist
         } else if let mal = query.animeIDs.mal {
             variables["idMal"] = mal
         } else if !query.title.isEmpty {
             variables["search"] = query.title
+            resolvedByTitleSearch = true
         } else {
             return nil
         }
         let body: [String: Any] = ["query": document, "variables": variables]
         let response = await MetadataHTTP.postJSON(GraphQLResponse.self, url: endpoint, body: body)
-        return response?.data?.Media
+        guard let media = response?.data?.Media else { return nil }
+        guard !resolvedByTitleSearch
+                || AnimeTitleMatch.names(query, among: media.allTitles) else {
+            return nil
+        }
+        return media
     }
 
     // MARK: - DTOs
@@ -83,6 +98,10 @@ public struct AniListArtworkProvider: ArtworkProvider {
         public let averageScore: Int?
         public let bannerImage: String?
         public let coverImage: CoverImage?
+        public let title: Title?
+        /// Alternate names AniList lists, which is often where a library's
+        /// English spelling of a romaji-canonical show is found.
+        public let synonyms: [String]?
         /// The next unaired episode (AniList numbers episodes absolutely within the
         /// media entry). Present only for currently-airing shows.
         public let nextAiringEpisode: AiringSchedule?
@@ -93,7 +112,9 @@ public struct AniListArtworkProvider: ArtworkProvider {
             averageScore: Int?,
             bannerImage: String?,
             coverImage: CoverImage?,
-            nextAiringEpisode: AiringSchedule? = nil
+            nextAiringEpisode: AiringSchedule? = nil,
+            title: Title? = nil,
+            synonyms: [String]? = nil
         ) {
             self.id = id
             self.idMal = idMal
@@ -101,6 +122,14 @@ public struct AniListArtworkProvider: ArtworkProvider {
             self.bannerImage = bannerImage
             self.coverImage = coverImage
             self.nextAiringEpisode = nextAiringEpisode
+            self.title = title
+            self.synonyms = synonyms
+        }
+
+        /// Every name AniList lists this work under, for identity checking only.
+        var allTitles: [String?] {  // l10n:content — provider-supplied media titles compared as lookup keys
+            [title?.romaji, title?.english, title?.native]
+                + (synonyms?.map { $0 } ?? [])
         }
 
         public struct CoverImage: Decodable, Sendable {
@@ -110,6 +139,18 @@ public struct AniListArtworkProvider: ArtworkProvider {
             public init(extraLarge: String?, large: String?) {
                 self.extraLarge = extraLarge
                 self.large = large
+            }
+        }
+
+        public struct Title: Decodable, Sendable {
+            public let romaji: String?
+            public let english: String?
+            public let native: String?
+
+            public init(romaji: String?, english: String?, native: String?) {
+                self.romaji = romaji
+                self.english = english
+                self.native = native
             }
         }
 

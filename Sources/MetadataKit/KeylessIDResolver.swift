@@ -51,13 +51,27 @@ public struct KeylessIDResolver: Sendable {
     private func animeIDs(title: String) async -> [String: SourcedValue<String>] {  // l10n:content — media title used as an external-provider lookup key
         let document = """
         query ($search: String) {
-          Media(search: $search, type: ANIME) { id idMal }
+          Media(search: $search, type: ANIME) {
+            id
+            idMal
+            title { romaji english native }
+            synonyms
+          }
         }
         """
         let body: [String: Any] = ["query": document, "variables": ["search": title]]
         guard let url = URL(string: "https://graphql.anilist.co"),
               let response = await MetadataHTTP.postJSON(AniListIDResponse.self, url: url, body: body),
               let media = response.data?.Media else { return [:] }
+        // AniList's search always answers with its nearest match, so an unchecked
+        // hit does not identify the file — it renames it. That is worse here than
+        // in the artwork providers: these ids are written onto the item, and every
+        // later lookup, rating and scrobble inherits the wrong work.
+        guard AnimeTitleMatch.names(
+            [media.title?.romaji, media.title?.english, media.title?.native]
+                + (media.synonyms?.map { $0 } ?? []),
+            whenAskedFor: [title]
+        ) else { return [:] }
         let sourceURL = media.id.flatMap { URL(string: "https://anilist.co/anime/\($0)") }
         var ids: [String: SourcedValue<String>] = [:]
         if let anilist = media.id {
@@ -80,7 +94,17 @@ public struct KeylessIDResolver: Sendable {
     private struct AniListIDResponse: Decodable {
         let data: DataField?
         struct DataField: Decodable { let Media: Media? }
-        struct Media: Decodable { let id: Int?; let idMal: Int? }
+        struct Media: Decodable {
+            let id: Int?
+            let idMal: Int?
+            let title: Title?
+            let synonyms: [String]?
+            struct Title: Decodable {
+                let romaji: String?
+                let english: String?
+                let native: String?
+            }
+        }
     }
 
     // MARK: - TV (TVmaze)

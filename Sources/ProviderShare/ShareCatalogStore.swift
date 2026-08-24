@@ -63,6 +63,7 @@ actor ShareCatalogStore {
         )
     }
     private var normalizedMetadataReady = false
+    private var didEmitCatalogDiagnostics = false
     /// Cached "does ANY local (NFO/filename) metadata_values row exist" check —
     /// avoids a real query on every read-path call (`withLocalOverlay`/grid sort
     /// join) for the common no-NFO catalog, where it must add negligible
@@ -135,6 +136,27 @@ actor ShareCatalogStore {
             normalizedMetadataReady = true
             repairAllLocalMetadataProjections()
             repairFilenameProviderIDs()
+        }
+        emitCatalogDiagnosticsOnce()
+    }
+
+    /// One-shot catalog telemetry, emitted the first time anything opens this
+    /// store. Off unless the process was launched with `PLZXFAN_STDOUT=1`, so a
+    /// normal build pays nothing; `PLZXCATPROBE` adds `rel_path LIKE` probes for
+    /// diagnosing "my show isn't in the TV Shows library".
+    private func emitCatalogDiagnosticsOnce() {
+        guard FanoutDiagnostics.isEnabled, !didEmitCatalogDiagnostics else { return }
+        didEmitCatalogDiagnostics = true
+        FanoutDiagnostics.emit("SHARECAT " + readQueries.catalogSummary())
+        let needles = (ProcessInfo.processInfo.environment["PLZXCATPROBE"] ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        for row in readQueries.pathProbe(needles) {
+            FanoutDiagnostics.emit("SHARECAT " + row)
+        }
+        for row in readQueries.seriesKeySummary() {
+            FanoutDiagnostics.emit("SHARECAT series " + row)
         }
     }
 
@@ -2297,7 +2319,8 @@ actor ShareCatalogStore {
 
     /// Per-library counts so `libraries()` can hide an indexed library with no content.
     func libraryCounts() -> (movies: Int, tvSeries: Int, animeSeries: Int) {
-        ensureOpen(); return readQueries.libraryCounts()
+        ensureOpen()
+        return readQueries.libraryCounts()
     }
 
     /// Per-source provenance-row counts (Step 6 diagnostics). Lazy/on-demand.
@@ -2507,6 +2530,43 @@ extension ShareCatalogStore {
     /// children, and an omitted child made its parent look like a leaf. The parent
     /// could then be skipped, and the child never walked and never stamped, so the
     /// prune deleted its media. Tree shape has to come from the full row set.
+    /// Directories we have actually recorded CONTENT for — at least one indexed
+    /// file sitting directly inside them.
+    ///
+    /// The incremental skip treats an unchanged directory with no recorded
+    /// subdirectories as a finished leaf and doesn't list it. That is only sound
+    /// when its contents were genuinely indexed. A directory recorded by a scan
+    /// that was then interrupted before its children were walked has neither
+    /// files nor subdirectories on record, so it reads as an empty leaf — and
+    /// because a folder's own mtime doesn't move when a grandchild changes, every
+    /// later scan skips it again. It is never indexed and never will be.
+    ///
+    /// Measured on the maintainer's share: 165 of 273 show folders were stuck
+    /// this way — every series that keeps its episodes in `Season N` subfolders,
+    /// while series with episodes flat in the show folder (whose files WERE
+    /// recorded) scanned fine.
+    ///
+    /// Paths come back without the trailing separator, matching `dir_state`.
+    func directoriesWithRecordedFiles() -> Set<String> {
+        ensureOpen()
+        guard db != nil else { return [] }
+        var out: Set<String> = []
+        // `rtrim(path, replace(path, '/', ''))` strips every trailing character
+        // that is NOT a slash, leaving the path up to and including the last one —
+        // SQLite has no `dirname`, and doing it here keeps the whole set to one
+        // scan instead of shipping every row's path back to be parsed.
+        query("""
+        SELECT DISTINCT rtrim(rel_path, replace(rel_path, '/', '')) FROM assets;
+        """) { stmt in
+            guard let path = self.columnText(stmt, 0) else { return }
+            // A file directly at the share root has no separator, so the trim
+            // leaves nothing — that empty string IS the root's own path, which is
+            // how `dir_state` spells it too.
+            out.insert(path.isEmpty ? "" : String(path.dropLast()))
+        }
+        return out
+    }
+
     func recordedDirectoryPaths() -> Set<String> {
         ensureOpen()
         guard db != nil,

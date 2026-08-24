@@ -84,6 +84,77 @@ struct CatalogReadQueries {
         return (movies, tv, anime)
     }
 
+    /// A one-line summary of what the scan actually indexed, for on-device
+    /// diagnosis of "my show isn't in the TV Shows library". Answers the three
+    /// questions that distinguish the possible causes: is the file in `assets` at
+    /// all, what `kind`/`library` did the scan give it, and did it get a
+    /// `series_key` (the column the TV/Anime library queries require).
+    func catalogSummary() -> String {  // l10n:content — developer-facing diagnostic, never shown in UI
+        guard db != nil else { return "catalog unavailable" }
+        var parts: [String] = []
+        parts.append("assets=" + String(count(where: nil)))
+        for kind in ["movie", "episode"] {
+            parts.append("\(kind)=" + String(count(where: "kind='\(kind)'")))
+        }
+        for library in ["movies", "tv", "anime"] {
+            parts.append("lib.\(library)=" + String(count(where: "library='\(library)'")))
+        }
+        parts.append("episodeNoSeriesKey="
+            + String(count(where: "kind='episode' AND series_key IS NULL")))
+        parts.append("tvSeries=" + String(distinctSeriesCount(library: .tv)))
+        parts.append("animeSeries=" + String(distinctSeriesCount(library: .anime)))
+        return parts.joined(separator: " ")
+    }
+
+    /// Every distinct series key the scan grouped, with its library and episode
+    /// count. Bounded so a large share can't flood the log.
+    func seriesKeySummary(limit: Int = 400) -> [String] {
+        guard db != nil else { return [] }
+        var rows: [String] = []
+        query("""
+        SELECT series_key, library, COUNT(*), MIN(series_title)
+        FROM assets WHERE kind='episode'
+        GROUP BY series_key, library ORDER BY series_key LIMIT ?;
+        """, bind: { sqlite3_bind_int($0, 1, Int32(limit)) }) { stmt in
+            let key = CatalogConnection.columnText(stmt, 0) ?? "<null>"
+            let library = CatalogConnection.columnText(stmt, 1) ?? "?"
+            let count = Int(sqlite3_column_int64(stmt, 2))
+            let title = CatalogConnection.columnText(stmt, 3) ?? "?"
+            rows.append("\(library)/\(key) n=\(count) title=\(title)")
+        }
+        return rows
+    }
+
+    /// Rows whose `rel_path` contains one of `needles`, so "my show isn't in the
+    /// library" can be answered directly: either the file is absent from `assets`
+    /// (the scan never recorded it) or it is present and the row says why it was
+    /// filed elsewhere.
+    func pathProbe(_ needles: [String], limit: Int = 12) -> [String] {
+        guard db != nil else { return [] }
+        var rows: [String] = []
+        for needle in needles {
+            var found = 0
+            query("""
+            SELECT rel_path, kind, library, series_key, season, episode
+            FROM assets WHERE rel_path LIKE ? LIMIT ?;
+            """, bind: { stmt in
+                self.bindText(stmt, 1, "%\(needle)%")
+                sqlite3_bind_int(stmt, 2, Int32(limit))
+            }) { stmt in
+                found += 1
+                let path = CatalogConnection.columnText(stmt, 0) ?? "?"
+                let kind = CatalogConnection.columnText(stmt, 1) ?? "?"
+                let library = CatalogConnection.columnText(stmt, 2) ?? "?"
+                let key = CatalogConnection.columnText(stmt, 3) ?? "<null>"
+                let season = CatalogConnection.columnOptInt(stmt, 4).map(String.init) ?? "nil"
+                let episode = CatalogConnection.columnOptInt(stmt, 5).map(String.init) ?? "nil"
+                rows.append("probe<\(needle)> kind=\(kind) lib=\(library) key=\(key) s=\(season) e=\(episode) path=\(path)")
+            }
+            if found == 0 { rows.append("probe<\(needle)> NO ROWS in assets") }
+        }
+        return rows
+    }
+
     /// Discovery times are bucketed to five minutes before ordering.
     ///
     /// Sized to a scan, not to a day. It has to be long enough to swallow one

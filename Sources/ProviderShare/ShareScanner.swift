@@ -311,6 +311,15 @@ actor ShareScanner {
         // therefore skippable — orphaning the child and pruning its media.
         let directoriesWithSubdirectories =
             Self.parentPaths(of: await store.recordedDirectoryPaths())
+        // Directories we have actually indexed files for. Being recorded in
+        // `dir_state` only says a listing once succeeded, NOT that the subtree was
+        // walked — a scan interrupted between recording a folder and reaching its
+        // children leaves it looking like a finished, empty leaf. Since a folder's
+        // own mtime never moves when a grandchild changes, the skip below then
+        // re-skips it on every later pass and its media stays invisible forever.
+        // Requiring positive evidence makes the skip an assertion about content we
+        // have, rather than an assumption from content we don't.
+        let directoriesWithRecordedFiles = await store.directoriesWithRecordedFiles()
         // Sidecar/artwork folders are re-listed on a DEEP pass only.
         //
         // They can't be skipped on mtime alone (an NFO edited in place doesn't
@@ -433,6 +442,12 @@ actor ShareScanner {
                            // listing is what yields their mtimes and lets the
                            // whole level below be skipped.
                            !directoriesWithSubdirectories.contains(child.relPath),
+                           // ...and a leaf we have actually indexed files for. A
+                           // folder with neither recorded files nor recorded
+                           // subdirectories is not a finished leaf, it is one we
+                           // know nothing about — see
+                           // `directoriesWithRecordedFiles`.
+                           directoriesWithRecordedFiles.contains(child.relPath),
                            !directoriesNeedingRelist.contains(child.relPath) {
                             dirsSkipped += 1
                             // Collected, not stamped here. Stamping per directory

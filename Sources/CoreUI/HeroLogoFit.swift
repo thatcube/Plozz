@@ -161,4 +161,40 @@ public enum HeroLogoFit {
         }
         return CGSize(width: width, height: height)
     }
+
+    /// A nominal box for a logo whose **drawn** width must not pass `drawnWidth`,
+    /// trading the width that cap takes back as height so the area
+    /// ``fittedSize(for:maxWidth:maxHeight:coverage:)`` solves for is unchanged.
+    ///
+    /// ``fittedSize(for:maxWidth:maxHeight:coverage:)`` reads its box as a budget
+    /// and lets a wide shape flex to ``widthFlex`` past it, so a caller that means
+    /// "never wider than this line" has to hand over a box ``widthFlex`` narrower
+    /// than the line it is protecting. Doing only that would shrink every logo by
+    /// the same fifth, because the fit sizes on area — so the width the cap takes
+    /// is returned as height and the area target lands exactly where it was.
+    ///
+    /// Only the shapes that were actually overrunning give ground. Every wordmark
+    /// wide enough to reach the cap is then drawn at the *same* width, which is
+    /// what makes a set of them read as consistent — a logo's shape stops deciding
+    /// how much of the screen it takes. A compact or tall logo never reaches the
+    /// cap and is untouched.
+    ///
+    /// - Parameters:
+    ///   - budget: the nominal width × height the layout allots the logo.
+    ///   - drawnWidth: hard cap on what may actually be drawn.
+    ///   - maxHeight: ceiling on the nominal height after the trade, for a caller
+    ///     with something below the logo the give-back must not reach. Defaults to
+    ///     unbounded, i.e. the full trade.
+    public static func pinnedBox(
+        budget: CGSize,
+        drawnWidth: CGFloat,
+        maxHeight: CGFloat = .infinity
+    ) -> CGSize {
+        guard budget.width > 0, budget.height > 0, drawnWidth > 0 else { return budget }
+        let width = max(1, min(budget.width, drawnWidth / widthFlex))
+        // The budget's own area, redistributed — not the drawn cap's, which would
+        // hand back area the layout never offered.
+        let height = min(maxHeight, budget.width * budget.height / width)
+        return CGSize(width: width, height: max(1, height))
+    }
 }

@@ -226,6 +226,23 @@ struct HomeHeroView: View {
     /// than the buttons beneath it. `0` until first measured (overview falls back to
     /// its default cap). Varies per slide as the button set changes.
     @State private var actionButtonsWidth: CGFloat = 0
+
+    /// The nominal box handed to `HeroLogoArtwork`, with the wordmark's *drawn*
+    /// width pinned to the action-button row.
+    ///
+    /// The width cap was only ever a budget — `HeroLogoFit` flexes a wide shape a
+    /// quarter past it — so the wordmark this hero promises to hold to the button
+    /// row was overrunning it. Pinning also evens the hero out: every logo wide
+    /// enough to reach the row is drawn at the same width rather than at whatever
+    /// its aspect ratio earned. The width the pin takes comes back as height, so
+    /// no logo shrinks — see ``HeroLogoFit/pinnedBox(budget:drawnWidth:maxHeight:)``.
+    private var heroLogoBox: CGSize {
+        let column = actionButtonsWidth > 0 ? actionButtonsWidth : 620
+        return HeroLogoFit.pinnedBox(
+            budget: CGSize(width: column, height: 200),
+            drawnWidth: column
+        )
+    }
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
@@ -955,7 +972,12 @@ struct HomeHeroView: View {
                     // below) so it never runs wider than the buttons beneath it —
                     // matching the title/overview. Falls back to the component's
                     // default until first measured.
-                    maxWidth: actionButtonsWidth > 0 ? actionButtonsWidth : 620,
+                    //
+                    // Pinned rather than nominal: `HeroLogoFit` flexes a wide shape
+                    // past its box, so this cap was being drawn a quarter wider than
+                    // the buttons it names. See ``heroLogoBox``.
+                    maxWidth: heroLogoBox.width,
+                    maxHeight: heroLogoBox.height,
                     // The parent keeps metadata hidden for 280ms during a wipe. A
                     // cache-hot logo lands inside that window; a later result warms
                     // the next visit but never pops into an already-settled slide.

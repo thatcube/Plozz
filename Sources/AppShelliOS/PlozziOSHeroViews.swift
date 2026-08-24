@@ -51,6 +51,27 @@ enum PlozziOSPageLayout {
         min(style == .compactPortrait ? 330 : 520, heroTextMaxWidth(for: style))
     }
 
+    /// Nominal height budget for the hero wordmark.
+    static func heroLogoMaxHeight(for style: HeroArtworkStyle) -> CGFloat {
+        style == .compactPortrait ? 95 : 130
+    }
+
+    /// The box handed to `HeroLogoArtwork`, with the wordmark's *drawn* width
+    /// pinned to the column rather than merely budgeted against it.
+    ///
+    /// ``heroLogoMaxWidth`` alone did not deliver the cap it describes: `HeroLogoFit`
+    /// flexes a wide shape to ``HeroLogoFit/widthFlex`` past its box, so a wide
+    /// wordmark still overhung the column and still dragged the hero's rows left.
+    /// Pinning holds every logo wide enough to reach the column to the *same* drawn
+    /// width, and returns the width it takes as height so no logo shrinks.
+    static func heroLogoBox(for style: HeroArtworkStyle) -> CGSize {
+        let column = heroLogoMaxWidth(for: style)
+        return HeroLogoFit.pinnedBox(
+            budget: CGSize(width: column, height: heroLogoMaxHeight(for: style)),
+            drawnWidth: column
+        )
+    }
+
     static func heroStageMaxWidth(
         for style: HeroArtworkStyle,
         surfaceRole: HeroTrailerSurfaceRole
@@ -2019,10 +2040,11 @@ private struct PlozziOSHeroMetadata: View {
                 if let scheduleLine {
                     scheduleBadge(scheduleLine)
                 }
+                let logoBox = PlozziOSPageLayout.heroLogoBox(for: style)
                 HeroLogoArtwork(
                     references: presentation.logoReferences,
-                    maxWidth: PlozziOSPageLayout.heroLogoMaxWidth(for: style),
-                    maxHeight: style == .compactPortrait ? 95 : 130,
+                    maxWidth: logoBox.width,
+                    maxHeight: logoBox.height,
                     alignment: style == .compactPortrait ? .center : .leading
                 ) {
                     Text(presentation.title)

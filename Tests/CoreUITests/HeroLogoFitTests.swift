@@ -283,6 +283,136 @@ final class HeroLogoInkTests: XCTestCase {
     }
 }
 
+/// Coverage for the **width pin** — the trade that turns a nominal width budget
+/// into a hard cap on what is actually drawn, without shrinking anything.
+///
+/// `fittedSize` reads its box as a budget and lets a wide shape flex to
+/// `widthFlex` past it, so every caller that documented "never wider than this
+/// column" was in fact drawing a quarter wider than the column. Handing over a
+/// narrower box alone would fix the overrun and shrink every logo with it, since
+/// the fit sizes on area — so the width the cap takes is returned as height.
+final class HeroLogoPinnedBoxTests: XCTestCase {
+
+    /// A hero column: the width the buttons and overview beneath the logo occupy.
+    private let column = CGSize(width: 620, height: 200)
+
+    private func pinned() -> CGSize {
+        HeroLogoFit.pinnedBox(budget: column, drawnWidth: column.width)
+    }
+
+    private func drawn(aspect: CGFloat, in box: CGSize, coverage: Double = 1) -> CGSize {
+        HeroLogoFit.fittedSize(
+            for: CGSize(width: 1000, height: 1000 * aspect),
+            maxWidth: box.width,
+            maxHeight: box.height,
+            coverage: coverage
+        )
+    }
+
+    /// The whole point of the trade: the area the fit solves for is untouched, so
+    /// pinning the width costs no logo any size.
+    func testTheTradePreservesTheBudgetArea() {
+        let box = pinned()
+        XCTAssertEqual(
+            box.width * box.height,
+            column.width * column.height,
+            accuracy: 0.5,
+            "the width the pin takes must come back as height"
+        )
+        XCTAssertLessThan(box.width, column.width, "the nominal box must narrow")
+        XCTAssertGreaterThan(box.height, column.height, "and grow taller by the same factor")
+    }
+
+    /// The cap the callers actually promised. Checked across the full range of
+    /// shapes *and* ink weights, since ink adjusts the area target and an earlier
+    /// version let a thin wordmark buy its way past the ceiling.
+    func testNoLogoIsEverDrawnWiderThanTheColumn() {
+        let box = pinned()
+        for aspect in [0.08, 0.11, 0.18, 0.25, 0.55, 0.85, 1.4, 2.2] as [CGFloat] {
+            for coverage in [0.03, 0.12, 0.32, 0.55, 0.95] {
+                let size = drawn(aspect: aspect, in: box, coverage: coverage)
+                XCTAssertLessThanOrEqual(
+                    size.width,
+                    column.width + 0.001,
+                    "aspect \(aspect) at coverage \(coverage) overran the column"
+                )
+            }
+        }
+    }
+
+    /// Without the pin the same shapes overran — otherwise the test above proves
+    /// nothing about the change.
+    func testTheUnpinnedBoxDidOverrunTheColumn() {
+        let size = drawn(aspect: 0.18, in: column)
+        XCTAssertGreaterThan(
+            size.width,
+            column.width,
+            "a wide wordmark used to flex past the column it was capped to"
+        )
+    }
+
+    /// Why the row reads as consistent: every wordmark wide enough to reach the
+    /// cap is drawn at the *same* width, so a logo's aspect ratio stops deciding
+    /// how much of the screen it takes.
+    func testEveryWideWordmarkLandsAtTheSameDrawnWidth() {
+        let box = pinned()
+        let widths = [0.08, 0.11, 0.18].map { drawn(aspect: $0, in: box).width }
+        XCTAssertEqual(widths.max()! - widths.min()!, 0, accuracy: 0.001)
+        XCTAssertEqual(widths[0], column.width, accuracy: 0.001)
+    }
+
+    /// Ink still cannot buy a wide logo more width — but it is not silently
+    /// cancelled either: the same correction keeps working on the shapes that
+    /// never reach the cap.
+    func testInkStillMovesTheShapesThatDoNotReachTheCap() {
+        let box = pinned()
+        let thin = drawn(aspect: 0.85, in: box, coverage: 0.12)
+        let heavy = drawn(aspect: 0.85, in: box, coverage: 0.55)
+        XCTAssertGreaterThan(
+            thin.width * thin.height,
+            heavy.width * heavy.height,
+            "a sparse wordmark must still be drawn larger than a dense one"
+        )
+    }
+
+    /// A shape that reaches neither ceiling in either box is drawn identically —
+    /// proof the trade redistributes the budget rather than changing it.
+    func testAShapeThatClampsInNeitherBoxIsUnchanged() {
+        let before = drawn(aspect: 0.55, in: column)
+        let after = drawn(aspect: 0.55, in: pinned())
+        XCTAssertEqual(before.width, after.width, accuracy: 0.001)
+        XCTAssertEqual(before.height, after.height, accuracy: 0.001)
+    }
+
+    /// The give-back is boundable, for a caller with something below the logo it
+    /// must not reach — the Continue Watching card's mirror line, say.
+    func testMaxHeightBoundsTheGiveBack() {
+        let box = HeroLogoFit.pinnedBox(
+            budget: column,
+            drawnWidth: column.width,
+            maxHeight: 210
+        )
+        XCTAssertEqual(box.height, 210, accuracy: 0.001)
+        XCTAssertLessThan(box.width * box.height, column.width * column.height)
+    }
+
+    /// A budget already narrower than the cap allows is left alone — the pin is a
+    /// ceiling, not a resize.
+    func testABudgetInsideTheCapIsUntouched() {
+        let box = HeroLogoFit.pinnedBox(budget: column, drawnWidth: 10_000)
+        XCTAssertEqual(box.width, column.width, accuracy: 0.001)
+        XCTAssertEqual(box.height, column.height, accuracy: 0.001)
+    }
+
+    /// Degenerate input returns the budget rather than a divide-by-zero.
+    func testDegenerateInputReturnsTheBudget() {
+        for bad in [CGSize(width: 0, height: 200), CGSize(width: 620, height: 0)] {
+            XCTAssertEqual(HeroLogoFit.pinnedBox(budget: bad, drawnWidth: 620), bad)
+        }
+        XCTAssertEqual(HeroLogoFit.pinnedBox(budget: column, drawnWidth: 0), column)
+    }
+}
+
 /// Coverage for the logo lift — the second of the card's two remedies.
 ///
 /// Dimming the backdrop only works in one direction: it pulls the picture down

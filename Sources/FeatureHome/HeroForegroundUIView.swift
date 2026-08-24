@@ -630,13 +630,24 @@ final class HeroForegroundUIView: UIView {
             // wordmark carries the same weight on both screens — and so a tall or
             // very wide logo isn't shrunk for its shape.
             //
+            // The box is PINNED to the text column: `HeroLogoFit` flexes a wide
+            // shape past its budget, so a wordmark was being drawn a quarter wider
+            // than the description beneath it. Pinning holds every wide logo to the
+            // same drawn width and gives the width back as height, so nothing
+            // shrinks — see `HeroLogoFit.pinnedBox`.
+            //
             // The frame is the ACTUAL fitted image, not the slot: `.scaleAspectFit`
             // centres within its frame, so a frame wider than the drawn image would
             // push a tall/narrow wordmark right instead of leaving it left-aligned.
+            let column = min(maxWidth, logoMaxWidth)
+            let box = HeroLogoFit.pinnedBox(
+                budget: CGSize(width: column, height: logoMaxHeight),
+                drawnWidth: column
+            )
             let fitted = HeroLogoFit.fittedSize(
                 for: image.size,
-                maxWidth: min(maxWidth, logoMaxWidth),
-                maxHeight: logoMaxHeight,
+                maxWidth: box.width,
+                maxHeight: box.height,
                 coverage: currentLogo?.coverage ?? 1
             )
             let (w, h) = (fitted.width, fitted.height)

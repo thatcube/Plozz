@@ -373,6 +373,23 @@ struct DetailHeroView: View, Equatable {
     /// never runs wider than the overview beneath it.
     private var heroLogoWidth: CGFloat { 620 }
 
+    /// The nominal box handed to `HeroLogoArtwork`, with the wordmark's *drawn*
+    /// width pinned to the text column above.
+    ///
+    /// ``heroLogoWidth`` was only ever a budget: `HeroLogoFit` flexes a wide shape
+    /// past it, so the "never wider than the overview" cap above was being drawn a
+    /// quarter wider than the overview. Pinning it also evens the hero out, since
+    /// every wordmark wide enough to reach the column is now drawn at the same
+    /// width instead of at whatever its aspect ratio happened to earn. The width
+    /// the pin takes comes back as height, so no logo shrinks — see
+    /// ``HeroLogoFit/pinnedBox(budget:drawnWidth:maxHeight:)``.
+    private var heroLogoBox: CGSize {
+        HeroLogoFit.pinnedBox(
+            budget: CGSize(width: heroLogoWidth, height: heroLogoHeight),
+            drawnWidth: heroLogoWidth
+        )
+    }
+
     // MARK: - Visible item actions (discoverability)
 
     /// The subject of watched-state actions: the play target when it differs from
@@ -769,8 +786,12 @@ struct DetailHeroView: View, Equatable {
                     // so the gap above and below it varied with each logo's aspect
                     // ratio. Bounding the width makes such a logo hit that limit
                     // first and shrink its own height to match, leaving no slack.
-                    maxWidth: heroLogoWidth,
-                    maxHeight: heroLogoHeight
+                    //
+                    // The box is *pinned* rather than nominal, so the drawn logo
+                    // stops at the text column instead of flexing past it — see
+                    // ``heroLogoBox``.
+                    maxWidth: heroLogoBox.width,
+                    maxHeight: heroLogoBox.height
                 ) {
                     titleText(hideText: hideText)
                 }

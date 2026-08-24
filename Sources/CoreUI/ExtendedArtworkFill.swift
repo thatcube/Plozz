@@ -303,13 +303,12 @@ public enum ContinueWatchingCardShape {
     ///   points. Taken as a floor so the logo tracks it at large text sizes, where
     ///   the chip's inset grows but a pure fraction would not.
     public static func logoBox(cardWidth: CGFloat, stage: CGFloat, edgeInset: CGFloat) -> CGSize {
-        let budgetWidth = cardWidth * logoWidthFraction
-        let budgetHeight = stage * logoHeightFraction
         let margin = max(cardWidth * logoEdgeInsetFraction, edgeInset)
-        let drawnCeiling = max(1, cardWidth - 2 * margin)
-        let width = max(1, min(budgetWidth, drawnCeiling / HeroLogoFit.widthFlex))
-        let height = min(stage * logoMaxHeightFraction, budgetWidth * budgetHeight / width)
-        return CGSize(width: width, height: max(1, height))
+        return HeroLogoFit.pinnedBox(
+            budget: CGSize(width: cardWidth * logoWidthFraction, height: stage * logoHeightFraction),
+            drawnWidth: max(1, cardWidth - 2 * margin),
+            maxHeight: stage * logoMaxHeightFraction
+        )
     }
 
     /// Where the logo's centre sits, as a fraction of the CARD's height.

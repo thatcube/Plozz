@@ -78,6 +78,8 @@ public struct HomeAggregator: Sendable {
         let serverInfo = accounts.sourceServerInfo()
         let resolve: (String) -> SourceServerInfo? = { serverInfo[$0] }
 
+        Self.logContinueWatchingMergeInputs(perAccount.map(\.continueWatching))
+
         return Content(
             continueWatching: Self.mergedRow(
                 from: perAccount.map(\.continueWatching),
@@ -603,6 +605,27 @@ public struct HomeAggregator: Sendable {
     /// and which only remain untimestamped when that lookup genuinely fails — keep
     /// their interleave order *after* the timestamped ones (they never inherit a
     /// neighbouring show's timestamp).
+    /// TEMPORARY on-device diagnostic for the Continue Watching duplicate bug.
+    /// Emits one line per pre-merge card so a duplicate pair can be compared by
+    /// the exact fields the merge keys on. Remove once the cause is confirmed.
+    private static func logContinueWatchingMergeInputs(_ groups: [[MediaItem]]) {
+        let all = groups.flatMap { $0 }
+        FanoutDiagnostics.emit("CWDUP begin items=\(all.count) episodes=\(all.filter { $0.kind == .episode }.count)")
+        for item in all where item.kind == .episode {
+            let identities = MediaItemIdentity.identities(for: item)
+            var parts: [String] = ["CWDUP"]
+            parts.append("acct=" + (item.sourceAccountID ?? "nil"))
+            parts.append("parent=" + (item.parentTitle ?? "nil"))
+            parts.append("s=" + (item.seasonNumber.map(String.init) ?? "nil"))
+            parts.append("e=" + (item.episodeNumber.map(String.init) ?? "nil"))
+            parts.append("key=" + (MediaItemMerger.episodeTitleKey(for: item) ?? "nil"))
+            parts.append("idents=" + String(identities.count))
+            parts.append("seriesID=" + (item.seriesID ?? "nil"))
+            parts.append("first=" + (identities.first.map { "\($0)" } ?? "none"))
+            FanoutDiagnostics.emit(parts.joined(separator: " "))
+        }
+    }
+
     private static func mergedRow(
         from groups: [[MediaItem]],
         limit: Int,

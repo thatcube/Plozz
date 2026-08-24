@@ -142,6 +142,68 @@ final class EpisodeOrphanMergeTests: XCTestCase {
         XCTAssertEqual(MediaItemMerger.merge([show, film]).count, 2)
     }
 
+    // MARK: - Servers disagreeing about the show's name
+
+    func testSeriesNameWithATrailingYearStillMatches() {
+        // Real data: Plex reports "Bodies (2023)" (its folder name) where the
+        // share's filename parse says "Bodies". Requiring equal names left this
+        // one duplicated while Cobra Kai, spelled identically everywhere,
+        // collapsed correctly.
+        let plex = episode("plex-1", series: "Bodies (2023)", season: 1, number: 1,
+                           account: "plex", ids: ["Imdb": "tt18766898"], resume: 200)
+        let share = episode("f:TV Shows/Bodies/Season 1/E01.mkv",
+                            series: "Bodies", season: 1, number: 1, account: "smb")
+        let merged = MediaItemMerger.merge([plex, share])
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged.first?.id, "plex-1")
+    }
+
+    func testSeriesNameWithASubtitleStillMatches() {
+        // Real data: Jellyfin reports "Arcane: League of Legends", the share says
+        // "Arcane".
+        let jellyfin = episode("jf-1", series: "Arcane: League of Legends",
+                               season: 1, number: 9, account: "jellyfin",
+                               ids: ["Imdb": "tt15496440"])
+        let share = episode("f:arcane.mkv", series: "Arcane", season: 1, number: 9,
+                            account: "smb")
+        XCTAssertEqual(MediaItemMerger.merge([jellyfin, share]).count, 1)
+    }
+
+    func testYearIsStrippedFromTheSeriesName() {
+        let withYear = episode("a", series: "Bodies (2023)", season: 1, number: 1, account: "x")
+        let without = episode("b", series: "Bodies", season: 1, number: 1, account: "y")
+        XCTAssertEqual(MediaItemMerger.normalizedSeriesTitle(for: withYear), "bodies")
+        XCTAssertEqual(MediaItemMerger.normalizedSeriesTitle(for: without), "bodies")
+    }
+
+    func testATrailingNumberThatIsNotAYearIsKept() {
+        let item = episode("a", series: "Stranger Things 4", season: 1, number: 1, account: "x")
+        XCTAssertEqual(MediaItemMerger.normalizedSeriesTitle(for: item), "stranger things 4")
+    }
+
+    func testAPrefixPairThatBothCarryIDsIsStillNotGuessed() {
+        // "Star Trek" and "Star Trek Discovery" are prefix-compatible, so an
+        // id-less orphan must not be dropped into one of them at random.
+        let trek = episode("jf-1", series: "Star Trek", season: 1, number: 1,
+                           account: "jellyfin", ids: ["Imdb": "tt0060028"])
+        let disco = episode("jf-2", series: "Star Trek: Discovery", season: 1, number: 1,
+                            account: "jellyfin2", ids: ["Imdb": "tt5171438"])
+        let share = episode("f:trek.mkv", series: "Star Trek", season: 1, number: 1, account: "smb")
+        XCTAssertEqual(MediaItemMerger.merge([trek, disco, share]).count, 3)
+    }
+
+    func testAnOrphanJoinsTheOnlyCompatibleShowNotAnUnrelatedOne() {
+        let arcane = episode("jf-1", series: "Arcane: League of Legends", season: 1,
+                             number: 9, account: "jellyfin", ids: ["Imdb": "tt15496440"])
+        let bodies = episode("jf-2", series: "Bodies (2023)", season: 1, number: 9,
+                             account: "jellyfin", ids: ["Imdb": "tt18766898"])
+        let share = episode("f:arcane.mkv", series: "Arcane", season: 1, number: 9, account: "smb")
+        let merged = MediaItemMerger.merge([arcane, bodies, share])
+        XCTAssertEqual(merged.count, 2, "the share joins Arcane, leaving Bodies alone")
+        let arcaneCard = merged.first { $0.id == "jf-1" }
+        XCTAssertEqual(Set(arcaneCard?.sources.map(\.accountID) ?? []), ["jellyfin", "smb"])
+    }
+
     // MARK: - The key itself
 
     func testKeyFoldsCaseAndPunctuation() {

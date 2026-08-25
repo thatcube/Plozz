@@ -190,6 +190,43 @@ private struct SequentialAsyncImage<Content: View, Placeholder: View>: View {
 /// Decoded results live in `ArtworkImageCache`, so a card scrolled back into view
 /// (or one whose art was prefetched ahead of scroll) seeds its image
 /// synchronously and renders with no gray placeholder frame.
+/// The image last adopted for a given reference set, held for synchronous reuse.
+///
+/// SwiftUI re-creates a view — with fresh `@State` — whenever its identity churns,
+/// and each rebuild re-seeds from the decoded cache. That seed deliberately only
+/// accepts the PRIMARY candidate, so a view whose primary is not resident seeds
+/// blank and paints its placeholder. Once per rebuild is a flash; during a
+/// continuous gesture, which rebuilds every frame, it is a strobe.
+///
+/// Keyed by the same identity `taskKey` uses, so what comes back is the image
+/// already resolved for exactly these references — a repaint of what was on
+/// screen, never a lesser candidate, so it cannot cause the fallback-then-swap
+/// this seed's `stopAtPrimary` rule exists to prevent.
+///
+/// Main-actor isolated, so it needs no lock and can be read from `init`.
+@MainActor
+enum ArtworkSeedMemo {
+    private static var entries: [String: UIImage] = [:]
+    private static var order: [String] = []
+    /// Bounded: this holds references to decoded images, and the decoded cache
+    /// below it is already the memory budget. Evicting oldest-first costs one
+    /// re-seed, not a re-decode.
+    private static let capacity = 120
+
+    static func value(for key: String) -> UIImage? { entries[key] }
+
+    static func store(_ image: UIImage, for key: String) {
+        if entries[key] == nil {
+            order.append(key)
+            if order.count > capacity, let oldest = order.first {
+                order.removeFirst()
+                entries[oldest] = nil
+            }
+        }
+        entries[key] = image
+    }
+}
+
 private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     let references: [ArtworkReference]
     let maxAspectRatio: CGFloat?
@@ -259,12 +296,21 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         self.placeholder = placeholder
         // Seed synchronously from the decoded-image cache so an already-warmed card
         // renders its art on the very first frame — no async hop, no gray flash.
+        //
+        // A view whose identity churns is re-created with fresh `@State`, so it
+        // re-seeds from scratch every time. When the primary is not decoded that
+        // seeds BLANK, and under a continuous gesture that is one blank per frame,
+        // which reads as a strobe. `ArtworkSeedMemo` holds the image last adopted
+        // for these exact references, so a rebuild repaints precisely what was
+        // already on screen: no blank, and no swap either, because it is the same
+        // image rather than a lesser candidate.
+        let memoKey = Self.makeKey(references: references, variant: variant, maxAspectRatio: maxAspectRatio)
         let seeded = Self.cachedUsableImage(
             references: references,
             maxAspectRatio: maxAspectRatio,
             variant: variant,
             stopAtPrimary: true
-        )
+        ) ?? ArtworkSeedMemo.value(for: memoKey).map { (image: $0, index: references.startIndex) }
         let seededPreview = seeded == nil ? previewVariant.flatMap {
             Self.cachedUsableImage(references: references, maxAspectRatio: maxAspectRatio, variant: $0)
         } : nil
@@ -390,6 +436,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                ArtworkSeedMemo.store(loaded, for: key)
                 pinnedIdentity = pinIdentity
                 onResolveReference?(reference)
                 return
@@ -402,6 +449,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 resolved = true
                 isPreviewQuality = false
                 loadedKey = key
+                ArtworkSeedMemo.store(loaded, for: key)
                 pinnedIdentity = pinIdentity
                 onResolveReference?(nil)
                 return

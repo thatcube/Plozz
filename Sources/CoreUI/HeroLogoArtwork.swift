@@ -207,6 +207,38 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
     }
 }
 
+/// Processed logos held for synchronous reuse, so a rebuilt view paints a warmed
+/// logo on its FIRST frame.
+///
+/// `HeroLogoPipeline` is an actor, so reading it always costs a suspension — even
+/// on a hit. That is one frame with no logo, which draws the styled title: the
+/// text appearing *after* a logo had already loaded. The pipeline stays the
+/// source of truth and does all the work; this only makes an already-resolved
+/// answer readable without awaiting.
+///
+/// Main-actor isolated, so it needs no lock and can be read during `body`.
+@MainActor
+enum HeroLogoMemo {
+    private static var entries: [String: ProcessedLogo] = [:]
+    private static var order: [String] = []
+    /// Enough for a hero carousel plus the pages reached from it. Evicting
+    /// oldest-first costs one await on the next look, not a re-decode.
+    private static let capacity = 60
+
+    static func value(for key: String) -> ProcessedLogo? { entries[key] }
+
+    static func store(_ value: ProcessedLogo, for key: String) {
+        if entries[key] == nil {
+            order.append(key)
+            if order.count > capacity, let oldest = order.first {
+                order.removeFirst()
+                entries[oldest] = nil
+            }
+        }
+        entries[key] = value
+    }
+}
+
 #if canImport(UIKit)
 private struct LoadedLogo<TextFallback: View>: View {
     let references: [ArtworkReference]
@@ -225,10 +257,18 @@ private struct LoadedLogo<TextFallback: View>: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var image: ProcessedLogo?
+    /// The `taskKey` the current `image` was resolved for, so a re-resolve for the
+    /// SAME subject can keep it on screen while a different subject clears it.
+    @State private var resolvedKey: String?
 
     var body: some View {
+        // Falls back to the synchronous memo, so a logo this view has already
+        // resolved once paints on the FIRST frame of a rebuild. Without it every
+        // rebuild drew the styled title for at least one frame, because the
+        // pipeline is an actor and even a cache hit costs a suspension.
+        let shown = image ?? HeroLogoMemo.value(for: taskKey)
         Group {
-            if let processed = image {
+            if let processed = shown {
                 logo(processed)
                     .transition(.opacity)
             } else {
@@ -243,7 +283,7 @@ private struct LoadedLogo<TextFallback: View>: View {
             reduceMotion || !presentationPolicy.animatesResolvedLogo
                 ? nil
                 : .easeIn(duration: 0.25),
-            value: image != nil
+            value: shown != nil
         )
         .task(id: taskKey) { await resolve() }
     }
@@ -323,7 +363,21 @@ private struct LoadedLogo<TextFallback: View>: View {
 
     private func resolve() async {
         let startedAt = ProcessInfo.processInfo.systemUptime
-        image = nil
+        // Deliberately NOT cleared here.
+        //
+        // Blanking first meant every re-resolve dropped a logo that was already on
+        // screen back to the styled title, and then restored it — the text
+        // reappearing *after* the logo had loaded. A re-resolve is common: the
+        // reference list changes as a title is enriched, and a hero carousel
+        // rebuilds its slides as it pages.
+        //
+        // Keeping the old logo is safe because a logo is only ever REPLACED by one
+        // that has finished decoding, so there is no window where the wrong art is
+        // shown as final. The one case that must still clear is a change of
+        // subject: `.task(id:)` re-runs when `taskKey` changes, and a slide reused
+        // for a different title must not keep the previous show's wordmark.
+        if resolvedKey != taskKey { image = nil }
+        let key = taskKey
         // `HeroLogoPipeline` caches the processed result by URL and runs the heavy
         // pixel work off the main actor, so re-appears / scheme changes / fast
         // scrolling reuse the prepared logo instead of reprocessing it.
@@ -335,6 +389,7 @@ private struct LoadedLogo<TextFallback: View>: View {
         guard !Task.isCancelled else { return }
         let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
         guard presentationPolicy.shouldAdopt(elapsed: elapsed) else { return }
+        resolvedKey = key
 
         // Draw the logo the moment it is decoded, BEFORE the backdrop is sampled.
         //
@@ -369,6 +424,7 @@ private struct LoadedLogo<TextFallback: View>: View {
 
     private func adopt(_ processed: ProcessedLogo) {
         image = processed
+        HeroLogoMemo.store(processed, for: taskKey)
         onResolve?(ResolvedLogoTone(
             luminance: processed.luminance,
             coverage: processed.coverage,

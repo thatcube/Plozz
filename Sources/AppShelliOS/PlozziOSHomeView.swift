@@ -927,6 +927,19 @@ private struct PlozziOSHomeHeroCarousel: View {
                     ) { pullScale in
                         ZStack {
                             if let dragTargetItem {
+                                let _ = HeroArtDiagnostics.emitOnce(
+                                    stage: "slide-layers",
+                                    key: "\(currentItem.id)|\(dragTargetItem.id)"
+                                ) {
+                                    // The incoming layer sits BENEATH at full
+                                    // opacity while the outgoing fades over it, so
+                                    // an outgoing layer that is still loading shows
+                                    // the incoming picture through.
+                                    "slide LAYERS under=\(dragTargetItem.title) "
+                                    + "over=\(currentItem.title) "
+                                    + "underResident=\(backdropIsResident(dragTargetItem)) "
+                                    + "overResident=\(backdropIsResident(currentItem))"
+                                }
                                 PlozziOSHomeStaticBackdrop(
                                     item: dragTargetItem,
                                     style: style,
@@ -1178,6 +1191,26 @@ private struct PlozziOSHomeHeroCarousel: View {
         return adjacentItem(forward: dragOffset < 0)
     }
 
+    /// Whether this item's hero backdrop is already decoded and resident.
+    ///
+    /// The decisive fact for the transition flash. Every transition swaps the
+    /// backdrop between two different view TYPES (`PlozziOSHeroBackdrop` when
+    /// idle, `PlozziOSSlidingHeroArtwork` while sliding), which SwiftUI cannot
+    /// reuse across — so each one is rebuilt and reloads through
+    /// `FallbackAsyncImage`. A rebuild whose image is already in this cache is
+    /// invisible; a rebuild that misses leaves the layer blank for a moment, and
+    /// the incoming slide is drawn directly beneath it at full opacity.
+    private func backdropIsResident(_ item: MediaItem) -> Bool {
+        let references = HeroPresentation(
+            item: item,
+            artworkStyle: horizontalSizeClass == .compact ? .compactPortrait : .landscape,
+            surface: .home
+        ).artworkReferences
+        return references.contains {
+            ArtworkImageCache.shared.cachedImage(for: $0, variant: .heroBackdrop) != nil
+        }
+    }
+
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
         if let accountID = item.sourceAccountID {
             return appModel.accountsProviders.provider(forAccountID: accountID)
@@ -1367,6 +1400,15 @@ private struct PlozziOSHomeHeroCarousel: View {
         transitionInProgress = true
         transitionDirection = forward ? -1 : 1
         transitionTargetID = target.id
+        HeroArtDiagnostics.emit(
+            "slide BEGIN from=\(currentItem?.title ?? "?") to=\(target.title) "
+            + "forward=\(forward) "
+            + "fromResident=\(currentItem.map(backdropIsResident) ?? false) "
+            + "toResident=\(backdropIsResident(target)) "
+            + "trailerShowing=\(currentItem.map { trailerController.isShowing($0.id) } ?? false) "
+            + "trailerPlaying=\(trailerController.isPlaying) "
+            + "dragOffset=\(Int(dragOffset))"
+        )
         let distance = max(stageWidth, 1)
         let currentProgress = min(abs(dragOffset) / distance, 1)
         let remainingProgress = max(1 - currentProgress, 0)
@@ -1398,6 +1440,13 @@ private struct PlozziOSHomeHeroCarousel: View {
                 dragOffset = 0
                 foregroundVisible = false
             }
+            HeroArtDiagnostics.emit(
+                "slide COMMIT now=\(target.title) "
+                // The idle backdrop is a different view TYPE from the sliding one,
+                // so it is built fresh here. A miss means it paints blank for a
+                // moment at the very end of the transition.
+                + "nowResident=\(backdropIsResident(target))"
+            )
             withAnimation(.easeInOut(duration: 0.24)) {
                 foregroundVisible = true
             }

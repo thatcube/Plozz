@@ -590,7 +590,8 @@ private struct PlozziOSHeroBackdrop: View {
         ZStack {
             FallbackAsyncImage(
                 references: presentation.artworkReferences,
-                variant: .heroBackdrop
+                variant: .heroBackdrop,
+                pinIdentity: presentation.itemID
             ) {
                 palette.backgroundBase
             }
@@ -906,7 +907,8 @@ private struct PlozziOSSlidingHeroArtwork: View {
     private var artwork: some View {
         FallbackAsyncImage(
             references: presentation.artworkReferences,
-            variant: .heroBackdrop
+            variant: .heroBackdrop,
+            pinIdentity: presentation.itemID
         ) {
             palette.backgroundBase
         }
@@ -917,7 +919,8 @@ private struct PlozziOSSlidingHeroArtwork: View {
     private func mirroredEdge(alignment: Alignment) -> some View {
         FallbackAsyncImage(
             references: presentation.artworkReferences,
-            variant: .heroBackdrop
+            variant: .heroBackdrop,
+            pinIdentity: presentation.itemID
         ) {
             palette.backgroundBase
         }
@@ -944,7 +947,8 @@ private struct PlozziOSHeroReflection: View {
         ZStack {
             FallbackAsyncImage(
                 references: presentation.artworkReferences,
-                variant: .heroBackdrop
+                variant: .heroBackdrop,
+                pinIdentity: presentation.itemID
             ) {
                 Color.clear
             }

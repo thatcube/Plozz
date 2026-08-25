@@ -130,6 +130,7 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
         variant: ArtworkImageVariant = .original,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        pinIdentity: String? = nil,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.init(
@@ -139,6 +140,7 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
             onResolveReference: nil,
+            pinIdentity: pinIdentity,
             content: ArtworkFillImage.init,
             placeholder: placeholder
         )
@@ -343,6 +345,16 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // the card is never blanked to fetch something it is already showing an
         // acceptable version of.
         if seeded == nil, !isPreviewQuality, !isSameSubject {
+            // This is the visible flash: whatever was painted is dropped and the
+            // layer goes flat until a reload lands. Trace the clear itself — the
+            // key that changed is what identifies the churn causing it. Only fires
+            // on an actual blanking, so it cannot flood.
+            HeroArtDiagnostics.emit(
+                "image CLEAR variant=\(variant) had=\(image != nil) "
+                + "pin=\(pinIdentity ?? "nil") pinned=\(pinnedIdentity ?? "nil") "
+                + "wasKey=\(loadedKey ?? "nil") "
+                + "newKey=\(key)"
+            )
             image = nil
             resolved = false
         }

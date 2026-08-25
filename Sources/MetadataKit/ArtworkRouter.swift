@@ -35,6 +35,15 @@ public actor ArtworkRouter {
     /// entry), which would repeat the network lookup on every episode.
     private var originalLanguages: [String: String] = [:]
     private var missingOriginalLanguages = Set<String>()
+    /// Candidate lists, memoised for the process.
+    ///
+    /// Not the persistent cache: that stores one URL per key and a list has no
+    /// representation in it. A title's candidates are cheap to recompute once per
+    /// run, and holding them here is what makes returning to a page free. Capped
+    /// because a large library would otherwise grow this without bound; dropping
+    /// the lot costs one recomputation, which is far better than leaking.
+    private var heroCandidates: [String: [SourcedValue<URL>]] = [:]
+    private static let heroCandidatesCap = 600
 
     public init(
         config: MetadataProviderConfig = .resolved(),
@@ -138,9 +147,55 @@ public actor ArtworkRouter {
         return nil
     }
 
-    /// The ordered provider chain for a content type + artwork kind. Keyless,
-    /// per-IP providers come first (they scale infinitely and cover anime/episodes
-    /// best); the optional TMDb tier backs them up for heroes/logos/stills.
+    /// Ordered artwork candidates for `item`. See the ``MetadataQuery`` overload.
+    public func sourcedArtworkURLs(
+        _ kind: ArtworkKind,
+        for item: MediaItem,
+        limit: Int = 2
+    ) async -> [SourcedValue<URL>] {
+        await sourcedArtworkURLs(kind, for: MetadataQuery(item), limit: limit)
+    }
+
+    /// Ordered artwork candidates for `kind`, best first, across the provider chain.
+    ///
+    /// Deliberately a **separate** entry point rather than a change to
+    /// ``sourcedArtworkURL(_:for:)``. That one stops at the first provider which
+    /// answers, and Home depends on it doing exactly that — widening it to gather
+    /// candidates would ask providers that would never otherwise have been called,
+    /// on the browse path, which is precisely the wrong place to spend a request.
+    ///
+    /// This one is for the detail page, which wants a *second* picture. It costs no
+    /// more than the single lookup did for the providers that matter: TMDb reads
+    /// all of a title's backdrops out of the one `/images` response it already
+    /// fetches, and any provider holding a single image falls back to the protocol
+    /// default, which is the same call as before. It also stops the moment it has
+    /// `limit`, so a chain is never walked further than it needs to be.
+    ///
+    /// Results are memoised for the process, so returning to a title is free.
+    public func sourcedArtworkURLs(
+        _ kind: ArtworkKind,
+        for query: MetadataQuery,
+        limit: Int = 2
+    ) async -> [SourcedValue<URL>] {
+        guard limit > 0 else { return [] }
+        let key = "\(query.cacheKey(for: kind))|candidates"
+        if let hit = heroCandidates[key] { return hit }
+
+        var found: [SourcedValue<URL>] = []
+        for provider in chain(for: query.contentType, kind: kind) {
+            let source = MetadataSource(rawValue: provider.id)
+            for url in await provider.artworkURLs(kind, for: query, limit: limit - found.count) {
+                guard !found.contains(where: { $0.value == url }) else { continue }
+                found.append(SourcedValue(value: url, source: source))
+                if found.count >= limit { break }
+            }
+            if found.count >= limit { break }
+        }
+        if heroCandidates.count >= Self.heroCandidatesCap { heroCandidates.removeAll(keepingCapacity: true) }
+        heroCandidates[key] = found
+        return found
+    }
+
     private func chain(for type: ContentType, kind: ArtworkKind) -> [any ArtworkProvider] {
         CurrentMetadataPriority.artworkSources(for: type, kind: kind).compactMap {
             provider(for: $0)

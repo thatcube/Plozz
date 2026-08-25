@@ -114,6 +114,24 @@ public struct TMDbMetadataProvider: ArtworkProvider {
             .compactMap { URL(string: "\(imageBase)/original\($0)") }
     }
 
+    /// Wide backdrops are the one kind this provider holds several of, and the
+    /// ranking already prefers **textless** art (`preferNeutral`) — a backdrop with
+    /// no language attached, i.e. no title burned into it, which is exactly what a
+    /// hero wants under its logo. Every other kind falls back to the protocol's
+    /// single answer.
+    public func artworkURLs(
+        _ kind: ArtworkKind,
+        for query: MetadataQuery,
+        limit: Int
+    ) async -> [URL] {
+        guard limit > 0 else { return [] }
+        guard kind == .hero else {
+            guard let url = await artworkURL(kind, for: query) else { return [] }
+            return [url]
+        }
+        return await backdropURLs(for: query, limit: limit)
+    }
+
     public func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
         guard access.isEnabled, query.contentType != .music else { return nil }
         switch kind {

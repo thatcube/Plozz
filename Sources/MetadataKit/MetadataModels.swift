@@ -213,4 +213,26 @@ public protocol ArtworkProvider: Sendable {
     /// Returns a URL for `kind` art matching `query`, or `nil` if this provider
     /// can't serve it. Must never throw — enrichment is always best-effort.
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL?
+    /// Ordered candidates for `kind`, best first, up to `limit`.
+    ///
+    /// A hero draws the show's logo over its backdrop, and the Home hero and the
+    /// detail page want *different* pictures — so a provider that holds several
+    /// needs a way to offer them. One answer per provider made that impossible:
+    /// both screens asked for `.hero`, got the same single URL, and the four
+    /// textless backdrops TMDb had already fetched were discarded one layer up.
+    ///
+    /// Defaults to the single answer ``artworkURL(_:for:)`` gives, so a provider
+    /// with only one picture needs no change and costs no extra request.
+    func artworkURLs(_ kind: ArtworkKind, for query: MetadataQuery, limit: Int) async -> [URL]
+}
+
+extension ArtworkProvider {
+    public func artworkURLs(
+        _ kind: ArtworkKind,
+        for query: MetadataQuery,
+        limit: Int
+    ) async -> [URL] {
+        guard limit > 0, let url = await artworkURL(kind, for: query) else { return [] }
+        return [url]
+    }
 }

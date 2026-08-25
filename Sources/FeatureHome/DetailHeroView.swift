@@ -1739,7 +1739,22 @@ struct DetailHeroView: View, Equatable {
         // when the server backdrop URLs fail, so titles with real backdrop art are
         // unaffected.
         return {
-            if let hero = await ArtworkRouter.shared.artworkURL(.hero, for: source) { return hero }
+            // Ask for TWO candidates and take the SECOND when it exists.
+            //
+            // Home resolves this same `.hero` chain and takes the first, so asking
+            // for one here handed both screens the identical picture no matter how
+            // many the provider had found — TMDb fetches every backdrop a title
+            // has in one response and all but the best were discarded a layer up.
+            // Taking the runner-up costs no extra request (same chain, same
+            // response) and is the whole difference between two screens showing
+            // one image and two.
+            //
+            // The ranking is textless-first, so the picture the detail page ends
+            // up with is a clean backdrop rather than one with the title burned
+            // into it — which is what the hero's own logo is for.
+            let candidates = await ArtworkRouter.shared.sourcedArtworkURLs(.hero, for: source, limit: 2)
+            if let distinct = candidates.dropFirst().first?.value { return distinct }
+            if let only = candidates.first?.value { return only }
             return source.posterURL
         }
     }

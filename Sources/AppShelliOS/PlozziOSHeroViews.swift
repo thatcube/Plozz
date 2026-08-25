@@ -1026,7 +1026,8 @@ struct PlozziOSHomeHeroForeground: View {
                 mode: .home,
                 hidesRatings: appModel.settings.spoilers.settings
                     .shouldHideRatings(for: item),
-                scheduleLine: scheduleLine
+                scheduleLine: scheduleLine,
+                logoFallback: PlozziOSHeroMetadata.tmdbLogoFallback(for: item)
             )
 
             // Keep the actions on a single row: try the full Play pill first, then
@@ -1323,7 +1324,8 @@ private struct PlozziOSDetailHeroForeground: View {
                     { perform(entry) }
                 },
                 subjectTitle: presentsEpisodeStill ? item.title : nil,
-                scheduleLine: scheduleLine
+                scheduleLine: scheduleLine,
+                logoFallback: PlozziOSHeroMetadata.tmdbLogoFallback(for: item)
             )
 
             // Progressive overflow: try every inline layout from "all buttons
@@ -2001,6 +2003,24 @@ private struct PlozziOSHeroMetadata: View {
     /// The air-schedule badge above the title ("New episode every Wednesday"), or
     /// `nil` when there is nothing truthful to say. Matches tvOS.
     var scheduleLine: LocalizedStringResource? = nil
+    /// Looks the title up for a logo when the provider has none of its own.
+    ///
+    /// tvOS has always had this on both its heroes; iOS never did, so a title
+    /// whose server carries no logo fell straight to the styled text — most
+    /// visibly on a discovery item, which comes from Seerr/TMDb and so has no
+    /// provider logo at all, while TMDb itself usually has one.
+    var logoFallback: (@Sendable () async -> URL?)? = nil
+
+    /// The same lookup tvOS's heroes use. Kinds that have no title art of their
+    /// own are excluded rather than searched for one that cannot exist.
+    static func tmdbLogoFallback(for item: MediaItem) -> (@Sendable () async -> URL?)? {
+        switch item.kind {
+        case .folder, .collection, .unknown:
+            return nil
+        default:
+            return { await ArtworkRouter.shared.artworkURL(.logo, for: item) }
+        }
+    }
 
     /// The artwork this hero is drawing, sampled so the logo's halo is decided by
     /// measured contrast rather than assumed. `nil` when there is no backdrop to
@@ -2053,6 +2073,7 @@ private struct PlozziOSHeroMetadata: View {
                 let logoBox = PlozziOSPageLayout.heroLogoBox(for: style)
                 HeroLogoArtwork(
                     references: presentation.logoReferences,
+                    asyncFallbackURL: logoFallback,
                     // Without this the analysis cannot prove a logo is safe and so
                     // keeps its halo on for EVERY title — which is why iOS drew a
                     // shadow behind logos that plainly did not need one while tvOS,

@@ -1592,7 +1592,20 @@ private struct PlozziOSHorizontalHeroDragGesture:
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer:
                 UIGestureRecognizer
         ) -> Bool {
-            true
+            // A scrolling ancestor is the one recognizer this must NOT share with.
+            //
+            // `gestureRecognizerShouldBegin` already refuses anything that is not
+            // decisively horizontal, but recognizing simultaneously meant the
+            // scroll view kept its own pan as well — so a swipe that had passed
+            // that test still scrolled the page under it by whatever vertical
+            // component the finger carried. Almost no real swipe is perfectly
+            // level, so this happened constantly.
+            //
+            // Excluding it makes the two mutually exclusive: a gesture this one
+            // has claimed is a page turn and nothing else. Every other recognizer
+            // still runs alongside, so taps and the system's edge gestures are
+            // unaffected.
+            !(otherGestureRecognizer.view is UIScrollView)
         }
     }
 }

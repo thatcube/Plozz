@@ -191,13 +191,13 @@ by any of the services below.
 <p align="center"><b>More open source from Brandon</b></p>
 
 <p align="center">
-  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="48" height="48" alt="Hozz" /></a>
+  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="48" alt="Hozz" /></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives — iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="48" height="48" alt="Mozz" /></a>
+  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives — iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="48" alt="Mozz" /></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="48" height="48" alt="Plozz" /></a>
+  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="48" alt="Plozz" /></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="48" height="48" alt="Twozz" /></a>
+  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="48" alt="Twozz" /></a>
 </p>
 
 <p align="center">

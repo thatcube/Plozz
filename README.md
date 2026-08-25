@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg" alt="Plozz logo" width="128" />
+  <img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" alt="Plozz logo" width="128" />
 </p>
 
 <h1 align="center">Plozz</h1>
@@ -187,16 +187,16 @@ by any of the services below.
 
 ---
 
-<p align="center"><b>More open source from Brandon</b></p>
+<p align="center"><b>More open source</b></p>
 
 <p align="center">
-  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Hozz</b></a>
+  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="32" align="middle" alt="Hozz" /></a>&nbsp;<a href="https://github.com/thatcube/hozz"><b>Hozz</b></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Mozz</b></a>
+  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="32" align="middle" alt="Mozz" /></a>&nbsp;<a href="https://github.com/thatcube/Mozz"><b>Mozz</b></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Plozz</b></a>
+  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="32" align="middle" alt="Plozz" /></a>&nbsp;<a href="https://github.com/thatcube/Plozz"><b>Plozz</b></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Twozz</b></a>
+  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="32" align="middle" alt="Twozz" /></a>&nbsp;<a href="https://github.com/thatcube/Twozz"><b>Twozz</b></a>
 </p>
 
 <p align="center">

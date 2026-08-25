@@ -1261,7 +1261,19 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             )
         }
         // One picture is not a choice — leave both heroes on the legacy ladder.
-        guard candidates.count >= 2 else { return [] }
+        guard candidates.count >= 2 else {
+            HeroArtDiagnostics.emitOnce(stage: "plex-pool", key: dto.ratingKey ?? "?") {
+                "plex pool=\(candidates.count) art=\(dto.art != nil) "
+                + "images=\((dto.Image ?? []).count) "
+                + "types=[\((dto.Image ?? []).compactMap(\.type).joined(separator: ","))] "
+                + "title=\(dto.title ?? "?") — NO SELECTION"
+            }
+            return []
+        }
+        HeroArtDiagnostics.emitOnce(stage: "plex-pool", key: dto.ratingKey ?? "?") {
+            "plex pool=\(candidates.count) art=\(dto.art != nil) "
+            + "images=\((dto.Image ?? []).count) title=\(dto.title ?? "?")"
+        }
         return HeroArtworkPlanner.selections(for: candidates)
     }
 

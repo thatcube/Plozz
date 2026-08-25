@@ -89,6 +89,13 @@ public enum HeroArtworkPlanner {
         guard let home = ranked.first else { return [] }
         let detail = detailPick(from: ranked, home: home) ?? home
 
+        HeroArtDiagnostics.emit(
+            "plan pool=\(ranked.count) "
+            + "home=\(HeroArtDiagnostics.brief(home.reference)) [\(home.origin.rawValue)/\(home.text)] "
+            + "detail=\(HeroArtDiagnostics.brief(detail.reference)) [\(detail.origin.rawValue)/\(detail.text)] "
+            + "different=\(home.reference != detail.reference)"
+        )
+
         return [
             ArtworkSelection(placement: .homeHero, references: ladder(from: ranked, leading: home)),
             ArtworkSelection(placement: .detailBackdrop, references: ladder(from: ranked, leading: detail))

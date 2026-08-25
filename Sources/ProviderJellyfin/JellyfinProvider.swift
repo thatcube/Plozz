@@ -1680,7 +1680,17 @@ public struct JellyfinProvider: MediaProvider {
         // One picture is not a choice — say nothing and leave both heroes on the
         // legacy ladder they already resolve, rather than restating it as an
         // explicit selection.
-        guard candidates.count >= 2 else { return [] }
+        guard candidates.count >= 2 else {
+            HeroArtDiagnostics.emitOnce(stage: "jf-pool", key: dto.Id) {
+                "jellyfin pool=\(candidates.count) backdropTags=\((dto.BackdropImageTags ?? []).count) "
+                + "thumb=\(dto.ImageTags?["Thumb"] != nil) title=\(dto.Name ?? "?") — NO SELECTION"
+            }
+            return []
+        }
+        HeroArtDiagnostics.emitOnce(stage: "jf-pool", key: dto.Id) {
+            "jellyfin pool=\(candidates.count) backdropTags=\((dto.BackdropImageTags ?? []).count) "
+            + "thumb=\(dto.ImageTags?["Thumb"] != nil) title=\(dto.Name ?? "?")"
+        }
         return HeroArtworkPlanner.selections(for: candidates)
     }
 

@@ -1124,14 +1124,21 @@ struct DetailHeroView: View, Equatable {
     /// dissolve mask. Rendered as a `.background` of the hero content so it can
     /// ignore the horizontal/top overscan safe area and span the screen edge to
     /// edge *without* inflating the hero's (and the scroll column's) layout width.
-    @ViewBuilder
     private func heroBackdrop() -> some View {
         // The shared `HeroBackdropLayer` (CoreUI) owns the exact scrim + dissolve
         // + full-bleed treatment, so the detail hero and the Home hero carousel
         // render an identical backdrop. Hero artwork is never spoiler-blurred;
         // episode spoiler masking remains limited to episode text and cards.
-        SeriesDetailHeroBackdrop(
-            references: backdrop.artworkReferences(for: .detailBackdrop),
+        let references = backdrop.artworkReferences(for: .detailBackdrop)
+        HeroArtDiagnostics.emitOnce(stage: "detail-draw", key: backdrop.id) {
+            "DETAIL \(backdrop.title) draws=\(HeroArtDiagnostics.brief(references.first)) "
+            + "ladder=[\(references.map(HeroArtDiagnostics.brief).joined(separator: " , "))] "
+            + "selections=\(backdrop.artworkSelections.map(\.placement.rawValue).joined(separator: ",")) "
+            + "legacyHero=\(HeroArtDiagnostics.brief(backdrop.heroBackdropURL)) "
+            + "legacyBackdrop=\(HeroArtDiagnostics.brief(backdrop.backdropURL))"
+        }
+        return SeriesDetailHeroBackdrop(
+            references: references,
             asyncFallbackURL: tmdbBackdropFallback,
             width: Self.screenWidth,
             height: Self.screenHeight * heroHeightFraction,

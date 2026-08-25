@@ -581,6 +581,7 @@ struct MainTabView: View {
             // Keeps person tracing alive across relaunches once it has been
             // asked for, so restoring the live stream never costs the repro.
             PersonDiagnostics.armLatchIfTracing()
+            HeroArtDiagnostics.armLatchIfTracing()
         }
         .onChange(of: homeScopeKey) { previous, current in
             // TEMPORARY. `homeScopeKey` is the `.id()` of BOTH tab subtrees, so

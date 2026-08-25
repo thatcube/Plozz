@@ -1183,11 +1183,22 @@ struct DetailHeroView: View, Equatable {
         let source = backdrop
         distinctBackdrop = nil
         guard source.kind != .episode else { return }
-        let candidates = await ArtworkRouter.shared.sourcedArtworkURLs(.hero, for: source, limit: 2)
+        let candidates = await ArtworkRouter.shared.sourcedArtworkURLs(.hero, for: source, limit: 4)
         // Only a genuinely different picture is worth a second appearance. When the
         // router has one image, the ladder already shows it.
         let onScreen = source.heroBackdropURL ?? source.backdropURL
-        guard let distinct = candidates.first(where: { $0.value != onScreen })?.value,
+        let usable = candidates.filter { $0.value != onScreen }
+        // Prefer a DIFFERENT SOURCE, then the furthest-ranked rather than the
+        // runner-up.
+        //
+        // A provider's candidates are ranked, and adjacent entries are usually the
+        // same shoot — often literally the same key art re-cropped, which reads as
+        // the picture shifting rather than changing. Reaching across sources, and
+        // failing that down the list, buys a visibly different image at no cost:
+        // they all arrived in the one response that was already fetched.
+        let homeSource = candidates.first?.source
+        let pick = usable.first(where: { $0.source != homeSource }) ?? usable.last
+        guard let distinct = pick?.value,
               distinct != onScreen,
               !Task.isCancelled,
               source.id == backdrop.id

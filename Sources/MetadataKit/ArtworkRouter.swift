@@ -184,6 +184,12 @@ public actor ArtworkRouter {
         var found: [SourcedValue<URL>] = []
         var asked: [String] = []
         for provider in chain(for: query.contentType, kind: kind) {
+            // Bounded on purpose. The single-answer path stops at the first
+            // provider that answers, and this must not turn one lookup into a walk
+            // of the whole chain on the detail path: once something has answered,
+            // at most one more provider is consulted. A title nobody can serve
+            // still costs exactly what it always did.
+            if !found.isEmpty && asked.count >= 2 { break }
             let source = MetadataSource(rawValue: provider.id)
             let offered = await provider.artworkURLs(kind, for: query, limit: limit - found.count)
             asked.append("\(provider.id):\(offered.count)")

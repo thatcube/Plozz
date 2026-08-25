@@ -13,6 +13,11 @@ struct PlozzApp: App {
             directory: nil
         )
         MainActor.assumeIsolated { MainThreadStallProbe.startIfRequested() }
+        // At process start, not behind any view. The hero-artwork trace latches so
+        // it survives a relaunch, and the switch that turns it back off therefore
+        // has to run somewhere that always runs — a tab-change hook does not, when
+        // the app opens on the profile picker and never reaches the tabs.
+        HeroArtDiagnostics.armLatchIfTracing()
     }
 
     var body: some Scene {

@@ -33,12 +33,24 @@ public enum HeroArtDiagnostics {
         }
     }()
 
-    /// Arms the latch for the NEXT launch, so a single `PLZHEROART=1` run keeps
-    /// recording without a `--console` relaunch (which would kill the app
-    /// mid-repro).
+    /// Applies the environment at a known point in startup.
+    ///
+    /// `1` arms the latch so tracing survives a relaunch; `0` clears it. Both are
+    /// done eagerly here rather than left to ``isEnabled``, which is a lazy `static
+    /// let` and is therefore only evaluated when something first tries to trace —
+    /// so a device left latched could not reliably be switched off, because the
+    /// switch lived inside the very thing that was not being touched.
     public static func armLatchIfTracing() {
-        guard ProcessInfo.processInfo.environment["PLZHEROART"] == "1" else { return }
-        startPersistentTrace()
+        switch ProcessInfo.processInfo.environment["PLZHEROART"] {
+        case "1":
+            startPersistentTrace()
+        case "0":
+            if let latchURL { try? FileManager.default.removeItem(at: latchURL) }
+        default:
+            break
+        }
+        // Pin the decision now, so it can't be read differently later in the run.
+        _ = isEnabled
     }
 
     private static var latchURL: URL? {

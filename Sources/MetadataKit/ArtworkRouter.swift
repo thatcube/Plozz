@@ -182,15 +182,23 @@ public actor ArtworkRouter {
         if let hit = heroCandidates[key] { return hit }
 
         var found: [SourcedValue<URL>] = []
+        var asked: [String] = []
         for provider in chain(for: query.contentType, kind: kind) {
             let source = MetadataSource(rawValue: provider.id)
-            for url in await provider.artworkURLs(kind, for: query, limit: limit - found.count) {
+            let offered = await provider.artworkURLs(kind, for: query, limit: limit - found.count)
+            asked.append("\(provider.id):\(offered.count)")
+            for url in offered {
                 guard !found.contains(where: { $0.value == url }) else { continue }
                 found.append(SourcedValue(value: url, source: source))
                 if found.count >= limit { break }
             }
             if found.count >= limit { break }
         }
+        HeroArtDiagnostics.emit(
+            "router candidates kind=\(kind) title=\(query.title) type=\(query.contentType) "
+            + "asked=[\(asked.joined(separator: " "))] got=\(found.count) "
+            + "urls=[\(found.map { HeroArtDiagnostics.brief($0.value) }.joined(separator: " , "))]"
+        )
         if heroCandidates.count >= Self.heroCandidatesCap { heroCandidates.removeAll(keepingCapacity: true) }
         heroCandidates[key] = found
         return found

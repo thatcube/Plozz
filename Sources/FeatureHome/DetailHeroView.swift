@@ -322,6 +322,16 @@ struct DetailHeroView: View, Equatable {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var presentationCache = HeroPresentationCache()
+    /// A backdrop for this page that is deliberately NOT the one Home is showing,
+    /// once the router has found one.
+    ///
+    /// Resolved into the ladder rather than left as `asyncFallbackURL`, because a
+    /// fallback only fires when the ladder FAILS — and the ladder now always has
+    /// the server's backdrop in it, so the distinct picture would never have been
+    /// reached. First paint still comes from the ladder and still costs no
+    /// request; this arrives after, and is memoised per process so returning to a
+    /// page shows it immediately with no second appearance.
+    @State private var distinctBackdrop: URL?
     /// Bumped when a watchlist press is accepted, purely to re-run `body`.
     ///
     /// `heroWatchlistAction` recomputes its add/remove state from
@@ -1129,10 +1139,21 @@ struct DetailHeroView: View, Equatable {
         // + full-bleed treatment, so the detail hero and the Home hero carousel
         // render an identical backdrop. Hero artwork is never spoiler-blurred;
         // episode spoiler masking remains limited to episode text and cards.
-        let references = backdrop.artworkReferences(for: .detailBackdrop)
-        HeroArtDiagnostics.emitOnce(stage: "detail-draw", key: backdrop.id) {
+        let ladder = backdrop.artworkReferences(for: .detailBackdrop)
+        // The distinct picture leads once it exists; the ladder is what draws
+        // instantly, and remains the fallback beneath it.
+        let references: [ArtworkReference] = {
+            guard let distinct = distinctBackdrop else { return ladder }
+            let lead = ArtworkReference.remote(distinct)
+            return [lead] + ladder.filter { $0 != lead }
+        }()
+        HeroArtDiagnostics.emitOnce(
+            stage: "detail-draw",
+            key: "\(backdrop.id)|\(distinctBackdrop?.absoluteString ?? "nil")"
+        ) {
             "DETAIL \(backdrop.title) draws=\(HeroArtDiagnostics.brief(references.first)) "
-            + "ladder=[\(references.map(HeroArtDiagnostics.brief).joined(separator: " , "))] "
+            + "distinct=\(HeroArtDiagnostics.brief(distinctBackdrop)) "
+            + "ladder=[\(ladder.map(HeroArtDiagnostics.brief).joined(separator: " , "))] "
             + "selections=\(backdrop.artworkSelections.map(\.placement.rawValue).joined(separator: ",")) "
             + "legacyHero=\(HeroArtDiagnostics.brief(backdrop.heroBackdropURL)) "
             + "legacyBackdrop=\(HeroArtDiagnostics.brief(backdrop.backdropURL))"
@@ -1149,6 +1170,29 @@ struct DetailHeroView: View, Equatable {
                 && heroTrailerController.isShowing((backdropItem ?? item).id)
                 && heroTrailerController.isPlaying
         )
+        .task(id: backdrop.id) { await resolveDistinctBackdrop() }
+    }
+
+    /// Asks the router for a backdrop that isn't the one Home drew.
+    ///
+    /// Runs off the first-paint path deliberately: the hero has already drawn from
+    /// the ladder by the time this starts, so a slow or empty answer costs the
+    /// viewer nothing. Clears first so a page reused for another title cannot show
+    /// the previous one's picture.
+    private func resolveDistinctBackdrop() async {
+        let source = backdrop
+        distinctBackdrop = nil
+        guard source.kind != .episode else { return }
+        let candidates = await ArtworkRouter.shared.sourcedArtworkURLs(.hero, for: source, limit: 2)
+        // Only a genuinely different picture is worth a second appearance. When the
+        // router has one image, the ladder already shows it.
+        let onScreen = source.heroBackdropURL ?? source.backdropURL
+        guard let distinct = candidates.first(where: { $0.value != onScreen })?.value,
+              distinct != onScreen,
+              !Task.isCancelled,
+              source.id == backdrop.id
+        else { return }
+        distinctBackdrop = distinct
     }
 
     /// The hero Play button. Extracted so the optional initial-focus binding can

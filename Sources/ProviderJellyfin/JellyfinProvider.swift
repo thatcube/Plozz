@@ -1456,7 +1456,7 @@ public struct JellyfinProvider: MediaProvider {
             logoURL: Self.logoURL(for: dto, client: client),
             ratings: Self.ratings(from: dto),
             providerIDs: dto.ProviderIds ?? [:],
-            artworkSelections: Self.detailBackdropSelection(for: dto, client: client),
+            artworkSelections: Self.heroArtworkSelections(for: dto, client: client),
             mediaInfo: Self.sourceMetadata(
                 container: dto.MediaSources?.first?.Container,
                 streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? [],
@@ -1632,33 +1632,56 @@ public struct JellyfinProvider: MediaProvider {
         }
     }
 
-    /// A *second, distinct* backdrop for the detail page, when the server holds
-    /// one.
+    /// This title's wide artwork, ranked and split between the two hero screens.
     ///
-    /// `BackdropImageTags` is an array — most movies and series carry several —
-    /// but every URL this provider built pointed at index 0, so Home and the
-    /// detail page drew the identical picture for the same title. The enrichment
-    /// layer has always intended otherwise (`MetadataEnrichment.detailBackdrop`
-    /// takes the second candidate), but that path only fills an item with *no*
-    /// artwork at all, which a server-backed item never is.
+    /// `BackdropImageTags` is an array — most movies and series carry several — but
+    /// every URL this provider built pointed at index 0, so Home and the detail page
+    /// drew the identical picture. Note that a *listing* asks the server for one tag
+    /// per image type (`ImageTypeLimit=1`, which keeps a grid's payload small), so a
+    /// card-level item legitimately has a pool of one; the single-item detail fetch
+    /// raises the limit and is where the second picture actually comes from.
     ///
-    /// Returns nothing when the server has only one backdrop, leaving the detail
-    /// page on its usual ladder rather than inventing a difference that isn't
-    /// there. Home is untouched either way: it keeps reading index 0 through the
-    /// legacy `heroBackdropURL`.
-    private static func detailBackdropSelection(
+    /// The item's `Thumb` joins the pool last. It is landscape and is a genuinely
+    /// different frame, but it is a promo still rather than a chosen backdrop, so it
+    /// is only ever reached by a title that has no second backdrop at all.
+    ///
+    /// Ranking and the home/detail split are ``HeroArtworkPlanner``'s, shared with
+    /// Plex and the share so a title behaves the same way on every backend.
+    private static func heroArtworkSelections(
         for dto: BaseItemDto,
         client: JellyfinClient
     ) -> [ArtworkSelection] {
-        guard let tags = dto.BackdropImageTags, tags.count >= 2 else { return [] }
-        guard let url = client.imageURL(
-            itemID: dto.Id,
-            kind: .backdrop,
-            maxWidth: 3840,
-            tag: tags[1],
-            index: 1
-        ) else { return [] }
-        return [ArtworkSelection(placement: .detailBackdrop, references: [.remote(url)])]
+        var candidates: [HeroArtworkCandidate] = []
+        for (index, tag) in (dto.BackdropImageTags ?? []).enumerated() {
+            guard let url = client.imageURL(
+                itemID: dto.Id,
+                kind: .backdrop,
+                maxWidth: 3840,
+                tag: tag,
+                index: index
+            ) else { continue }
+            candidates.append(
+                HeroArtworkCandidate(
+                    reference: .remote(url),
+                    origin: .server,
+                    // Nothing has looked at the pixels, and the server does not say.
+                    text: .unknown,
+                    // The server's own order is its preference, so keep it.
+                    score: -Double(index)
+                )
+            )
+        }
+        if let thumb = dto.ImageTags?["Thumb"],
+           let url = client.imageURL(itemID: dto.Id, kind: .thumb, maxWidth: 3840, tag: thumb) {
+            candidates.append(
+                HeroArtworkCandidate(reference: .remote(url), origin: .server, text: .unknown, score: -1000)
+            )
+        }
+        // One picture is not a choice — say nothing and leave both heroes on the
+        // legacy ladder they already resolve, rather than restating it as an
+        // explicit selection.
+        guard candidates.count >= 2 else { return [] }
+        return HeroArtworkPlanner.selections(for: candidates)
     }
 
     /// Builds an *item-owned* image URL only when the DTO actually advertises

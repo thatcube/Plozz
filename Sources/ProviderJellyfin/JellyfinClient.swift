@@ -365,7 +365,19 @@ public struct JellyfinClient: Sendable {
     func item(userID: String, id: String) async throws -> BaseItemDto {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,MediaStreams,MediaSources,ProviderIds,Trickplay,Chapters,Genres,People,Studios,Tags,Taglines")],
+            queryItems: [
+                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,MediaStreams,MediaSources,ProviderIds,Trickplay,Chapters,Genres,People,Studios,Tags,Taglines"),
+                // Ask for the title's *other* backdrops, so the detail page has a
+                // second picture to show and isn't reduced to repeating Home's.
+                //
+                // Deliberately only here. `ImageTypeLimit` caps tags per image type
+                // across the whole response, so raising it on a listing would grow
+                // every card's payload in a grid that shows one image each. This is
+                // a single item the viewer has opened, so the extra tags are a few
+                // dozen bytes on a request that is already fetching chapters,
+                // people and media sources.
+                URLQueryItem(name: "ImageTypeLimit", value: "4")
+            ],
             headers: authHeaders
         )
         let result = try await interactiveHTTP.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)

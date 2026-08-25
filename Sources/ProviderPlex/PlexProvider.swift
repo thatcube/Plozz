@@ -1203,6 +1203,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             logoURL: logoURL(from: dto),
             ratings: Self.ratings(from: dto),
             providerIDs: Self.providerIDs(from: dto),
+            artworkSelections: heroArtworkSelections(from: dto),
             mediaInfo: Self.sourceMetadata(from: dto),
             libraryID: dto.librarySectionID.map(String.init),
             versions: Self.versions(from: dto.Media, edition: dto.editionTitle),
@@ -1226,6 +1227,52 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             return URL(string: path)
         }
         return client.imageURL(path: path, maxWidth: nil)
+    }
+
+    /// This title's wide artwork, ranked and split between the two hero screens.
+    ///
+    /// Plex's `art` is one picture, and it was feeding both heroes — the same image
+    /// twice for every title. The metadata response *also* carries an `Image` array
+    /// (already decoded here for `clearLogo`) whose `background` entries are the
+    /// other art Plex holds for the title, so a second picture costs nothing: no
+    /// extra request, no extra round trip, it is already in hand.
+    ///
+    /// `art` leads, because it is the one Plex itself chose. Ranking and the
+    /// home/detail split are ``HeroArtworkPlanner``'s, shared with Jellyfin/Emby and
+    /// the share so a title behaves the same way on every backend.
+    private func heroArtworkSelections(from dto: PlexMetadata) -> [ArtworkSelection] {
+        var candidates: [HeroArtworkCandidate] = []
+        if let art = client.imageURL(path: dto.art, maxWidth: 3840) {
+            candidates.append(
+                HeroArtworkCandidate(reference: .remote(art), origin: .server, text: .unknown, score: 0)
+            )
+        }
+        for (index, entry) in (dto.Image ?? []).enumerated()
+        where entry.type?.lowercased() == "background" {
+            guard let url = backgroundURL(entry) else { continue }
+            candidates.append(
+                HeroArtworkCandidate(
+                    reference: .remote(url),
+                    origin: .server,
+                    text: .unknown,
+                    // Behind `art`, and in the order Plex listed them.
+                    score: -Double(index + 1)
+                )
+            )
+        }
+        // One picture is not a choice — leave both heroes on the legacy ladder.
+        guard candidates.count >= 2 else { return [] }
+        return HeroArtworkPlanner.selections(for: candidates)
+    }
+
+    /// An `Image` entry's URL, handling the absolute-vs-server-path split the same
+    /// way the logo and person headshots do.
+    private func backgroundURL(_ entry: PlexImage) -> URL? {
+        guard let path = entry.url, !path.isEmpty else { return nil }
+        if path.hasPrefix("http://") || path.hasPrefix("https://") {
+            return URL(string: path)
+        }
+        return client.imageURL(path: path, maxWidth: 3840)
     }
 
     /// Maps Plex's `<Role>` (cast) plus `<Director>`/`<Writer>` (crew) elements

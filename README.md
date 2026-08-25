@@ -57,8 +57,7 @@
 ## What it is
 
 Plozz plays the movies, shows, and music on **your** server, on your Apple TV,
-iPhone, and iPad. It is free, open source, and finished — there's no paywall, no
-subscription, no account to make, no ads, and no upsell hiding behind a feature.
+iPhone, and iPad. It's free and open source.
 
 It talks to Jellyfin, Plex, and Emby, and it can read a plain network share
 directly if you don't run a server at all. Connect more than one and Plozz
@@ -191,17 +190,13 @@ by any of the services below.
 <p align="center"><b>More open source from Brandon</b></p>
 
 <p align="center">
-  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="48" alt="Hozz" /></a>
+  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Hozz</b></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives — iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="48" alt="Mozz" /></a>
+  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Mozz</b></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="48" alt="Plozz" /></a>
+  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Plozz</b></a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="48" alt="Twozz" /></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/thatcube/hozz"><b>Hozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Mozz"><b>Mozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Plozz"><b>Plozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Twozz"><b>Twozz</b></a>
+  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="32" align="middle" alt="" />&nbsp;<b>Twozz</b></a>
 </p>
 
 <p align="center">

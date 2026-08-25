@@ -104,11 +104,7 @@ final class HeroForegroundUIView: UIView {
     private let dotSpacing: CGFloat = 12
     /// Narrower cinematic text column (was 576; trimmed 80pt for a tighter column).
     private let contentMaxWidth: CGFloat = 496
-    /// Cap the logo to the same width as the description text column, so a wide
-    /// wordmark spans the full text width rather than a narrower box.
-    private let logoMaxWidth: CGFloat = 496
-    /// Nominal wordmark height; `HeroLogoFit` may exceed it for a tall logo.
-    private let logoMaxHeight: CGFloat = 160
+    // The wordmark's own box is shared with the detail hero — see `HeroLogoLayout`.
     private let dotsGlassHPad: CGFloat = 0
     private let dotsGlassVPad: CGFloat = 0
     private let bottomMargin: CGFloat = 24
@@ -626,8 +622,8 @@ final class HeroForegroundUIView: UIView {
 
         var logoTop = y
         if !logoImageView.isHidden, let image = logoImageView.image, image.size.width > 0 {
-            // Shared with the detail hero's `HeroLogoArtwork`, so one show's
-            // wordmark carries the same weight on both screens — and so a tall or
+            // Shared with the detail hero via `HeroLogoLayout`, so one show's
+            // wordmark is drawn at the same size on both screens — and so a tall or
             // very wide logo isn't shrunk for its shape.
             //
             // The box is PINNED to the text column: `HeroLogoFit` flexes a wide
@@ -639,11 +635,7 @@ final class HeroForegroundUIView: UIView {
             // The frame is the ACTUAL fitted image, not the slot: `.scaleAspectFit`
             // centres within its frame, so a frame wider than the drawn image would
             // push a tall/narrow wordmark right instead of leaving it left-aligned.
-            let column = min(maxWidth, logoMaxWidth)
-            let box = HeroLogoFit.pinnedBox(
-                budget: CGSize(width: column, height: logoMaxHeight),
-                drawnWidth: column
-            )
+            let box = HeroLogoLayout.box(fitting: maxWidth)
             let fitted = HeroLogoFit.fittedSize(
                 for: image.size,
                 maxWidth: box.width,

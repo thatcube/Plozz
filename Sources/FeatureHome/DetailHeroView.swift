@@ -368,27 +368,12 @@ struct DetailHeroView: View, Equatable {
     /// tone flips — so legibility stays consistent between appearances.
     private var scrimTone: Color { colorScheme == .dark ? .black : .white }
 
-    private var heroLogoHeight: CGFloat { 200 }
-    /// Width cap for the hero logo, sized to the hero's text column so the wordmark
-    /// never runs wider than the overview beneath it.
-    private var heroLogoWidth: CGFloat { 620 }
-
-    /// The nominal box handed to `HeroLogoArtwork`, with the wordmark's *drawn*
-    /// width pinned to the text column above.
+    /// The nominal box handed to `HeroLogoArtwork`.
     ///
-    /// ``heroLogoWidth`` was only ever a budget: `HeroLogoFit` flexes a wide shape
-    /// past it, so the "never wider than the overview" cap above was being drawn a
-    /// quarter wider than the overview. Pinning it also evens the hero out, since
-    /// every wordmark wide enough to reach the column is now drawn at the same
-    /// width instead of at whatever its aspect ratio happened to earn. The width
-    /// the pin takes comes back as height, so no logo shrinks — see
-    /// ``HeroLogoFit/pinnedBox(budget:drawnWidth:maxHeight:)``.
-    private var heroLogoBox: CGSize {
-        HeroLogoFit.pinnedBox(
-            budget: CGSize(width: heroLogoWidth, height: heroLogoHeight),
-            drawnWidth: heroLogoWidth
-        )
-    }
+    /// Shared with Home rather than derived from this page's own 620pt text
+    /// column, so the same show's wordmark is drawn at the same size on both
+    /// screens — see ``HeroLogoLayout``.
+    private var heroLogoBox: CGSize { HeroLogoLayout.box }
 
     // MARK: - Visible item actions (discoverability)
 

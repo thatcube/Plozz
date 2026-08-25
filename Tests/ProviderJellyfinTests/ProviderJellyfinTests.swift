@@ -326,6 +326,76 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "http://host:8096/Items/i1/Images/Primary?maxWidth=400")
     }
 
+    /// The first backdrop keeps the bare path it has always used, so every URL
+    /// already built — and anything cached under it — stays byte-identical.
+    func testFirstBackdropKeepsTheBarePath() async throws {
+        let items = try await backdropItems(tags: #"["tagA","tagB"]"#)
+        let home = items[0].artworkReferences(for: .homeHero)
+        guard case .remote(let url)? = home.first else {
+            return XCTFail("expected a home hero backdrop, got \(home)")
+        }
+        XCTAssertEqual(url.path, "/Items/m1/Images/Backdrop", "index 0 must not gain a path segment")
+    }
+
+    /// The second backdrop is addressed by INDEX in the path. `tag` alone does not
+    /// select it — the server reads the tag for cache validation and still returns
+    /// index 0, which is how both screens ended up drawing the same picture.
+    func testSecondBackdropIsAddressedByIndexInThePath() async throws {
+        let items = try await backdropItems(tags: #"["tagA","tagB"]"#)
+        let detail = items[0].artworkReferences(for: .detailBackdrop)
+        guard case .remote(let url)? = detail.first else {
+            return XCTFail("expected a distinct detail backdrop, got \(detail)")
+        }
+        XCTAssertEqual(url.path, "/Items/m1/Images/Backdrop/1")
+        XCTAssertTrue(url.absoluteString.contains("tag=tagB"), "got \(url)")
+    }
+
+    /// The whole point: the two screens no longer resolve to the same image.
+    func testHomeAndDetailResolveToDifferentBackdrops() async throws {
+        let items = try await backdropItems(tags: #"["tagA","tagB"]"#)
+        let home = items[0].artworkReferences(for: .homeHero).first
+        let detail = items[0].artworkReferences(for: .detailBackdrop).first
+        XCTAssertNotNil(home)
+        XCTAssertNotNil(detail)
+        XCTAssertNotEqual(home, detail)
+    }
+
+    /// One backdrop means there is no second image to show. The detail page falls
+    /// back to the shared one rather than being given an index that would 404.
+    func testASingleBackdropAddsNoDetailSelection() async throws {
+        let items = try await backdropItems(tags: #"["tagA"]"#)
+        XCTAssertTrue(
+            items[0].artworkSelections.isEmpty,
+            "a lone backdrop must not manufacture a second one"
+        )
+        let detail = items[0].artworkReferences(for: .detailBackdrop).first
+        guard case .remote(let url)? = detail else {
+            return XCTFail("expected the legacy backdrop, got \(String(describing: detail))")
+        }
+        XCTAssertEqual(url.path, "/Items/m1/Images/Backdrop")
+    }
+
+    /// An item with no backdrops at all is unaffected.
+    func testNoBackdropsAddsNoDetailSelection() async throws {
+        let items = try await backdropItems(tags: "[]")
+        XCTAssertTrue(items[0].artworkSelections.isEmpty)
+    }
+
+    private func backdropItems(tags: String) async throws -> [MediaItem] {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[
+          {"Id":"m1","Name":"Alien","Type":"Movie","BackdropImageTags":\(tags)}
+        ],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+        return try await provider.items(
+            in: "lib1",
+            kind: .movie,
+            page: PageRequest(startIndex: 0, limit: 60)
+        ).items
+    }
+
     func testItemsPageMapsItemsAndTotalCount() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items", json: """

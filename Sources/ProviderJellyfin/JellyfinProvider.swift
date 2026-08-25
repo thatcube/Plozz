@@ -1456,6 +1456,7 @@ public struct JellyfinProvider: MediaProvider {
             logoURL: Self.logoURL(for: dto, client: client),
             ratings: Self.ratings(from: dto),
             providerIDs: dto.ProviderIds ?? [:],
+            artworkSelections: Self.detailBackdropSelection(for: dto, client: client),
             mediaInfo: Self.sourceMetadata(
                 container: dto.MediaSources?.first?.Container,
                 streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? [],
@@ -1629,6 +1630,35 @@ public struct JellyfinProvider: MediaProvider {
                 imageURL: imageURL
             )
         }
+    }
+
+    /// A *second, distinct* backdrop for the detail page, when the server holds
+    /// one.
+    ///
+    /// `BackdropImageTags` is an array — most movies and series carry several —
+    /// but every URL this provider built pointed at index 0, so Home and the
+    /// detail page drew the identical picture for the same title. The enrichment
+    /// layer has always intended otherwise (`MetadataEnrichment.detailBackdrop`
+    /// takes the second candidate), but that path only fills an item with *no*
+    /// artwork at all, which a server-backed item never is.
+    ///
+    /// Returns nothing when the server has only one backdrop, leaving the detail
+    /// page on its usual ladder rather than inventing a difference that isn't
+    /// there. Home is untouched either way: it keeps reading index 0 through the
+    /// legacy `heroBackdropURL`.
+    private static func detailBackdropSelection(
+        for dto: BaseItemDto,
+        client: JellyfinClient
+    ) -> [ArtworkSelection] {
+        guard let tags = dto.BackdropImageTags, tags.count >= 2 else { return [] }
+        guard let url = client.imageURL(
+            itemID: dto.Id,
+            kind: .backdrop,
+            maxWidth: 3840,
+            tag: tags[1],
+            index: 1
+        ) else { return [] }
+        return [ArtworkSelection(placement: .detailBackdrop, references: [.remote(url)])]
     }
 
     /// Builds an *item-owned* image URL only when the DTO actually advertises

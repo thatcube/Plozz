@@ -952,7 +952,7 @@ public struct JellyfinClient: Sendable {
     /// what busts client-side image caches when art is replaced server-side —
     /// without it, replaced art keeps showing the stale cached copy because the
     /// tag-less URL never changes.
-    func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?, tag: String? = nil) -> URL? {
+    func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?, tag: String? = nil, index: Int? = nil) -> URL? {
         let typeSegment: String
         switch kind {
         case .primary: typeSegment = "Primary"
@@ -963,6 +963,15 @@ public struct JellyfinClient: Sendable {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
         let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
         components.path = basePath + "/Items/\(itemID)/Images/\(typeSegment)"
+        // Only `Backdrop` holds more than one image, and the *index* is what
+        // selects between them — it belongs in the path, not the query. `tag`
+        // alone does not: the server reads it for cache validation and still
+        // serves index 0, so a second backdrop requested by tag came back as the
+        // first one. Index 0 keeps the bare path it has always used, so every
+        // existing URL (and anything cached under it) is byte-identical.
+        if let index, index > 0 {
+            components.path += "/\(index)"
+        }
         var query: [URLQueryItem] = []
         if let maxWidth {
             query.append(URLQueryItem(name: "maxWidth", value: String(maxWidth)))

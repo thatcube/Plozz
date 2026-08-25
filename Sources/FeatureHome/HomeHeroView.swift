@@ -227,22 +227,13 @@ struct HomeHeroView: View {
     /// its default cap). Varies per slide as the button set changes.
     @State private var actionButtonsWidth: CGFloat = 0
 
-    /// The nominal box handed to `HeroLogoArtwork`, with the wordmark's *drawn*
-    /// width pinned to the action-button row.
+    /// The nominal box handed to `HeroLogoArtwork`.
     ///
-    /// The width cap was only ever a budget — `HeroLogoFit` flexes a wide shape a
-    /// quarter past it — so the wordmark this hero promises to hold to the button
-    /// row was overrunning it. Pinning also evens the hero out: every logo wide
-    /// enough to reach the row is drawn at the same width rather than at whatever
-    /// its aspect ratio earned. The width the pin takes comes back as height, so
-    /// no logo shrinks — see ``HeroLogoFit/pinnedBox(budget:drawnWidth:maxHeight:)``.
-    private var heroLogoBox: CGSize {
-        let column = actionButtonsWidth > 0 ? actionButtonsWidth : 620
-        return HeroLogoFit.pinnedBox(
-            budget: CGSize(width: column, height: 200),
-            drawnWidth: column
-        )
-    }
+    /// A fixed shared box rather than the measured button-row width: the pill set
+    /// changes from slide to slide, so sizing the wordmark against it made the
+    /// same logo a different size on different slides, and made it a different
+    /// size again on the detail page. See ``HeroLogoLayout``.
+    private var heroLogoBox: CGSize { HeroLogoLayout.box }
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
@@ -968,14 +959,10 @@ struct HomeHeroView: View {
                     references: item.artworkReferences(for: .logo),
                     asyncFallbackURL: logoFallback(for: item),
                     backgroundSample: backgroundSample(for: item),
-                    // Cap the logo image to the action-button row width (measured
-                    // below) so it never runs wider than the buttons beneath it —
-                    // matching the title/overview. Falls back to the component's
-                    // default until first measured.
-                    //
-                    // Pinned rather than nominal: `HeroLogoFit` flexes a wide shape
-                    // past its box, so this cap was being drawn a quarter wider than
-                    // the buttons it names. See ``heroLogoBox``.
+                    // The logo is sized from a shared hero box, not from this
+                    // hero's own button row — the pill set changes per slide, and
+                    // the detail page's column is wider again. See
+                    // ``HeroLogoLayout``.
                     maxWidth: heroLogoBox.width,
                     maxHeight: heroLogoBox.height,
                     // The parent keeps metadata hidden for 280ms during a wipe. A

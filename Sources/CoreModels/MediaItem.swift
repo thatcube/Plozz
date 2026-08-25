@@ -626,20 +626,28 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case .homeHero:
             return [heroBackdropURL, backdropURL, fallbackArtworkURL].compactMap { $0 }
         case .detailBackdrop:
-            // No poster last resort here.
+            // The parent backdrop is the last rung, and only when it isn't the
+            // poster.
             //
-            // A discovery title opened from a cast or Related card arrives with a
-            // poster and nothing else, so this ladder painted the poster full-bleed
-            // and then swapped it for the real backdrop the moment enrichment
-            // landed — the background visibly changing a second after arriving, on
-            // every such page. A portrait poster stretched behind a landscape hero
-            // was never the image we wanted anyway; it was a placeholder that
-            // outstayed its welcome by being indistinguishable from the real thing.
+            // Previously this ladder stopped at the item's own two URLs, which for
+            // an episode-seeded series page is nothing at all: a Jellyfin episode
+            // carries Primary/Thumb, not backdrops. The hero therefore opened EMPTY
+            // and waited on an asynchronous router lookup before it could draw
+            // anything — the blank hero, and a good part of why opening a show
+            // feels slow. `fallbackArtworkURL` already holds exactly the right
+            // picture for that moment: the owning series' landscape backdrop
+            // (Jellyfin resolves it through `SeriesId`, Plex through the parent's
+            // `art`), and it is already in hand, so first paint costs no request.
             //
-            // The layer's async fallback still resolves a genuine backdrop, so the
-            // page goes from its scrim straight to the right image — one appearance
-            // instead of a replacement.
-            return [heroBackdropURL, backdropURL].compactMap { $0 }
+            // The exclusion it replaces was aimed at a real regression, and that
+            // aim is kept: a discovery title opened from a cast or Related card can
+            // arrive with a poster and nothing else, and painting a portrait poster
+            // full-bleed — then swapping it for the real backdrop the moment
+            // enrichment lands — looked like a bug on every such page. Comparing
+            // against `posterURL` excludes precisely that case and nothing else,
+            // rather than throwing away every parent backdrop to be rid of it.
+            let parent = fallbackArtworkURL == posterURL ? nil : fallbackArtworkURL
+            return [heroBackdropURL, backdropURL, parent].compactMap { $0 }
         case .poster:
             return [posterURL, fallbackArtworkURL].compactMap { $0 }
         case .seriesPoster:

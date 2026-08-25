@@ -157,3 +157,64 @@ final class HeroArtworkPlannerTests: XCTestCase {
         XCTAssertEqual(detail, [ref("b"), ref("a"), ref("c")])
     }
 }
+
+/// Coverage for the detail hero's legacy ladder.
+///
+/// An episode-seeded series page (opening a show from Continue Watching, or from
+/// "Go to Show") had NO artwork to draw: a Jellyfin episode carries Primary/Thumb
+/// rather than backdrops, and the ladder stopped at the item's own two URLs. The
+/// hero opened empty and waited on an asynchronous lookup — measured in a device
+/// trace as `ladder=[] legacyHero=nil legacyBackdrop=nil` on every series page.
+final class DetailBackdropLadderTests: XCTestCase {
+
+    private let poster = URL(string: "https://art.example/poster.jpg")!
+    private let seriesArt = URL(string: "https://art.example/series-backdrop.jpg")!
+
+    private func item(
+        poster: URL? = nil,
+        backdrop: URL? = nil,
+        hero: URL? = nil,
+        fallback: URL? = nil
+    ) -> MediaItem {
+        MediaItem(
+            id: "i1",
+            title: "Show",
+            kind: .episode,
+            posterURL: poster,
+            backdropURL: backdrop,
+            heroBackdropURL: hero,
+            fallbackArtworkURL: fallback
+        )
+    }
+
+    /// The regression this fixes: something real to draw at first paint.
+    func testAnEpisodeWithOnlyParentArtStillHasABackdropToDraw() {
+        let refs = item(poster: poster, fallback: seriesArt)
+            .artworkReferences(for: .detailBackdrop)
+        XCTAssertEqual(refs, [.remote(seriesArt)])
+    }
+
+    /// The parent backdrop is a LAST resort — it must never outrank the item's own.
+    func testTheItemsOwnBackdropsStillComeFirst() {
+        let own = URL(string: "https://art.example/own.jpg")!
+        let refs = item(backdrop: own, fallback: seriesArt)
+            .artworkReferences(for: .detailBackdrop)
+        XCTAssertEqual(refs, [.remote(own), .remote(seriesArt)])
+    }
+
+    /// The exclusion this replaces is preserved exactly: a discovery title that
+    /// arrives with a poster and nothing else must not paint that poster
+    /// full-bleed behind a landscape hero.
+    func testAPosterIsStillNeverUsedAsABackdrop() {
+        let refs = item(poster: poster, fallback: poster)
+            .artworkReferences(for: .detailBackdrop)
+        XCTAssertTrue(refs.isEmpty, "a poster must not be stretched behind the hero")
+    }
+
+    /// Home already used the parent backdrop and must be unchanged by this.
+    func testHomeHeroLadderIsUnchanged() {
+        let refs = item(poster: poster, fallback: seriesArt)
+            .artworkReferences(for: .homeHero)
+        XCTAssertEqual(refs, [.remote(seriesArt)])
+    }
+}

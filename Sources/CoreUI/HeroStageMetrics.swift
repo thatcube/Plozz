@@ -38,6 +38,52 @@ public enum HeroStageMetrics {
     /// container) doesn't produce a hero the length of a page.
     public static let portraitHomeMaximumHeight: CGFloat = 900
 
+    /// The least of the window the hero must always leave below itself.
+    ///
+    /// A hard floor, and about reachability rather than looks. The hero pins its
+    /// action row to its own bottom, so a hero taller than the window puts Play,
+    /// Watchlist and Info underneath the floating tab bar — or past the bottom of
+    /// the screen entirely. That is exactly what an accessibility Dynamic Type
+    /// size did on an iPhone SE (3rd generation), where the 160pt text allowance
+    /// took a 520pt hero to 680pt inside a 667pt window.
+    ///
+    /// Enough for a row heading and a hint of the card under it, which is also
+    /// the smallest peek that still reads as "there is more below".
+    public static let minimumPeek: CGFloat = 96
+
+    /// Hero height for a given window.
+    ///
+    /// - Parameters:
+    ///   - windowHeight: the whole window, not the safe area — the hero runs
+    ///     full-bleed under the status bar, and the peek is measured against the
+    ///     bottom of the screen. `nil` before the window has been measured.
+    ///   - fallback: height to use until then.
+    ///   - accessibilityExtra: height added for an accessibility Dynamic Type
+    ///     size. Added *after* the proportional clamp, because that ceiling is
+    ///     there to stop the hero dominating a large screen rather than to
+    ///     withhold room that text needs — but still subject to
+    ///     ``minimumPeek``, because room for text is not worth an action button
+    ///     the viewer cannot reach.
+    public static func portraitHomeHeight(
+        windowHeight: CGFloat?,
+        fallback: CGFloat,
+        accessibilityExtra: CGFloat = 0
+    ) -> CGFloat {
+        guard let windowHeight, windowHeight > 0 else {
+            return fallback + accessibilityExtra
+        }
+        let share = windowHeight * portraitHomeHeightShare
+        let clamped = min(
+            max(share, portraitHomeMinimumHeight),
+            portraitHomeMaximumHeight
+        )
+        // Never taller than the window less its peek — but never shorter than
+        // the proportional height either, so an absurdly short container can't
+        // invert the two and collapse the hero.
+        let ceiling = max(windowHeight - minimumPeek, clamped)
+        return min(clamped + accessibilityExtra, ceiling)
+    }
+
     /// Width ÷ height of the hero's picture band — the shape the artwork is
     /// cropped into before the mirror takes over.
     ///
@@ -57,32 +103,6 @@ public enum HeroStageMetrics {
     /// reflection grow to a third of the screen, which stops reading as a
     /// reflection and starts reading as a second, upside-down picture.
     public static let maximumReflectionShare: CGFloat = 0.24
-
-    /// Hero height for a given window.
-    ///
-    /// - Parameters:
-    ///   - windowHeight: the whole window, not the safe area — the hero runs
-    ///     full-bleed under the status bar, and the peek is measured against the
-    ///     bottom of the screen. `nil` before the window has been measured.
-    ///   - fallback: height to use until then.
-    ///   - accessibilityExtra: height added for an accessibility Dynamic Type
-    ///     size. Added *after* the clamp: the ceiling exists to stop the hero
-    ///     dominating a large screen, not to withhold room that text needs.
-    public static func portraitHomeHeight(
-        windowHeight: CGFloat?,
-        fallback: CGFloat,
-        accessibilityExtra: CGFloat = 0
-    ) -> CGFloat {
-        guard let windowHeight, windowHeight > 0 else {
-            return fallback + accessibilityExtra
-        }
-        let share = windowHeight * portraitHomeHeightShare
-        let clamped = min(
-            max(share, portraitHomeMinimumHeight),
-            portraitHomeMaximumHeight
-        )
-        return clamped + accessibilityExtra
-    }
 
     /// The picture / mirror split for a hero stage of this size.
     public static func geometry(

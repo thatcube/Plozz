@@ -59,6 +59,45 @@ final class HeroStageMetricsTests: XCTestCase {
         )
     }
 
+    /// The regression this exists for.
+    ///
+    /// The hero pins its action row to its own bottom, so a hero taller than the
+    /// window puts Play, Watchlist and Info under the floating tab bar or off the
+    /// screen. An accessibility Dynamic Type size did exactly that on an iPhone
+    /// SE (3rd generation): a 520pt hero plus the 160pt text allowance is 680pt
+    /// inside a 667pt window. Room for text is not worth an unreachable button.
+    func testAccessibilityTextNeverPushesTheHeroPastTheWindow() {
+        for window in windowHeights + [667] {
+            let hero = height(window: window, accessibilityExtra: 160)
+            XCTAssertLessThanOrEqual(
+                hero,
+                window - HeroStageMetrics.minimumPeek + 0.001,
+                "window \(window)"
+            )
+        }
+    }
+
+    /// Capping it must not claw back the ordinary height — accessibility text
+    /// should still get more room than the default wherever the screen allows.
+    func testAccessibilityTextStillGetsExtraRoomWhereItFits() {
+        for window in windowHeights + [667] {
+            XCTAssertGreaterThanOrEqual(
+                height(window: window, accessibilityExtra: 160),
+                height(window: window),
+                "window \(window)"
+            )
+        }
+    }
+
+    /// The peek guarantee must not be able to invert the proportional height and
+    /// collapse the hero on an absurdly short container.
+    func testPeekGuaranteeNeverCollapsesTheHero() {
+        XCTAssertEqual(
+            height(window: 120),
+            HeroStageMetrics.portraitHomeMinimumHeight
+        )
+    }
+
     func testShortWindowKeepsTheFloor() {
         XCTAssertEqual(
             height(window: 568),

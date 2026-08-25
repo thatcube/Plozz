@@ -429,3 +429,67 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertNil((0 as TimeInterval).runtimeBadgeText)
     }
 }
+
+/// A Continue Watching card was drawing its progress bar with no time beside it.
+///
+/// The bar needs only a *fraction*, which a provider can report directly; the label
+/// needs a duration in seconds, and some titles arrive with the first and not the
+/// second — a share file has no runtime until it has been played once, and a server
+/// whose media was never probed reports none. The card then said a film was
+/// part-watched without saying how much was left.
+final class RecoveredRuntimeTests: XCTestCase {
+
+    private func movie(
+        runtime: TimeInterval? = nil,
+        resume: TimeInterval? = nil,
+        percentage: Double? = nil,
+        versionDuration: TimeInterval? = nil
+    ) -> MediaItem {
+        var item = MediaItem(id: "m1", title: "West Side Story", kind: .movie)
+        item.runtime = runtime
+        item.resumePosition = resume
+        item.playedPercentage = percentage
+        if let versionDuration {
+            item.versions = [MediaVersion(id: "v1", name: "File", duration: versionDuration)]
+        }
+        return item
+    }
+
+    /// The reported bug: a bar, and nothing beside it.
+    func testAProgressBarWithoutARuntimeNowShowsATime() {
+        let item = movie(resume: 3_600, percentage: 0.5)
+        XCTAssertNotNil(item.resumeProgressFraction, "the bar was always drawn")
+        XCTAssertNotNil(item.cardRuntimeText, "the time beside it was missing")
+        XCTAssertTrue(item.cardRuntimeIsRemaining)
+    }
+
+    /// 3600s at the halfway mark is a two-hour film, so an hour is left.
+    func testPositionOverFractionRecoversTheRuntime() {
+        XCTAssertEqual(movie(resume: 3_600, percentage: 0.5).cardRuntimeText, 3_600.runtimeBadgeText)
+    }
+
+    /// The file's own duration is the true length and outranks the derivation.
+    func testTheFilesDurationIsPreferredOverTheDerivation() {
+        let item = movie(resume: 600, percentage: 0.5, versionDuration: 7_200)
+        // 7200 × (1 − 0.5) = 3600 left, NOT the 600 the ratio would have implied.
+        XCTAssertEqual(item.cardRuntimeText, 3_600.runtimeBadgeText)
+    }
+
+    /// A stated runtime always wins; none of this may perturb a normal item.
+    func testAStatedRuntimeIsUnchanged() {
+        let item = movie(runtime: 7_200, resume: 1_800, percentage: 0.25)
+        XCTAssertEqual(item.cardRuntimeText, 5_400.runtimeBadgeText)
+    }
+
+    /// Dividing by a tiny fraction multiplies its rounding error into a wild
+    /// duration. A confident "3h 40m left" that is invented is worse than a blank.
+    func testAVanishinglySmallFractionIsNotExtrapolated() {
+        XCTAssertNil(movie(resume: 60, percentage: 0.001).cardRuntimeText)
+    }
+
+    /// Nothing to work from stays blank rather than guessing.
+    func testNoPositionMeansNoTime() {
+        XCTAssertNil(movie(percentage: 0.4).cardRuntimeText)
+        XCTAssertNil(movie().cardRuntimeText)
+    }
+}

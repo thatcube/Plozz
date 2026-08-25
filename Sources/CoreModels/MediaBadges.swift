@@ -510,18 +510,50 @@ public extension MediaItem {
     }
 
     var cardRuntimeText: String? {  // l10n:content — formatted duration, not copy
-        guard cardRuntimeEligible, let runtime, runtime > 0 else { return nil }
+        guard cardRuntimeEligible, let runtime = resolvedRuntime, runtime > 0 else { return nil }
         if let remaining = remainingRuntimeLabel(for: runtime) {
             return remaining
         }
         return runtime.runtimeBadgeText
     }
 
+    /// The item's runtime, recovered when the provider never stated one.
+    ///
+    /// A Continue Watching card was showing its progress bar with no time beside
+    /// it. The bar only needs a *fraction* — which a provider can report directly —
+    /// while the label needs a duration in seconds, and some titles arrive with the
+    /// first and not the second. A share file has no runtime until it has been
+    /// played once, and a server whose media was never probed reports none either.
+    /// The card then said a film was part-watched without saying how much was left,
+    /// which is the one thing that row exists to answer.
+    ///
+    /// Two recoveries, both from data already on the item:
+    ///
+    /// 1. **The chosen file's own duration.** `MediaVersion.duration` comes from
+    ///    the file, so it is the true length whenever the item-level field is
+    ///    merely absent.
+    /// 2. **Position ÷ fraction.** Both come from the same provider and describe
+    ///    the same playback, so their ratio is that playback's length. Floored at a
+    ///    1% fraction: dividing by a smaller one multiplies its rounding error into
+    ///    a wild duration, and a confidently wrong "3h 40m left" is worse than the
+    ///    blank this replaces.
+    private var resolvedRuntime: TimeInterval? {
+        if let runtime, runtime > 0 { return runtime }
+        if let versionDuration = selectedVersion?.duration ?? versions.first?.duration,
+           versionDuration > 0 {
+            return versionDuration
+        }
+        guard let resume = resumePosition, resume > 0,
+              let fraction = playedPercentage, fraction >= 0.01, fraction < 1
+        else { return nil }
+        return resume / fraction
+    }
+
     /// Whether ``cardRuntimeText`` holds a REMAINING duration (in-progress item)
     /// rather than the full runtime. Callers append their own localized "left"
     /// suffix when this is `true`.
     var cardRuntimeIsRemaining: Bool {
-        guard cardRuntimeEligible, let runtime, runtime > 0 else { return false }
+        guard cardRuntimeEligible, let runtime = resolvedRuntime, runtime > 0 else { return false }
         return remainingRuntimeLabel(for: runtime) != nil
     }
 
@@ -535,7 +567,7 @@ public extension MediaItem {
     /// use the longer "… left" form composed by the caller from
     /// ``cardRuntimeText``/``cardRuntimeIsRemaining``).
     var resumeRemainingText: String? {  // l10n:content — formatted duration, not copy
-        guard let runtime, runtime > 0 else { return nil }
+        guard let runtime = resolvedRuntime, runtime > 0 else { return nil }
         return remainingRuntimeLabel(for: runtime)
     }
 

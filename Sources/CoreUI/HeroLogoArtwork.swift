@@ -332,10 +332,42 @@ private struct LoadedLogo<TextFallback: View>: View {
             asyncFallbackURL: asyncFallbackURL,
             priority: .userInitiated
         ) else { return }
-        let processed = await finalize(prepared)
         guard !Task.isCancelled else { return }
         let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
         guard presentationPolicy.shouldAdopt(elapsed: elapsed) else { return }
+
+        // Draw the logo the moment it is decoded, BEFORE the backdrop is sampled.
+        //
+        // The sample is a second image fetched and analysed, and waiting on it
+        // held a logo that was already in hand — so the styled title sat on screen
+        // for the duration and was then replaced, which reads as a flash rather
+        // than as loading. Nothing about the halo decision is worth that: the
+        // logo is the content, the halo is a refinement to it.
+        //
+        // Unmeasured means no halo *when a measurement is actually coming*. A
+        // caller with no sampler at all (a rail of cards, where per-card analysis
+        // would be one image pass per card while scrolling) keeps the conservative
+        // always-on halo, because for that caller "unmeasured" is permanent rather
+        // than momentary.
+        let awaitsSample = backgroundSample != nil
+        adopt(HeroLogoAnalysis.analyze(
+            prepared,
+            backgroundSample: nil,
+            halosWhenUnmeasured: !awaitsSample
+        ))
+        guard awaitsSample else { return }
+
+        // Then refine in place. A halo appearing a beat late is a soft shadow
+        // fading in under artwork the viewer is already reading; a logo appearing
+        // a beat late is the title of the show changing shape. A sample that fails
+        // to resolve falls back to the halo, since an unmeasured logo still cannot
+        // be proven safe.
+        let sample = await backgroundSample?()
+        guard !Task.isCancelled else { return }
+        adopt(HeroLogoAnalysis.analyze(prepared, backgroundSample: sample))
+    }
+
+    private func adopt(_ processed: ProcessedLogo) {
         image = processed
         onResolve?(ResolvedLogoTone(
             luminance: processed.luminance,
@@ -345,19 +377,6 @@ private struct LoadedLogo<TextFallback: View>: View {
             blue: processed.blue,
             brightInk: processed.brightInk
         ))
-    }
-
-    /// Combines the prepared logo with a colour sample of the background to decide
-    /// whether the legibility halo is needed. With no sample available we keep the
-    /// halo on, since we can't prove the logo is safe without it.
-    ///
-    /// A logo is legible when it separates from the artwork behind it by *either*
-    /// brightness or colour, so the halo is reserved for the cases where it does
-    /// neither: the luminance gap is small **and** the colours are close. That
-    /// keeps vibrant wordmarks (e.g. a saturated red logo on near-black) clean,
-    /// even though their luminance sits close to the dark backdrop's.
-    private func finalize(_ prepared: PreparedLogo) async -> ProcessedLogo {
-        HeroLogoAnalysis.analyze(prepared, backgroundSample: await backgroundSample?())
     }
 }
 
@@ -388,7 +407,11 @@ enum HeroLogoAnalysis {
     /// near-grayscale tone at one luminance extreme — an all-black or all-white
     /// wordmark that can be safely recoloured to the scheme foreground via its
     /// alpha mask (the coverage guard excludes never-stripped solid rectangles).
-    static func analyze(_ prepared: PreparedLogo, backgroundSample: HeroBackgroundSample?) -> ProcessedLogo {
+    static func analyze(
+        _ prepared: PreparedLogo,
+        backgroundSample: HeroBackgroundSample?,
+        halosWhenUnmeasured: Bool = true
+    ) -> ProcessedLogo {
         let isDark = prepared.luminance < 0.5
         let chroma = max(prepared.red, prepared.green, prepared.blue)
             - min(prepared.red, prepared.green, prepared.blue)
@@ -396,7 +419,7 @@ enum HeroLogoAnalysis {
             && chroma < 0.10
             && (prepared.luminance < 0.22 || prepared.luminance > 0.85)
 
-        var needsHalo = true
+        var needsHalo = halosWhenUnmeasured
         if let bg = backgroundSample {
             let lumaGap = abs(prepared.luminance - bg.luminance)
             let colorGap = perceptualDistance(

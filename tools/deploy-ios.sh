@@ -138,8 +138,11 @@ if [[ "$NO_BUILD" != "1" ]]; then
     echo "▸ Baking a fresh build number (skipping XcodeGen)…"
     generate_args=(--bake-only)
   fi
+  # bash 3.2 (the system bash) treats an empty array as unset under `set -u`,
+  # so an unguarded expansion aborts the script on exactly the --regen path
+  # where the array is deliberately empty.
   "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project/version generation" -- \
-    tools/generate-project.sh "${generate_args[@]}"
+    tools/generate-project.sh ${generate_args[@]+"${generate_args[@]}"}
 fi
 
 # --- Build destination -------------------------------------------------------

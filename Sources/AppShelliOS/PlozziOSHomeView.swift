@@ -306,6 +306,23 @@ struct PlozziOSHomeView: View {
                         onPinnedItemsChanged: { heroPinnedItemIDs = $0 },
                         pullModel: heroPullModel
                     )
+                    // Warm every slide's logo as soon as the carousel exists.
+                    //
+                    // `HeroLogoArtwork` shows the styled title while the logo
+                    // resolves, so a cold logo reads as the show's name flashing
+                    // and then being replaced — the artwork arriving looks like a
+                    // glitch rather than like loading. tvOS has warmed logos on its
+                    // hero for a while (`HeroLogoPreloader` on the carousel's
+                    // lookahead); iOS never did, so it paid the swap on every
+                    // slide.
+                    //
+                    // Deliberately NOT paired with `.onArrival`, which is how tvOS
+                    // suppresses a late swap: that keeps the *text* when a logo
+                    // misses the window, and the ask here is to see the logo. This
+                    // wins the race instead of hiding the loser.
+                    .task(id: heroItems.map(\.id).joined(separator: "|")) {
+                        await warmHeroLogos(for: heroItems)
+                    }
                 }
 
                 // Trending row intentionally NOT shown on iOS/iPadOS (2026-07-25).
@@ -537,6 +554,24 @@ struct PlozziOSHomeView: View {
             return true
         case .unknown, .deleted, nil:
             return false
+        }
+    }
+
+    /// Decodes each hero slide's logo into the shared cache before the slide is
+    /// looked at, so `HeroLogoArtwork` resolves from memory and the styled title
+    /// it falls back to is never seen.
+    ///
+    /// Ordered rather than concurrent, and at background priority: this is work
+    /// for slides the viewer has not reached yet, so it must not compete with the
+    /// artwork and metadata the first slide is waiting on. `HeroLogoPipeline`
+    /// de-duplicates by URL, so a slide that resolves on its own first costs
+    /// nothing here.
+    private func warmHeroLogos(for items: [MediaItem]) async {
+        for item in items {
+            guard !Task.isCancelled else { return }
+            let references = item.artworkReferences(for: .logo)
+            guard !references.isEmpty else { continue }
+            await HeroLogoPreloader.warm(references: references)
         }
     }
 

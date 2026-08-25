@@ -348,21 +348,25 @@ final class HeroForegroundUIView: UIView {
             return
         }
         if logo.isDark {
-            // Light glow for a dark logo — unchanged across appearances.
-            logoImageView.layer.shadowColor = UIColor.white.cgColor
-            logoImageView.layer.shadowOpacity = 0.6
-            logoImageView.layer.shadowRadius = 9
+            // Was a white glow. It fired on any mid-to-dark logo and read as an
+            // effect stuck on the artwork rather than the logo sitting in front of
+            // it; a shadow reads as depth, which is what is actually happening.
+            // Matches `LogoLegibilityHalo` so a wordmark looks the same on both
+            // renderers and on iOS.
+            logoImageView.layer.shadowColor = UIColor.black.cgColor
+            logoImageView.layer.shadowOpacity = 0.42
+            logoImageView.layer.shadowRadius = 12
         } else if traitCollection.userInterfaceStyle == .light {
             // Softer, lighter dark glow in light mode (matches LogoLegibilityHalo):
             // the bright hero doesn't need a heavy black halo, so drop the opacity
             // and widen the radius for a gentle lift instead of a hard smudge.
             logoImageView.layer.shadowColor = UIColor.black.cgColor
-            logoImageView.layer.shadowOpacity = 0.28
-            logoImageView.layer.shadowRadius = 13
+            logoImageView.layer.shadowOpacity = 0.26
+            logoImageView.layer.shadowRadius = 15
         } else {
             logoImageView.layer.shadowColor = UIColor.black.cgColor
-            logoImageView.layer.shadowOpacity = 0.55
-            logoImageView.layer.shadowRadius = 9
+            logoImageView.layer.shadowOpacity = 0.42
+            logoImageView.layer.shadowRadius = 12
         }
         logoImageView.layer.shadowOffset = .zero
     }

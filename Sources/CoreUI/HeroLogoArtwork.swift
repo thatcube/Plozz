@@ -96,26 +96,26 @@ public struct ResolvedLogoTone: Equatable, Sendable {
 
 /// Which contrast halo a logo gets.
 public enum HeroLogoHaloStyle: Sendable {
-    /// Pick per logo: a light glow behind dark logos, a dark shadow behind light
-    /// ones. Right for the hero, which samples the artwork behind the logo and so
-    /// knows what it is actually competing with.
-    case adaptive
-    /// Always a dark shadow, and a gentle one.
+    /// A dark shadow at hero strength.
     ///
-    /// For surfaces that render a logo without sampling the artwork behind it —
-    /// a rail of cards, where per-card sampling would mean one image analysis per
-    /// card while scrolling. Without a sample the halo can't be reasoned about, so
-    /// it is always drawn, and `adaptive` then put a white glow behind every
-    /// mid-to-dark logo. On an orange Oppenheimer wordmark over its own orange
-    /// artwork that glow was the most conspicuous thing on the card. A dark
-    /// shadow reads as depth rather than as an effect.
+    /// Never a light one. A white glow behind a dark logo was the old behaviour
+    /// here, and it was the most conspicuous thing on the screen whenever it fired
+    /// — it reads as an effect stuck on the artwork rather than as the logo
+    /// sitting on it. A shadow reads as depth, which is what the logo is actually
+    /// doing: sitting in front of a picture.
     ///
-    /// Gentle because these surfaces lay an even dim over their whole artwork
+    /// Drawn only when the artwork behind has been sampled and found too close in
+    /// tone to the ink (see ``HeroLogoAnalysis``); a surface that never samples
+    /// cannot prove a logo is safe and so draws it always.
+    case standard
+    /// The same dark shadow, much softer.
+    ///
+    /// For a surface that lays an even dim over its own artwork
     /// (``ContinueWatchingCardShape/artworkDim``), so the halo is not carrying
     /// legibility on its own — it only has to keep the letterforms from touching
     /// the picture. At full strength it instead read as a hard outline, worst on
     /// pale artwork where a tight black edge has the most to contrast against.
-    case alwaysDark
+    case gentle
 }
 
 public struct HeroLogoArtwork<TextFallback: View>: View {
@@ -139,7 +139,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         maxHeight: CGFloat = 200,
         presentationPolicy: HeroLogoPresentationPolicy = .whenReady,
         alignment: Alignment = .leading,
-        haloStyle: HeroLogoHaloStyle = .adaptive,
+        haloStyle: HeroLogoHaloStyle = .standard,
         logoNeedsHelp: Double? = nil,
         onResolve: ((ResolvedLogoTone) -> Void)? = nil,
         @ViewBuilder textFallback: @escaping () -> TextFallback
@@ -168,7 +168,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         maxHeight: CGFloat = 200,
         presentationPolicy: HeroLogoPresentationPolicy = .whenReady,
         alignment: Alignment = .leading,
-        haloStyle: HeroLogoHaloStyle = .adaptive,
+        haloStyle: HeroLogoHaloStyle = .standard,
         logoNeedsHelp: Double? = nil,
         onResolve: ((ResolvedLogoTone) -> Void)? = nil,
         @ViewBuilder textFallback: @escaping () -> TextFallback
@@ -305,13 +305,12 @@ private struct LoadedLogo<TextFallback: View>: View {
                 .modifier(LogoToneLift(
                     needsHelp: logoNeedsHelp,
                     luminance: processed.luminance,
-                    active: haloStyle == .alwaysDark
+                    active: haloStyle == .gentle
                 ))
                 .modifier(LogoLegibilityHalo(
-                    isDark: haloStyle == .adaptive && processed.isDark,
                     active: processed.needsHalo,
                     scale: LogoLegibilityHalo.scale(forLogoHeight: fitted.height),
-                    isGentle: haloStyle == .alwaysDark
+                    isGentle: haloStyle == .gentle
                 ))
         }
     }
@@ -901,7 +900,6 @@ struct LogoToneLift: ViewModifier {
 }
 
 struct LogoLegibilityHalo: ViewModifier {
-    let isDark: Bool
     let active: Bool
     /// 1 at hero size, proportionally smaller for a card-sized logo.
     var scale: CGFloat = 1
@@ -926,10 +924,6 @@ struct LogoLegibilityHalo: ViewModifier {
     func body(content: Content) -> some View {
         if !active {
             content
-        } else if isDark {
-            content
-                .shadow(color: .white.opacity(0.6), radius: 5 * scale)
-                .shadow(color: .white.opacity(0.35), radius: 14 * scale)
         } else if isGentle {
             // Barely a halo at all, and deliberately so: a halo is a visible thing
             // drawn around the letterforms, and past a certain strength it reads
@@ -949,12 +943,17 @@ struct LogoLegibilityHalo: ViewModifier {
             // already bright, so a heavy black halo reads as a hard smudge. Lower
             // opacity + a wider radius keeps the logo legible with a gentle lift.
             content
-                .shadow(color: .black.opacity(0.30), radius: 7 * scale)
-                .shadow(color: .black.opacity(0.22), radius: 18 * scale)
+                .shadow(color: .black.opacity(0.26), radius: 9 * scale)
+                .shadow(color: .black.opacity(0.18), radius: 22 * scale)
         } else {
+            // Softened from 0.55/0.45 at 5/14. The old pair was tuned as the
+            // counterpart to a white glow that no longer exists, and read as a
+            // dark rim once it was the only treatment; widening the radii and
+            // dropping the opacity keeps the letterforms off the picture while
+            // looking like depth rather than an edge.
             content
-                .shadow(color: .black.opacity(0.55), radius: 5 * scale)
-                .shadow(color: .black.opacity(0.45), radius: 14 * scale)
+                .shadow(color: .black.opacity(0.42), radius: 8 * scale)
+                .shadow(color: .black.opacity(0.30), radius: 20 * scale)
         }
     }
 }

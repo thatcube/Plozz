@@ -935,6 +935,11 @@ struct PlozziOSHeroFadeMask: View {
         colorScheme == .dark ? 1.0 : 0.86
     }
 
+    /// The shortest distance the dissolve is ever given to happen in, plus the
+    /// rest of the melt-start rules, live in ``HeroStageMetrics/meltStart(width:height:mirrorScale:floor:)``
+    /// so they can be unit-tested — the first version of this computed the start
+    /// inline here, where nothing could reach it, and shipped a hard cut on every
+    /// narrow phone as a result.
     var body: some View {
         GeometryReader { proxy in
             gradient(start: start(in: proxy.size))
@@ -942,14 +947,13 @@ struct PlozziOSHeroFadeMask: View {
     }
 
     private func start(in size: CGSize) -> CGFloat {
-        guard extendsArtwork, size.width > 0, size.height > 0 else {
-            return meltStart
-        }
-        let mirrorLine = HeroStageMetrics.geometry(
+        guard extendsArtwork else { return meltStart }
+        return HeroStageMetrics.meltStart(
             width: size.width,
-            height: size.height
-        ).reflectionStart
-        return min(max(mirrorLine * extendedMeltScale, meltStart), 0.92)
+            height: size.height,
+            mirrorScale: extendedMeltScale,
+            floor: meltStart
+        )
     }
 
     private func gradient(start: CGFloat) -> some View {

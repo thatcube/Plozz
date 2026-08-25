@@ -112,5 +112,43 @@ public enum HeroStageMetrics {
         let visible = natural / floor
         return max(0, (1 - visible) / 2)
     }
+
+    /// The shortest distance the hero's bottom dissolve is ever given to happen
+    /// in, in points.
+    ///
+    /// A floor, and the reason one is needed: the mirror line is not always a
+    /// safe place to start melting from. On a narrow phone the picture is
+    /// naturally about as tall as the whole hero — 375pt of width at the 5:7
+    /// picture shape is 525pt, against a 520pt stage — so there is no mirror band
+    /// at all and the mirror line sits at 1.0. Melting from there gives the
+    /// dissolve the last few points of the hero, which is a hard cut from
+    /// full-brightness artwork straight to page background rather than a melt.
+    /// Measured on an iPhone SE (3rd generation).
+    ///
+    /// Points rather than a fraction because this is a perceptual distance — how
+    /// far the eye travels before it stops registering an edge — and a fraction
+    /// would quietly mean a different distance on every screen, which is the bug
+    /// class this type exists to end.
+    public static let minimumMeltSpan: CGFloat = 130
+
+    /// Where the hero's bottom dissolve begins, as a fraction of its height.
+    ///
+    /// Holds the picture whole down to its mirror line (scaled by `mirrorScale`,
+    /// which lets a light page start the melt earlier than a dark one), never
+    /// starts earlier than `floor`, and never starts so late that the dissolve
+    /// has less than ``minimumMeltSpan`` to happen in.
+    public static func meltStart(
+        width: CGFloat,
+        height: CGFloat,
+        mirrorScale: CGFloat,
+        floor: CGFloat
+    ) -> CGFloat {
+        guard width > 0, height > 0 else { return floor }
+        let mirrorLine = geometry(width: width, height: height).reflectionStart
+        // Never leave the dissolve less room than it needs, and never let the
+        // guarantee itself eat more than half the hero.
+        let latest = 1 - min(minimumMeltSpan / height, 0.5)
+        return min(max(mirrorLine * mirrorScale, floor), latest)
+    }
 }
 #endif

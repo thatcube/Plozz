@@ -22,6 +22,7 @@ private final class PlozziOSHomeHeroPullModel {
 struct PlozziOSHomeView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozziOSHeroContainerHeight) private var heroContainerHeight
     @Environment(HeroTrailerController.self) private var trailerController
     @State private var viewModel: HomeViewModel
     @State private var featuredItems: [MediaItem] = []
@@ -138,6 +139,10 @@ struct PlozziOSHomeView: View {
                 loadedContent(content)
             }
         }
+        // The portrait hero is sized to the phone, not to a constant — see
+        // `HeroStageMetrics`. Published here so the loading skeleton reserves the
+        // same height the real hero will take, rather than reflowing when it lands.
+        .plozziOSTracksHeroContainerHeight()
         .navigationTitle(Text(verbatim: ""))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
@@ -268,7 +273,8 @@ struct PlozziOSHomeView: View {
         let trailerPauseThreshold = PlozziOSHeroMetrics.height(
             style: heroStyle,
             surfaceRole: .home,
-            dynamicTypeSize: dynamicTypeSize
+            dynamicTypeSize: dynamicTypeSize,
+            containerHeight: heroContainerHeight
         ) / 2
         let scroll = ScrollView {
             // NOT lazy, deliberately. Each row is itself a horizontal ScrollView
@@ -815,6 +821,7 @@ private struct PlozziOSHeroLoadID: Equatable {
 private struct PlozziOSHomeHeroCarousel: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozziOSHeroContainerHeight) private var heroContainerHeight
     @Environment(HeroTrailerController.self) private var trailerController
     @State private var selectedItemID: String?
     @State private var dwellStart = Date()
@@ -868,7 +875,12 @@ private struct PlozziOSHomeHeroCarousel: View {
         let heroHeight = PlozziOSHeroMetrics.height(
             style: style,
             surfaceRole: .home,
-            dynamicTypeSize: dynamicTypeSize
+            dynamicTypeSize: dynamicTypeSize,
+            containerHeight: heroContainerHeight
+        )
+        let extendsArtwork = PlozziOSHeroMetrics.extendsArtwork(
+            style: style,
+            surfaceRole: .home
         )
         GeometryReader { proxy in
             let swipeDistance = max(proxy.size.width, 1)
@@ -888,7 +900,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                     PlozziOSPullResponsiveHomeBackdrop(
                         model: pullModel,
                         style: style,
-                        heroHeight: heroHeight
+                        heroHeight: heroHeight,
+                        extendsArtwork: extendsArtwork
                     ) { pullScale in
                         ZStack {
                             if let dragTargetItem {
@@ -899,7 +912,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                                     contentOffsetX: incomingX,
                                     showsTrailer: false,
                                     usesSlidingArtwork: true,
-                                    ancestorScale: pullScale
+                                    ancestorScale: pullScale,
+                                    extendsArtwork: extendsArtwork
                                 )
 
                                 PlozziOSHomeStaticBackdrop(
@@ -909,7 +923,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                                     contentOffsetX: outgoingX,
                                     showsTrailer: false,
                                     usesSlidingArtwork: true,
-                                    ancestorScale: pullScale
+                                    ancestorScale: pullScale,
+                                    extendsArtwork: extendsArtwork
                                 )
                                 .opacity(1 - progress)
                             } else {
@@ -917,7 +932,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                                     item: currentItem,
                                     style: style,
                                     height: heroHeight,
-                                    ancestorScale: pullScale
+                                    ancestorScale: pullScale,
+                                    extendsArtwork: extendsArtwork
                                 )
                                 .id(currentItem.id)
                             }
@@ -1404,6 +1420,7 @@ private struct PlozziOSPullResponsiveHomeBackdrop<Backdrop: View>: View {
     let model: PlozziOSHomeHeroPullModel
     let style: HeroArtworkStyle
     let heroHeight: CGFloat
+    var extendsArtwork: Bool = false
     @ViewBuilder let backdrop: (CGFloat) -> Backdrop
 
     var body: some View {
@@ -1431,13 +1448,17 @@ private struct PlozziOSPullResponsiveHomeBackdrop<Backdrop: View>: View {
                 .scaleEffect(pullScale, anchor: .center)
                 .offset(y: -(pullOffset - pullDistance))
 
-            PlozziOSStationaryHeroScrim(style: style, height: heroHeight)
+            PlozziOSStationaryHeroScrim(
+                style: style,
+                height: heroHeight,
+                extendsArtwork: extendsArtwork
+            )
         }
         // Masked BEFORE the pull offset, exactly as tvOS masks before its recede
         // lift. Applied after, the mask sits in the fixed parent space: the hero
         // slid under a stationary fade, so pulling down exposed the page
         // background above the image and left a hard unfaded edge below.
-        .mask { PlozziOSHeroFadeMask() }
+        .mask { PlozziOSHeroFadeMask(extendsArtwork: extendsArtwork) }
         .offset(y: -pullDistance)
     }
 }

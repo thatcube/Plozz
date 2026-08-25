@@ -111,6 +111,7 @@ struct PlozziOSHomeSkeletonScreen: View {
 struct PlozziOSHomeHeroSkeleton: View {
     @Environment(\.themePalette) private var palette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.plozziOSHeroContainerHeight) private var heroContainerHeight
 
     let style: HeroArtworkStyle
 
@@ -128,7 +129,8 @@ struct PlozziOSHomeHeroSkeleton: View {
                 height: PlozziOSHeroMetrics.height(
                     style: style,
                     surfaceRole: .home,
-                    dynamicTypeSize: dynamicTypeSize
+                    dynamicTypeSize: dynamicTypeSize,
+                    containerHeight: heroContainerHeight
                 )
             )
             .overlay {

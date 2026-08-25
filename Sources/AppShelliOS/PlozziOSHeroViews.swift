@@ -12,21 +12,94 @@ import SwiftUI
 import UIKit
 
 enum PlozziOSHeroMetrics {
+    /// Whether this hero fills its stage by **mirroring** its own bottom edge
+    /// into the space the picture doesn't reach, rather than by cropping the
+    /// picture until it does.
+    ///
+    /// Only the portrait Home hero: it is the one that stands a fixed fraction
+    /// of the window tall (see ``HeroStageMetrics``) regardless of how the
+    /// artwork is shaped, so it is the one whose crop would otherwise be
+    /// dictated by the length of the phone. The detail hero is the top of a
+    /// scrolling page rather than a full screen, and a regular-width layout puts
+    /// its metadata in a side column where height is not the constraint.
+    static func extendsArtwork(
+        style: HeroArtworkStyle,
+        surfaceRole: HeroTrailerSurfaceRole
+    ) -> Bool {
+        style == .compactPortrait && surfaceRole == .home
+    }
+
     static func height(
         style: HeroArtworkStyle,
         surfaceRole: HeroTrailerSurfaceRole,
-        dynamicTypeSize: DynamicTypeSize
+        dynamicTypeSize: DynamicTypeSize,
+        containerHeight: CGFloat? = nil
     ) -> CGFloat {
-        let base: CGFloat
-        if style == .compactPortrait {
-            base = 610
-        } else {
-            base = surfaceRole == .detail ? 760 : 680
+        let accessibilityExtra: CGFloat = dynamicTypeSize.isAccessibilitySize
+            ? (style == .compactPortrait ? 160 : 140)
+            : 0
+        // The portrait Home hero is sized to the phone, not to a constant: it
+        // has to reach far enough down that the metadata sits in the lower part
+        // of the screen, while still leaving the next row peeking. See
+        // `HeroStageMetrics`.
+        if extendsArtwork(style: style, surfaceRole: surfaceRole) {
+            return HeroStageMetrics.portraitHomeHeight(
+                windowHeight: containerHeight,
+                fallback: 610,
+                accessibilityExtra: accessibilityExtra
+            )
         }
-        guard dynamicTypeSize.isAccessibilitySize else { return base }
-        return base + (style == .compactPortrait ? 160 : 140)
+        let base: CGFloat = style == .compactPortrait
+            ? 610
+            : (surfaceRole == .detail ? 760 : 680)
+        return base + accessibilityExtra
     }
 
+}
+
+/// The height of the window the hero is standing in, so a portrait Home hero can
+/// be sized to the phone (see ``HeroStageMetrics``).
+///
+/// The **window**, not the safe area: the hero runs full-bleed under the status
+/// bar and the peek it leaves is measured against the bottom of the screen, so a
+/// height that already had the insets taken out of it would size the hero to the
+/// wrong thing — and differently on every phone, which is the problem this is
+/// here to solve. `nil` until the window has been measured, which is what makes
+/// the fallback in `PlozziOSHeroMetrics.height` reachable.
+private struct PlozziOSHeroContainerHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+extension EnvironmentValues {
+    var plozziOSHeroContainerHeight: CGFloat? {
+        get { self[PlozziOSHeroContainerHeightKey.self] }
+        set { self[PlozziOSHeroContainerHeightKey.self] = newValue }
+    }
+}
+
+private struct PlozziOSHeroContainerHeightModifier: ViewModifier {
+    @State private var height: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.plozziOSHeroContainerHeight, height)
+            .background {
+                PlozziOSWindowHeightReader { measured in
+                    guard measured > 0, height != measured else { return }
+                    height = measured
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+    }
+}
+
+extension View {
+    /// Publishes the window's height to every hero below, so they can size
+    /// themselves to the phone. See ``EnvironmentValues/plozziOSHeroContainerHeight``.
+    func plozziOSTracksHeroContainerHeight() -> some View {
+        modifier(PlozziOSHeroContainerHeightModifier())
+    }
 }
 
 enum PlozziOSPageLayout {
@@ -366,6 +439,7 @@ struct PlozziOSDetailHeroSection: View {
 
 private struct PlozziOSHeroStage<Foreground: View>: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.plozziOSHeroContainerHeight) private var containerHeight
 
     let item: MediaItem
     let presentation: HeroPresentation
@@ -400,7 +474,15 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
         PlozziOSHeroMetrics.height(
             style: style,
             surfaceRole: surfaceRole,
-            dynamicTypeSize: dynamicTypeSize
+            dynamicTypeSize: dynamicTypeSize,
+            containerHeight: containerHeight
+        )
+    }
+
+    private var extendsArtwork: Bool {
+        PlozziOSHeroMetrics.extendsArtwork(
+            style: style,
+            surfaceRole: surfaceRole
         )
     }
 
@@ -424,6 +506,7 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
                         itemID: item.id,
                         height: height,
                         showsScrim: showsScrim,
+                        extendsArtwork: extendsArtwork,
                         ignoresHorizontalSafeArea: false,
                         surfaceRole: surfaceRole,
                         trailerController: trailerController
@@ -572,6 +655,123 @@ private struct PlozziOSHeroPlaybackID: Equatable {
     let role: HeroTrailerSurfaceRole
 }
 
+/// A hero's artwork laid into a stage **taller than the picture**, with the
+/// shortfall filled by a mirrored continuation of the picture's own bottom edge.
+///
+/// The same trick a Continue Watching card uses, and deliberately the same
+/// geometry (``HeroStageMetrics`` delegating to ``ExtendedArtworkGeometry``)
+/// rather than a second implementation of it. The portrait Home hero has to
+/// stand about three quarters of the phone tall so its metadata sits low; a hero
+/// that simply *filled* that slot would crop 16:9 backdrop art past 3x, and
+/// would crop it by a different amount on every phone. Mirroring buys the height
+/// back and leaves the picture alone.
+///
+/// The picture is handed a `layout` rather than a plain size because the flipped
+/// copy is not free to render everything the upright one does — see
+/// ``PlozziOSHeroPictureLayout/isMirror``.
+private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
+    /// How far the mirror is drawn up *behind* the picture's bottom edge, so the
+    /// two overlap instead of meeting at a line that splits open the moment the
+    /// hero is scaled by an overscroll pull. Same reasoning, and same value, as
+    /// a Continue Watching card's seam overlap.
+    private static var seamOverlap: CGFloat { 2 }
+
+    let height: CGFloat
+    @ViewBuilder let picture: (PlozziOSHeroPictureLayout) -> Picture
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let geometry = HeroStageMetrics.geometry(
+                width: width,
+                height: height
+            )
+            ZStack(alignment: .top) {
+                sizedPicture(geometry, isMirror: false)
+                if geometry.reflectionHeight > 0 {
+                    mirror(geometry, width: width)
+                        .offset(y: geometry.pictureHeight - Self.seamOverlap)
+                }
+            }
+            // ONE clip, on the outside. The picture is rendered wider than the
+            // stage whenever a side trim is in play, and the mirror overruns the
+            // foot; both are cut here rather than each carrying its own
+            // rasterisation boundary along the seam.
+            .frame(width: width, height: height, alignment: .top)
+            .clipped()
+        }
+        .frame(height: height)
+    }
+
+    private func sizedPicture(
+        _ geometry: ExtendedArtworkGeometry,
+        isMirror: Bool
+    ) -> some View {
+        picture(
+            PlozziOSHeroPictureLayout(
+                width: geometry.renderedWidth,
+                height: geometry.pictureHeight,
+                isMirror: isMirror
+            )
+        )
+        .frame(width: geometry.renderedWidth, height: geometry.pictureHeight)
+    }
+
+    /// The band under the picture: the same image flipped, so its top row is the
+    /// picture's last row, then eased away by **alpha** rather than by painting
+    /// black over it. A black wash is what a Continue Watching card uses because
+    /// it stands on an opaque card; the hero stands on the page, and the page is
+    /// white in light mode.
+    private func mirror(
+        _ geometry: ExtendedArtworkGeometry,
+        width: CGFloat
+    ) -> some View {
+        Color.clear
+            .frame(
+                width: width,
+                height: geometry.reflectionHeight + Self.seamOverlap
+            )
+            .overlay(alignment: .top) {
+                sizedPicture(geometry, isMirror: true)
+                    .scaleEffect(x: 1, y: -1)
+            }
+            .clipped()
+            .mask {
+                // Full strength at the seam — a reflection is brightest where it
+                // meets what it reflects, and any step there is a hard line
+                // across the picture. Barely eased after that, because this is
+                // NOT the hero's dissolve: the fade mask is still to come and
+                // now begins at this very band, so ramping hard here as well
+                // dissolved the image twice over and left the buttons sitting on
+                // flat page background instead of on the picture.
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0),
+                        .init(color: .white.opacity(0.94), location: 0.45),
+                        .init(color: .white.opacity(0.82), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+    }
+}
+
+/// The slot ``PlozziOSExtendedHeroArtwork`` is asking a picture to fill.
+private struct PlozziOSHeroPictureLayout {
+    let width: CGFloat
+    let height: CGFloat
+    /// True for the flipped copy.
+    ///
+    /// Callers must not put `HeroTrailerVideoLayer` in a mirrored copy: it does
+    /// not create a player layer, it **moves** the controller's single surface
+    /// view into whichever host asks last, so a second instance would tear the
+    /// trailer out of the upright picture. Mirror the trailer with
+    /// `PlozziOSMirrorVideoLayer`, which owns its own layer over the same player
+    /// — the same split the sidebar reflection already makes.
+    let isMirror: Bool
+}
+
 private struct PlozziOSHeroBackdrop: View {
     @Environment(\.themePalette) private var palette
 
@@ -582,11 +782,60 @@ private struct PlozziOSHeroBackdrop: View {
     let showsScrim: Bool
     var showsTrailer: Bool = true
     var appliesFadeMask: Bool = true
+    /// Fill the stage by mirroring the picture's bottom edge instead of cropping
+    /// the picture until it fills. See ``PlozziOSExtendedHeroArtwork``.
+    var extendsArtwork: Bool = false
     let ignoresHorizontalSafeArea: Bool
     let surfaceRole: HeroTrailerSurfaceRole
     let trailerController: HeroTrailerController
 
     var body: some View {
+        ZStack {
+            if extendsArtwork {
+                PlozziOSExtendedHeroArtwork(height: height) { layout in
+                    artwork(layout: layout)
+                        .frame(width: layout.width, height: layout.height)
+                        .clipped()
+                }
+            } else {
+                artwork(layout: nil)
+            }
+
+            // Gentle black legibility darkening behind the title (kept true to the
+            // image, not a grey wash).
+            if showsScrim {
+                PlozziOSHeroLegibilityScrim(
+                    style: style,
+                    extendsArtwork: extendsArtwork
+                )
+            }
+        }
+        .frame(height: height)
+        // Dissolve the whole stack (image + trailer + scrim) to transparent at the
+        // bottom so it melts into the page via ALPHA — the tvOS approach. The
+        // image keeps its true colours and gently reveals the page, instead of
+        // being painted over with an opaque grey that reads as muddy.
+        .mask {
+            if appliesFadeMask {
+                PlozziOSHeroFadeMask(extendsArtwork: extendsArtwork)
+            } else {
+                Rectangle().fill(.white)
+            }
+        }
+        .clipped()
+        .ignoresSafeArea(
+            edges: ignoresHorizontalSafeArea
+                ? [.top, .horizontal]
+                : .top
+        )
+    }
+
+    /// The picture itself: artwork, plus the trailer once it is rolling.
+    ///
+    /// `layout` is nil for the ordinary fill-the-stage case and set when this is
+    /// being laid into (or mirrored beneath) an extended stage.
+    @ViewBuilder
+    private func artwork(layout: PlozziOSHeroPictureLayout?) -> some View {
         ZStack {
             FallbackAsyncImage(
                 references: presentation.artworkReferences,
@@ -600,37 +849,17 @@ private struct PlozziOSHeroBackdrop: View {
             if showsTrailer,
                trailerController.currentItemID == itemID,
                trailerController.isPlaying {
-                HeroTrailerVideoLayer(
-                    controller: trailerController,
-                    role: surfaceRole
-                )
-                .transition(.opacity)
-            }
-
-            // Gentle black legibility darkening behind the title (kept true to the
-            // image, not a grey wash).
-            if showsScrim {
-                PlozziOSHeroLegibilityScrim(style: style)
+                if layout?.isMirror == true {
+                    PlozziOSMirrorVideoLayer(player: trailerController.player)
+                } else {
+                    HeroTrailerVideoLayer(
+                        controller: trailerController,
+                        role: surfaceRole
+                    )
+                    .transition(.opacity)
+                }
             }
         }
-        .frame(height: height)
-        // Dissolve the whole stack (image + trailer + scrim) to transparent at the
-        // bottom so it melts into the page via ALPHA — the tvOS approach. The
-        // image keeps its true colours and gently reveals the page, instead of
-        // being painted over with an opaque grey that reads as muddy.
-        .mask {
-            if appliesFadeMask {
-                PlozziOSHeroFadeMask()
-            } else {
-                Rectangle().fill(.white)
-            }
-        }
-        .clipped()
-        .ignoresSafeArea(
-            edges: ignoresHorizontalSafeArea
-                ? [.top, .horizontal]
-                : .top
-        )
     }
 }
 
@@ -680,6 +909,16 @@ struct PlozziOSHeroScrim: View {
 struct PlozziOSHeroFadeMask: View {
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Whether this hero fills its stage by mirroring its own bottom edge (see
+    /// ``PlozziOSExtendedHeroArtwork``). When it does, the melt is tied to the
+    /// mirror line instead of being a fixed fraction: the picture stays whole
+    /// right down to where its reflection begins, and the reflection is what
+    /// dissolves. That is the difference between an image that quietly gives up
+    /// halfway down the screen — leaving the metadata sitting on flat page
+    /// background, which is what a fixed 0.62 produced on a hero this tall — and
+    /// one that carries all the way behind the buttons and then melts.
+    var extendsArtwork: Bool = false
+
     /// Where the melt begins. Light mode starts higher because a light page
     /// swallows the artwork's edge sooner; dark mode holds the image longer so
     /// it doesn't wash out against the background.
@@ -687,8 +926,33 @@ struct PlozziOSHeroFadeMask: View {
         colorScheme == .dark ? 0.62 : 0.38
     }
 
+    /// The same idea against the mirror line rather than the whole stage: the
+    /// picture is kept whole to the very row where its reflection begins, and
+    /// the reflection is what melts into the page. Light mode starts a little
+    /// earlier, for the same reason the fixed start does — a pale page swallows
+    /// the artwork's edge sooner.
+    private var extendedMeltScale: CGFloat {
+        colorScheme == .dark ? 1.0 : 0.86
+    }
+
     var body: some View {
-        let start = meltStart
+        GeometryReader { proxy in
+            gradient(start: start(in: proxy.size))
+        }
+    }
+
+    private func start(in size: CGSize) -> CGFloat {
+        guard extendsArtwork, size.width > 0, size.height > 0 else {
+            return meltStart
+        }
+        let mirrorLine = HeroStageMetrics.geometry(
+            width: size.width,
+            height: size.height
+        ).reflectionStart
+        return min(max(mirrorLine * extendedMeltScale, meltStart), 0.92)
+    }
+
+    private func gradient(start: CGFloat) -> some View {
         let span = max(1 - start, 0.0001)
         return LinearGradient(
             stops: [
@@ -722,6 +986,19 @@ struct PlozziOSHeroLegibilityScrim: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let style: HeroArtworkStyle
+    /// Whether the picture now runs all the way down behind the metadata (see
+    /// ``PlozziOSHeroFadeMask/extendsArtwork``). It used to fade out around
+    /// halfway, so the lower half of the column was reading against flat page
+    /// background and barely needed a scrim; with the image still there, the
+    /// vignette has to do the job it was always nominally for.
+    ///
+    /// Only a little deeper, though. The first attempt at this took the peak to
+    /// 0.72, which — landing on the same band the fade mask dissolves — turned
+    /// the bottom of the hero into a black box with a photograph balanced on top
+    /// of it. Legibility here is a collaboration between three things (this, the
+    /// mirror's own easing, and the dissolve); any one of them doing the whole
+    /// job undoes the effect the other two exist for.
+    var extendsArtwork: Bool = false
 
     private var tone: Color {
         colorScheme == .dark ? .black : .white
@@ -730,7 +1007,7 @@ struct PlozziOSHeroLegibilityScrim: View {
     var body: some View {
         HeroLegibilityScrim(
             tone: tone,
-            edgePeak: 0.55,
+            edgePeak: extendsArtwork ? 0.62 : 0.55,
             // A portrait hero has no room for a side wash; only the landscape
             // layout puts the title in a left-hand column.
             edges: style == .landscape ? [.leading, .bottom] : [.bottom],
@@ -745,11 +1022,15 @@ struct PlozziOSHeroLegibilityScrim: View {
 struct PlozziOSStationaryHeroScrim: View {
     let style: HeroArtworkStyle
     let height: CGFloat
+    var extendsArtwork: Bool = false
 
     var body: some View {
         PlozziOSFullWidthHeroStage(height: height) {
-            PlozziOSHeroLegibilityScrim(style: style)
-                .frame(height: height)
+            PlozziOSHeroLegibilityScrim(
+                style: style,
+                extendsArtwork: extendsArtwork
+            )
+            .frame(height: height)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -831,6 +1112,9 @@ struct PlozziOSHomeStaticBackdrop: View {
     /// An outer visual zoom changes `frame(in: .global)` without changing layout.
     /// Pass it through so the reflected stage can recover its pre-zoom position.
     var ancestorScale: CGFloat = 1
+    /// Fill the stage by mirroring the picture's bottom edge rather than by
+    /// cropping the picture until it fills. See ``PlozziOSExtendedHeroArtwork``.
+    var extendsArtwork: Bool = false
 
     var body: some View {
         let presentation = HeroPresentation(
@@ -843,12 +1127,7 @@ struct PlozziOSHomeStaticBackdrop: View {
             ancestorScale: ancestorScale
         ) { usableWidth in
             if usesSlidingArtwork {
-                PlozziOSSlidingHeroArtwork(
-                    presentation: presentation,
-                    width: usableWidth,
-                    height: height,
-                    offsetX: contentOffsetX
-                )
+                slidingArtwork(presentation: presentation, width: usableWidth)
             } else {
                 PlozziOSHeroBackdrop(
                     presentation: presentation,
@@ -858,6 +1137,7 @@ struct PlozziOSHomeStaticBackdrop: View {
                     showsScrim: false,
                     showsTrailer: showsTrailer,
                     appliesFadeMask: false,
+                    extendsArtwork: extendsArtwork,
                     ignoresHorizontalSafeArea: false,
                     surfaceRole: .home,
                     trailerController: trailerController
@@ -871,6 +1151,35 @@ struct PlozziOSHomeStaticBackdrop: View {
                 contentWidth: contentWidth,
                 height: height,
                 trailerController: trailerController
+            )
+        }
+    }
+
+    /// The swipe-transition artwork. When the stage is mirror-extended the slide
+    /// happens inside the **picture band** and the mirror follows it, so a hero
+    /// mid-swipe has the same shape as one at rest — the alternative, sliding a
+    /// full-height image under a stationary mirror, tears the two apart for the
+    /// length of every drag.
+    @ViewBuilder
+    private func slidingArtwork(
+        presentation: HeroPresentation,
+        width: CGFloat
+    ) -> some View {
+        if extendsArtwork {
+            PlozziOSExtendedHeroArtwork(height: height) { layout in
+                PlozziOSSlidingHeroArtwork(
+                    presentation: presentation,
+                    width: layout.width,
+                    height: layout.height,
+                    offsetX: contentOffsetX
+                )
+            }
+        } else {
+            PlozziOSSlidingHeroArtwork(
+                presentation: presentation,
+                width: width,
+                height: height,
+                offsetX: contentOffsetX
             )
         }
     }
@@ -2499,6 +2808,56 @@ private struct PlozziOSWindowWidthReader: UIViewRepresentable {
             lastWidth = width
             Task { @MainActor in
                 onChange(width)
+            }
+        }
+    }
+}
+
+/// Reports the window's height, so a hero can be sized to the phone it is on
+/// rather than to a constant. See ``EnvironmentValues/plozziOSHeroContainerHeight``.
+///
+/// A `GeometryReader` around the page would report the safe-area content height,
+/// which is the wrong measurement (the hero starts under the status bar) and
+/// would have to be corrected by adding the insets back — reading the window is
+/// the same answer without the correction. Mirrors `PlozziOSWindowWidthReader`.
+struct PlozziOSWindowHeightReader: UIViewRepresentable {
+    let onChange: @MainActor (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> ReportingView {
+        let view = ReportingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateUIView(_ uiView: ReportingView, context: Context) {
+        uiView.onChange = onChange
+        uiView.report()
+    }
+
+    final class ReportingView: UIView {
+        var onChange: (@MainActor (CGFloat) -> Void)?
+        private var lastHeight: CGFloat?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            report()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            report()
+        }
+
+        func report() {
+            guard let height = window?.bounds.height,
+                  height > 0,
+                  height != lastHeight,
+                  let onChange else {
+                return
+            }
+            lastHeight = height
+            Task { @MainActor in
+                onChange(height)
             }
         }
     }

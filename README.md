@@ -1,12 +1,18 @@
 <p align="center">
-  <img src="App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg" alt="Plozz logo" width="128" />
+  <img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" alt="Plozz logo" width="128" />
 </p>
 
 <h1 align="center">Plozz</h1>
 
 <p align="center">
-A free, open source media player for Jellyfin, Plex, and Emby — native on Apple TV, iPhone, and iPad. 
-  <br> Also plays from network shares (SMB, NFS, WebDAV, SFTP, FTP). 
+  A free, open source media player for <b>Jellyfin</b>, <b>Plex</b>, and <b>Emby</b> —
+  native on Apple TV, iPhone, and iPad.
+  <br />
+  It also plays straight from network shares, so a folder of files works too.
+</p>
+
+<p align="center">
+  <a href="https://plozz.app"><b>plozz.app</b></a>
 </p>
 
 <p align="center">
@@ -16,159 +22,133 @@ A free, open source media player for Jellyfin, Plex, and Emby — native on Appl
 <p align="center">
   <a href="https://github.com/thatcube/Plozz/releases"><img src="https://img.shields.io/github/v/release/thatcube/Plozz?include_prereleases&sort=date&display_name=release&label=TestFlight%20beta&color=orange&logo=apple" alt="Latest TestFlight beta" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License: GPL-3.0" /></a>
-  <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple" alt="Platform: tvOS" /></a>
+  <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS%20%C2%B7%20iOS%20%C2%B7%20iPadOS-black.svg?logo=apple" alt="Platform: tvOS, iOS, iPadOS" /></a>
   <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>
 </p>
 
-## Try the beta
+---
 
-Plozz is in **public beta** on TestFlight. [**Join the beta**](https://testflight.apple.com/join/EKfReNMu) to install it on your Apple TV right now.
+## A look at it
 
-## Reporting bugs & requesting features
+<p align="center">
+  <img src="docs/assets/screenshots/tv-home.jpg" width="412" alt="The Plozz home screen, with a featured show and a Continue Watching row" />
+  <img src="docs/assets/screenshots/tv-show.jpg" width="412" alt="A series detail page showing artwork, cast, ratings and episodes" />
+</p>
 
-Found a bug or have an idea? [**Open an issue**](https://github.com/thatcube/Plozz/issues/new/choose) and pick a template — 🐞 **Bug report** or ✨ **Feature request**. For the full contribution flow (the file-an-issue-then-fix habit, dev setup, and the dual-provider expectation), see [**CONTRIBUTING.md**](CONTRIBUTING.md).
+<p align="center">
+  <sub><b>Home</b> — one row set across every server you've connected.</sub>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <sub><b>Detail</b> — artwork, ratings, cast and episodes, filled in automatically.</sub>
+</p>
 
-## Unique Features
+<p align="center">
+  <img src="docs/assets/screenshots/tv-player.jpg" width="412" alt="The Plozz player showing an episode with the transport bar visible" />
+  <img src="docs/assets/screenshots/tv-settings.jpg" width="412" alt="Plozz settings, showing a library sync in progress and the settings list" />
+</p>
 
-- **Multiple servers, one library.** Merge all of your content into one library across Plex, Jellyfin, Emby, and local-share servers.
-- **Sync watch history across all servers** - Optionally sync watch history across every connected server.
-- **Mark as watched** - Mark an entire season as watched or "up to here" to quickly update watch history.
-- **Watched & unwatched indicators** — Choose a watched checkmark or an unwatched corner badge (Infuse / classic-Plex style) on your posters, across Plex, Jellyfin and SMB shares.
-- **Trakt, AniList, MyAnimeList, Simkl, and Last.fm** - Full support for every tracker across your movies, tv, anime, and music.
-- **Seerr integration** - Connect a seerr account and request media from directly within the search or hero of the app.
-- **Highly customizable interface** - Change the theme of the entire app (light, dark, Pure Black). Change the density of media, optionally show hero content, change the navigation style.
-- **Jellyfin, Plex, Emby, and local shares (SMB, NFS, WebDAV, SFTP, FTP are experimental atm but supported)**
-- **Circadian mode** - Automatically warm and dim the display at set times to help you sleep (only at the app level)
-- **Subtitle customization** — Vastly customize the subtitles directly in the player. Change font, size, color, opacity, background, font weight, HDR brightness, shadow, position.
-- **Dual subtitle support** - Turn on 2 different subtitle tracks at the same
+<p align="center">
+  <sub><b>Player</b> — plays essentially anything, with real subtitle control.</sub>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <sub><b>Settings</b> — per-profile, and there is a lot you can change.</sub>
+</p>
 
-- **Auto-discovery** — Automatically detect Jellyfin, Emby, and Seerr servers
-- **Remote-free sign-in** — Jellyfin **Quick Connect**, Emby password sign-in, and Plex **Link** supported
+<p align="center"><sub>More screens, including iPhone and iPad, are on <a href="https://plozz.app">plozz.app</a>.</sub></p>
 
-- **Profiles** — Native Apple TV profile support - all settings are per-profile and your profile selection is remembered based on the Apple TV profile that was last used
-- **(Almost) All video formats supported** - Powered by [AetherEngine](https://github.com/superuser404notfound/AetherEngine), an open source engine that fully supports HDR, Dolby Vision, AV1, virtually everything.[View the full list](https://github.com/superuser404notfound/AetherEngine/blob/main/docs/formats.md).
+## What it is
 
-## Architecture
+Plozz plays the movies, shows, and music on **your** server, on your Apple TV,
+iPhone, and iPad. It's free and open source.
 
-Plozz is a Swift Package with one library per concern, consumed by a thin tvOS
-app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+It talks to Jellyfin, Plex, and Emby, and it can read a plain network share
+directly if you don't run a server at all. Connect more than one and Plozz
+presents them as a single library rather than a set of tabs you switch between.
 
-| Module | Responsibility |
-| --- | --- |
-| [`CoreModels`](Sources/CoreModels/README.md) | Domain models, `AppError`, `LoadState`, caption settings, and the **`MediaProvider`** protocol (the provider abstraction). |
-| [`CoreNetworking`](Sources/CoreNetworking/README.md) | `HTTPClient`, `Endpoint`, URL normalization, and a secret-safe logger (`PlozzLog`). |
-| [`CoreUI`](Sources/CoreUI/README.md) | Shared focusable components, theme, image cache, content-state views. |
-| [`ProviderJellyfin`](Sources/ProviderJellyfin/README.md) | Shared Jellyfin/Emby MediaBrowser client, DTOs, compatibility shims, device profile, and `MediaProvider` implementation. |
-| [`ProviderPlex`](Sources/ProviderPlex/README.md) | Plex client, DTOs, PIN/auth, connection resolver/selector, and a `MediaProvider` implementation. |
-| [`ProviderTrailers`](Sources/ProviderTrailers/README.md) | Synthetic `MediaProvider` for online (YouTube) trailers, with stream extraction via YouTubeKit. |
-| [`MetadataKit`](Sources/MetadataKit/README.md) | Keyless-first artwork & metadata enrichment (AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type with a persistent on-disk cache. Bundled TheTVDB tier + optional maintainer-hosted TMDb tier. |
-| [`RatingsService`](Sources/RatingsService/README.md) | External ratings enrichment (OMDb optional key, keyless AniList) with on-disk cache. |
-| [`TraktService`](Sources/TraktService/README.md) | Optional Trakt OAuth, scrobbling, and watched/sync helpers. |
-| [`TopShelfKit`](Sources/TopShelfKit/README.md) | Domain-to-snapshot mapping for the Top Shelf extension; writes to the shared App Group container. |
-| [`FeatureDiscovery`](Sources/FeatureDiscovery/README.md) | LAN (UDP) discovery, server validation, server-picker UI, last-server persistence. |
-| [`FeatureAuth`](Sources/FeatureAuth/README.md) | Quick Connect, Plex Link, password sign-in, the explicit **session state machine**, Keychain-backed account/session stores. |
-| [`FeatureHome`](Sources/FeatureHome/README.md) | Home rows, item detail, series/season experience, online trailer fallback. |
-| [`FeaturePlayback`](Sources/FeaturePlayback/README.md) | `AVPlayer` view model/view, engine routing, resume reporting, caption style rules, idle-sleep handling, diagnostics overlay. |
-| [`FeatureSearch`](Sources/FeatureSearch/README.md) | Search view & view model, deduplication, search policy. |
-| [`FeatureSettings`](Sources/FeatureSettings/README.md) | Settings (profiles, integrations, server, caption customization, preference detail). |
-| [`FeatureProfiles`](Sources/FeatureProfiles/README.md) | Profile picker, editor, avatar/photo capture (household "Who's watching?"). |
-| [`FeatureMusic`](Sources/FeatureMusic/README.md) | Music browsing, mini-player, queue/now-playing, background audio. |
-| [`AppShell`](Sources/AppShell/README.md) | App state wiring, root navigation, profile selection, provider/registry composition. |
+## Features
 
-Each module's `README.md` documents its responsibility, public surface, and
-invariants. Everything above the provider layer talks to the **`MediaProvider`**
-abstraction rather than a specific backend. Jellyfin and Emby intentionally share
-one conformer so their supported features remain in lockstep.
+### Your servers, together
 
-## Building & running
+- **Jellyfin, Plex, and Emby** — all three are first-class. Nothing is a
+  second-tier afterthought bolted on later.
+- **Network shares too** — SMB, NFS, WebDAV, SFTP, and FTP. A bare folder of
+  files becomes a real library with artwork, descriptions, ratings, and cast.
+  (Shares are supported, but still the newest and roughest part.)
+- **One merged library** — connect several servers and see one set of rows
+  instead of picking a server first.
+- **Sync watch history across servers** — optional, and off until you ask for it.
+- **Found automatically** — Plozz detects Jellyfin, Emby, and Seerr servers on
+  your network so you don't type an address.
+- **Sign in without the remote** — Jellyfin **Quick Connect**, Plex **Link**, and
+  Emby password sign-in.
 
-### Requirements
+### Watching
 
-- macOS with **Xcode 16+** (tvOS 18.0 deployment target)
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
+- **Plays essentially anything** — HDR, Dolby Vision, AV1, and the awkward files
+  other clients hand back to you, powered by
+  [AetherEngine](https://github.com/superuser404notfound/AetherEngine).
+  ([The full format list](https://github.com/superuser404notfound/AetherEngine/blob/main/docs/formats.md).)
+- **Subtitles you can actually read** — change font, size, weight, colour,
+  opacity, background, shadow, position, and HDR brightness from inside the
+  player.
+- **Two subtitle tracks at once** — for learning a language, or for a household
+  that doesn't share one.
+- **Mark as watched** — a whole season, or everything up to a given episode.
+- **Watched and unwatched indicators** — a checkmark, or an unwatched corner
+  badge in the Infuse / classic-Plex style, on every poster.
 
-### Generate the project and run
+### Music
 
-```bash
-xcodegen generate
-open Plozz.xcodeproj
-# Select the "Plozz" scheme and an Apple TV simulator, then Run.
-```
+- **Your music library too** — browse albums and artists, queue things up, and
+  keep listening with a mini-player while you carry on browsing. Audio keeps
+  playing in the background.
 
-### Run the unit tests
+### Make it yours
 
-```bash
-swift test
-```
+- **Themes** — light, dark, or Pure Black.
+- **Layout** — change how dense the rows are, whether the big hero banner shows
+  at all, and how navigation behaves.
+- **Profiles** — real Apple TV profile support. Every setting is per-profile, and
+  Plozz remembers which one you were using.
+- **Circadian mode** — warms and dims the app at times you choose, so late-night
+  viewing isn't a floodlight.
 
-The logic modules are platform-portable, so `swift test` runs on any Swift
-toolchain — no simulator. UI modules compile out behind `#if canImport(...)`
-guards and are covered by the tvOS simulator/app build instead. CI runs
-`swift test` on Linux and an `xcodebuild` tvOS build on macOS.
+### Connected services
 
-### Performance debugging
+- **Trackers** — Trakt, AniList, MyAnimeList, Simkl, and Last.fm, across movies,
+  TV, anime, and music.
+- **Seerr** — request something you don't have without leaving search.
 
-If the app feels laggy or you see blank artwork / memory crashes on device, see
-[`docs/performance-debugging.md`](docs/performance-debugging.md) — an on-device
-playbook using the watchdog and Instruments (`xctrace`).
+## Getting started
 
-### Testing a branch on a device
+Plozz is in **public beta** on TestFlight.
+[**Join the beta**](https://testflight.apple.com/join/EKfReNMu) and it installs
+on your Apple TV, iPhone, and iPad.
 
-To install a branch's build **alongside** the canonical app rather than replacing
-it, use `--branded`:
+You'll need one of: a Jellyfin, Plex, or Emby server, or a network share with
+your media on it. Plozz will offer to set up whichever it finds.
 
-```bash
-tools/deploy-tv.sh  --branded          # Apple TV
-tools/deploy-ios.sh --ipad --branded   # iPad
-```
+## Found a bug? Want something?
 
-This installs `com.thatcube.Plozz.<branch-slug>` as a separate app. Note it signs
-against stripped entitlements, so it has no cloud sync and won't inherit your
-servers — see [`docs/per-branch-builds.md`](docs/per-branch-builds.md).
+[**Open an issue**](https://github.com/thatcube/Plozz/issues/new/choose) and pick
+a template — 🐞 **Bug report** or ✨ **Feature request**. Bug reports are read and
+they do get fixed; feature requests genuinely shape what gets built next.
 
-### Localization
+Please don't paste tokens, passwords, or credentialed server URLs into an issue.
 
-Plozz serves all UI copy from one app-owned String Catalog. Adding a string means
-writing it in Swift, running `tools/l10n-sync.py`, and committing both. The rules
-(and the traps) are in [`docs/localization.md`](docs/localization.md).
+## Contributing
 
-Plozz ships complete UI and permission-prompt catalogs for **36 languages**,
-including Arabic/Hebrew RTL layouts and full Slavic plural forms. How
-translations are produced, independently reviewed, structurally gated, and
-corrected is in [`docs/translations.md`](docs/translations.md).
-
-## Releasing to TestFlight
-
-Distribution is automated with fastlane (App Store Connect API key auth). Drop a
-gitignored `.env.fastlane` with `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_PATH`
-(see `.env.fastlane.example`), then:
-
-```bash
-fastlane beta --env fastlane    # build + upload to TestFlight
-fastlane build --env fastlane   # archive a signed .ipa locally, no upload
-fastlane release --env fastlane # build + upload to the App Store
-```
-
-**Versioning** (`project.yml`): bump the **marketing version**
-(`CFBundleShortVersionString`, e.g. `0.1` → `0.2`) by hand; the **build number**
-is auto-incremented from the latest TestFlight build at archive time — never edit
-it manually.
-
-tvOS **Brand Assets** (app icon + Top Shelf images) live under
-`App/Resources/Assets.xcassets/…brandassets` and are required for any upload. The
-current art is a placeholder — replace it before a public App Store release.
-
-## Roadmap
-- Dedicated iOS music app (Mozz)
-- iOS and/or iPadOS Plozz app depending on demand
+Pull requests are welcome. Building the app, running the tests, the module
+layout, how localization works, and the release process are all in
+[**CONTRIBUTING.md**](CONTRIBUTING.md), with the deeper notes in
+[`docs/`](docs/).
 
 ## Donate
 
-Plozz will always be free and open source, with no paywall, ads, or obligation. If it's
-useful to you, donations toward upkeep
-are welcome — and not donating is completely okay.
+Plozz will always be free and open source, with no paywall, ads, or obligation.
+If it's useful to you, donations toward upkeep are welcome — and not donating is
+completely okay.
 
-**[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring.
+**[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time
+or recurring.
 
 ## Credits & attribution
 
@@ -194,10 +174,37 @@ by any of the services below.
 
 - **OMDb API** — optional IMDb ratings enrichment (requires your own OMDb key).
 - **AniList** — keyless community scores for anime titles.
-- **Plex** and **Jellyfin** — the media servers Plozz connects to. All library
-  content, artwork, and ratings shown in the app are supplied by your own
-  server. "Plex" and "Jellyfin" are trademarks of their respective owners.
+- **Plex**, **Jellyfin**, and **Emby** — the media servers Plozz connects to. All
+  library content, artwork, and ratings shown in the app are supplied by your own
+  server. Those names are trademarks of their respective owners.
 
 ## License
 
 [GPL-3.0](LICENSE) (with an App Store Exception) © 2026 Brandon Moore
+
+<!-- app-family:start -->
+<!-- Generated by https://github.com/thatcube/brando — edit apps.json there, not this block. -->
+
+---
+
+<p align="center"><b>More open source</b></p>
+
+<p align="center">
+  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/hozz-dark.svg" /><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/hozz-light.svg" height="26" alt="Hozz" /></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/mozz-dark.svg" /><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/mozz-light.svg" height="26" alt="Mozz" /></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/plozz-dark.svg" /><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/plozz-light.svg" height="26" alt="Plozz" /></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/twozz-dark.svg" /><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/lockups/twozz-light.svg" height="26" alt="Twozz" /></picture></a>
+</p>
+
+<p align="center">
+  <a href="https://brando.page">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thatcube/brando/main/logos/brando-white.svg" />
+      <img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/brando-black.svg" height="22" alt="Brandon Moore" />
+    </picture>
+  </a>
+</p>
+<!-- app-family:end -->

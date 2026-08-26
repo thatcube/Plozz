@@ -409,13 +409,26 @@ public enum PlozzTheme {
 
         /// How fast a focused card's caption walks its overflow into view.
         ///
-        /// Reading pace, not scrolling pace: fast enough that a long title
-        /// finishes before you've moved on, slow enough to actually read.
-        public static let marqueePointsPerSecond: Double = 55
+        /// Reading pace, not scrolling pace — and unhurried, because the line is
+        /// going to sit at the far end for a second anyway. Fast enough that a
+        /// long title finishes before you've moved on, slow enough that the
+        /// movement itself is calm.
+        public static let marqueePointsPerSecond: Double = 32
+        /// How fast it glides back afterwards. A little quicker than the way out:
+        /// the return carries no information — you've already read the end — so
+        /// it shouldn't take as long, but it still has to feel like the same
+        /// movement, not a snap.
+        public static let marqueeReturnPointsPerSecond: Double = 46
         /// How long a caption sits still after taking focus before it starts to
         /// move — long enough to read the beginning first, and long enough that
         /// scrubbing through a row never sets anything moving.
-        public static let marqueeStartDelay: Double = 0.9
+        public static let marqueeStartDelay: Double = 1.0
+        /// How long the end of the line stays on screen once it arrives. Without
+        /// this the title's end is only ever glimpsed in passing.
+        public static let marqueeEndHold: Double = 1.4
+        /// How long it rests at the start before going again, so a card left in
+        /// focus isn't in perpetual motion.
+        public static let marqueeRestHold: Double = 1.2
 
         // MARK: Focus caption movement
 

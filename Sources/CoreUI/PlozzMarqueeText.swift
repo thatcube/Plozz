@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// A single line of card caption that **fades** at the edges instead of
-/// truncating with an ellipsis, and scrolls its overflow into view while its card
+/// truncating with an ellipsis, and walks its overflow into view while its card
 /// holds focus.
 ///
 /// The geometry is borrowed rather than invented. A caption already sits inset
@@ -15,6 +15,15 @@ import SwiftUI
 /// At rest the line sits exactly where it always did: same position, same
 /// left-hand start. The only difference is what happens at the far end — a fade
 /// where there used to be an ellipsis. Focus is what sets it moving.
+///
+/// ## The scrolling line must not be part of the layout
+///
+/// A line laid out at its full width *is* a wide view, and a wide view widens
+/// whatever it sits in — which turned long titles into cards wider than their
+/// own artwork. So the card measures a hidden, ordinary, truncating copy, and
+/// the real line is drawn as an **overlay** on top of it. An overlay is sized by
+/// its host and reports nothing back, so however long the title is, the card
+/// stays exactly the width it would have been with a plain `Text`.
 ///
 /// ## Why the mask is constant
 ///
@@ -67,21 +76,21 @@ public struct PlozzMarqueeText: View {
 
     private var fades: Bool { overflow > 0.5 }
 
+    /// Restarts the marquee when focus changes, or when a recycled card puts a
+    /// different title in this line.
+    private var cycle: String { "\(isFocused)-\(Int(overflow.rounded()))" }
+
     public var body: some View {
+        // The layout copy: ordinary, truncating, never drawn. It exists so the
+        // card measures a caption that fits, exactly as it did before this line
+        // could scroll. Using the real text — rather than a spacer of guessed
+        // height — keeps the line's height right in every script.
         text
             .font(font)
-            .foregroundStyle(color)
             .lineLimit(1)
-            // Lay the line out at its full width instead of truncating it. What
-            // runs past the card is clipped, and faded before it gets there.
-            .fixedSize(horizontal: true, vertical: false)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.width
-            } action: { width in
-                textWidth = width
-            }
-            .offset(x: inset - scroll)
+            .hidden()
             .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) { line }
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.width
             } action: { width in
@@ -89,43 +98,53 @@ public struct PlozzMarqueeText: View {
             }
             .modifier(EdgeFade(inset: inset, width: containerWidth, isEnabled: fades))
             .clipped()
-            .onChange(of: isFocused) { _, focused in
-                focused ? startScrolling() : returnToRest()
-            }
-            .onChange(of: overflow) { _, _ in
-                // The text itself changed (a recycled card in a lazy row, or a
-                // title arriving late). Re-run whichever state we're in.
-                isFocused ? startScrolling() : returnToRest()
-            }
+            .task(id: cycle) { await runMarquee() }
     }
 
-    /// Walks the line along until its end clears the fade, then back, for as long
-    /// as the card holds focus.
+    /// The line you actually see: laid out at its full width, offset to its
+    /// resting position, and free to run past the card because it is an overlay.
+    private var line: some View {
+        text
+            .font(font)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                textWidth = width
+            }
+            .offset(x: inset - scroll)
+    }
+
+    /// Walks the line out until its end clears the fade, holds it there long
+    /// enough to read, glides back, and waits before going again.
     ///
-    /// Eased rather than linear on purpose: the slow-down at each end reads as the
-    /// line pausing to be read, which is the point of moving it at all, and it
-    /// costs nothing over a constant-speed scroll.
-    private func startScrolling() {
+    /// A loop with real pauses rather than a `repeatForever` autoreverse, because
+    /// an autoreverse turns around the instant it arrives: the end of the title
+    /// is on screen only in passing, and the movement never stops. Holding at
+    /// each end is what makes it readable, and what makes it read as a
+    /// considered movement rather than something sliding back and forth.
+    private func runMarquee() async {
+        if scroll != 0 {
+            withAnimation(.easeOut(duration: 0.3)) { scroll = 0 }
+        }
         let distance = overflow
-        guard isFocused, distance > 0.5, !reduceMotion else {
-            returnToRest()
-            return
-        }
-        let duration = Double(distance) / PlozzTheme.Metrics.marqueePointsPerSecond
-        withAnimation(
-            .easeInOut(duration: duration)
-                .delay(PlozzTheme.Metrics.marqueeStartDelay)
-                .repeatForever(autoreverses: true)
-        ) {
-            scroll = distance
-        }
-    }
+        guard isFocused, distance > 0.5, !reduceMotion else { return }
 
-    /// Hands the line back to its resting position — and, by assigning a
-    /// non-repeating animation to the same value, ends the marquee.
-    private func returnToRest() {
-        withAnimation(.easeOut(duration: 0.25)) {
-            scroll = 0
+        let out = Double(distance) / PlozzTheme.Metrics.marqueePointsPerSecond
+        let back = Double(distance) / PlozzTheme.Metrics.marqueeReturnPointsPerSecond
+        do {
+            try await Task.sleep(for: .seconds(PlozzTheme.Metrics.marqueeStartDelay))
+            while !Task.isCancelled {
+                withAnimation(.easeInOut(duration: out)) { scroll = distance }
+                try await Task.sleep(for: .seconds(out + PlozzTheme.Metrics.marqueeEndHold))
+                withAnimation(.easeInOut(duration: back)) { scroll = 0 }
+                try await Task.sleep(for: .seconds(back + PlozzTheme.Metrics.marqueeRestHold))
+            }
+        } catch {
+            // Cancelled: focus moved on, or the card was recycled. The task that
+            // replaces this one puts the line back where it started.
         }
     }
 }

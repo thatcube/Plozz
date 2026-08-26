@@ -205,7 +205,8 @@ extension MediaItem {
             return self
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
-             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload,
+             .removeFromContinueWatching:
             return nil
         }
     }

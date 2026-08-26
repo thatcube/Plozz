@@ -273,6 +273,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             performWatchlist(adding: action == .addToWatchlist, on: item)
         case .refreshMetadata:
             performRefresh(on: item)
+        case .removeFromContinueWatching:
+            performRemoveFromContinueWatching(on: item)
         case .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
             performDownloadAction(action, item)
         case .goToSeason, .goToMovie, .goToEpisode:
@@ -324,6 +326,38 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             played: played,
             resumePosition: played ? 0 : nil,
             playedPercentage: played ? 1 : nil
+        ).post()
+
+        enqueueWatchMutation(mutation)
+    }
+
+    /// Clears the title's saved position on every server holding it, taking it off
+    /// Continue Watching without claiming it was watched.
+    ///
+    /// The optimistic post carries `resumePosition: 0`, which every surface already
+    /// reads as "no longer in progress" — the card leaves the row at once and its
+    /// progress bar goes, with no refetch and no focus change. The durable write
+    /// then goes through the same outbox as every other watch action, so it
+    /// survives an asleep server or a kill mid-write.
+    ///
+    /// `played` is deliberately left `nil`: the viewer said take it off the row,
+    /// which is not a claim about having seen it.
+    private func performRemoveFromContinueWatching(on item: MediaItem) {
+        guard let mutation = WatchMutationFactory.removeFromContinueWatching(
+            item: item,
+            primaryAccountID: primaryAccountID(),
+            additionalSources: additionalSources(item),
+            crossServerSync: crossServerWatchSyncEnabled()
+        ) else { return }
+
+        var ids = Set(mutation.targets.map(\.itemID))
+        ids.insert(item.id)
+        let scoped = Set(mutation.targets.map(\.id))
+        MediaItemMutation(
+            itemIDs: ids,
+            scopedItemIDs: scoped,
+            resumePosition: 0,
+            playedPercentage: 0
         ).post()
 
         enqueueWatchMutation(mutation)

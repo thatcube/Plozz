@@ -68,6 +68,15 @@ public enum MediaItemActionCatalog {
             if item.kind == .episode, hasUnwatchedUpToHere(item, in: context) {
                 actions.append(.markWatchedUpToHere)
             }
+
+            // Offered wherever a title HAS somewhere to resume from, rather than
+            // only on the Continue Watching row. The row is the reason to want it,
+            // but the thing being undone is the resume point itself, and meeting
+            // the same title in a library or on its own page is no reason to
+            // withhold it.
+            if hasResumePoint(item) {
+                actions.append(.removeFromContinueWatching)
+            }
         }
 
         // Watchlist action: a single toggle whose direction follows the item's
@@ -168,6 +177,20 @@ public enum MediaItemActionCatalog {
 
     /// Whether `item` is a kind that can carry a watched state at all. Folders,
     /// collections and unknowns can't.
+    /// Whether the title has a saved position to clear.
+    ///
+    /// Containers are excluded: a season's "progress" is a count of watched
+    /// episodes rather than a position, so there is nothing here to remove — the
+    /// episode itself is where the action belongs.
+    private static func hasResumePoint(_ item: MediaItem) -> Bool {
+        switch item.kind {
+        case .movie, .episode, .video:
+            return (item.resumePosition ?? 0) > 0
+        case .season, .series, .folder, .collection, .unknown:
+            return false
+        }
+    }
+
     private static func isWatchStateEligible(_ item: MediaItem) -> Bool {
         switch item.kind {
         case .movie, .episode, .video, .season, .series: return true

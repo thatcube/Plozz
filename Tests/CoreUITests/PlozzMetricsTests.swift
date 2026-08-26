@@ -30,6 +30,21 @@ final class PlozzMetricsTests: XCTestCase {
         XCTAssertLessThan(extraLarge.posterGridColumns, standard.posterGridColumns)
     }
 
+    /// The caption only moves to stay clear of a growing card, so it has to move
+    /// further in the style that grows further — and the outlined style must not
+    /// budge from what it has always done.
+    func testCaptionPushFollowsTheFocusStyle() {
+        for density in UIDensity.allCases {
+            let m = PlozzMetrics(density: density)
+            XCTAssertEqual(m.focusCaptionPush(for: .outlined), m.focusCaptionPush)
+            XCTAssertGreaterThan(
+                m.focusCaptionPush(for: .highlight),
+                m.focusCaptionPush(for: .outlined),
+                "highlight grows further, so its caption has to clear further (\(density))"
+            )
+        }
+    }
+
     func testPosterColumnsCountMatchesDensity() {
         for density in UIDensity.allCases {
             let m = PlozzMetrics(density: density)

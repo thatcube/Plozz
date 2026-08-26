@@ -12,14 +12,14 @@ import Foundation
 /// Only the tvOS shell reads it — iOS has no focus engine — but it lives here
 /// with every other card preference so the two shells share one settings model.
 public enum CardFocusStyle: String, CaseIterable, Identifiable, Codable, Sendable {
-    /// The default: a focused card lights its glass surface, and an artwork-only
-    /// card blooms a glass halo around its edge.
+    /// A focused card lights its glass surface, and an artwork-only card blooms a
+    /// glass halo around its edge.
     case outlined
-    /// tvOS's native treatment instead: no outline or halo at all. The card
-    /// simply grows — far enough that it still covers the ground the outline
-    /// used to (see `PlozzTheme.Metrics.highlightFocusScale`) — catches a
-    /// specular sheen as it takes focus, and settles gently back when it loses
-    /// it.
+    /// The default. tvOS's native treatment: no outline or halo at all. The card
+    /// simply grows — far enough that it still covers the ground an outline would
+    /// have (see `PlozzTheme.Metrics.highlightFocusScale`) — catches the light as
+    /// focus lands, leans in the direction focus travelled, and settles gently
+    /// back when it loses focus.
     case highlight
 
     public var id: String { rawValue }
@@ -52,17 +52,19 @@ public enum CardFocusStyle: String, CaseIterable, Identifiable, Codable, Sendabl
         case .outlined:
             return LocalizedStringResource(
                 "cardFocusStyle.detail.outlined",
-                defaultValue: "The focused card is outlined in glass.",
+                defaultValue: "Outlined in glass.",
                 comment: "One-line explanation shown under the card focus-style picker."
             )
         case .highlight:
             return LocalizedStringResource(
                 "cardFocusStyle.detail.highlight",
-                defaultValue: "No outline — the card grows and catches the light.",
+                defaultValue: "Grows and catches the light.",
                 comment: "One-line explanation shown under the card focus-style picker."
             )
         }
     }
 
-    public static let `default`: CardFocusStyle = .outlined
+    /// New installs get the native treatment: it's the one that looks like the
+    /// rest of the platform, and it's cheaper to draw.
+    public static let `default`: CardFocusStyle = .highlight
 }

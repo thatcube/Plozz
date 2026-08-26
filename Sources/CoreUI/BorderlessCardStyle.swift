@@ -126,6 +126,10 @@ private struct FocusHaloModifier: ViewModifier {
 /// sits on the page (never on glass), so — unlike the framed caption — it doesn't
 /// flip to dark ink on focus.
 ///
+/// Both lines marquee: they fade into that same inset instead of truncating with
+/// an ellipsis, and walk their overflow into view while the card holds focus.
+/// See `PlozzMarqueeText`.
+///
 /// Callers constrain the width (the card slot / artwork width); this fills it and
 /// stays leading-aligned.
 public struct BorderlessCardCaption: View {
@@ -136,6 +140,7 @@ public struct BorderlessCardCaption: View {
     private let subtitle: String?   // l10n:content — media title/subtitle from the server
     private let horizontalInset: CGFloat
     private let reservesSubtitleSpace: Bool
+    private let isFocused: Bool
 
     @Environment(\.plozzMetrics) private var metrics
 
@@ -143,32 +148,39 @@ public struct BorderlessCardCaption: View {
         title: Text,
         subtitle: String?,   // l10n:content — media title/subtitle from the server
         horizontalInset: CGFloat,
-        reservesSubtitleSpace: Bool = true
+        reservesSubtitleSpace: Bool = true,
+        isFocused: Bool = false
     ) {
         self.title = title
         self.subtitle = subtitle
         self.horizontalInset = horizontalInset
         self.reservesSubtitleSpace = reservesSubtitleSpace
+        self.isFocused = isFocused
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            title
-                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
+            PlozzMarqueeText(
+                text: title,
+                font: .system(size: metrics.cardTitleFontSize, weight: .semibold),
+                color: .primary,
+                inset: horizontalInset,
+                isFocused: isFocused
+            )
             if let subtitle {
-                Text(subtitle)
-                    .font(.system(size: metrics.cardSubtitleFontSize))
-                    .foregroundStyle(Color.secondary)
-                    .lineLimit(1)
+                PlozzMarqueeText(
+                    text: Text(subtitle),
+                    font: .system(size: metrics.cardSubtitleFontSize),
+                    color: .secondary,
+                    inset: horizontalInset,
+                    isFocused: isFocused
+                )
             } else if reservesSubtitleSpace {
                 Text(verbatim: " ")
                     .font(.system(size: metrics.cardSubtitleFontSize))
                     .hidden()
             }
         }
-        .padding(.horizontal, horizontalInset)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

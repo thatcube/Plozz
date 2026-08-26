@@ -9,10 +9,11 @@ final class CardFocusStyleSettingsStoreTests: XCTestCase {
         return defaults
     }
 
-    func testDefaultIsOutlinedWhenEmpty() {
+    /// New installs get the native treatment without visiting Settings.
+    func testDefaultIsHighlightWhenEmpty() {
         let store = CardFocusStyleSettingsStore(defaults: makeDefaults())
-        XCTAssertEqual(store.load(), .outlined)
-        XCTAssertEqual(CardFocusStyle.default, .outlined)
+        XCTAssertEqual(store.load(), .highlight)
+        XCTAssertEqual(CardFocusStyle.default, .highlight)
     }
 
     func testOnlyTheOutlinedStyleDrawsAnOutline() {
@@ -42,18 +43,18 @@ final class CardFocusStyleSettingsStoreTests: XCTestCase {
         let primary = CardFocusStyleSettingsStore(defaults: defaults, namespace: nil)
         let alice = CardFocusStyleSettingsStore(defaults: defaults, namespace: "alice")
 
-        primary.save(.outlined)
-        alice.save(.highlight)
+        primary.save(.highlight)
+        alice.save(.outlined)
 
-        XCTAssertEqual(primary.load(), .outlined)
-        XCTAssertEqual(alice.load(), .highlight)
+        XCTAssertEqual(primary.load(), .highlight)
+        XCTAssertEqual(alice.load(), .outlined)
         XCTAssertEqual(
             defaults.string(forKey: "com.plozz.cardFocusStyle.alice"),
-            CardFocusStyle.highlight.rawValue
+            CardFocusStyle.outlined.rawValue
         )
         XCTAssertEqual(
             defaults.string(forKey: "com.plozz.cardFocusStyle"),
-            CardFocusStyle.outlined.rawValue
+            CardFocusStyle.highlight.rawValue
         )
     }
 
@@ -66,9 +67,9 @@ final class CardFocusStyleSettingsStoreTests: XCTestCase {
             store: CardStyleSettingsStore(defaults: defaults),
             focusStore: CardFocusStyleSettingsStore(defaults: defaults)
         )
-        XCTAssertEqual(model.focusStyle, .outlined)
-        model.focusStyle = .highlight
-        XCTAssertEqual(CardFocusStyleSettingsStore(defaults: defaults).load(), .highlight)
+        XCTAssertEqual(model.focusStyle, .highlight)
+        model.focusStyle = .outlined
+        XCTAssertEqual(CardFocusStyleSettingsStore(defaults: defaults).load(), .outlined)
         // The two preferences are stored separately and don't disturb each other.
         XCTAssertEqual(CardStyleSettingsStore(defaults: defaults).load(), model.style)
     }

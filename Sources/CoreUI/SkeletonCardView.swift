@@ -43,6 +43,7 @@ public struct SkeletonCardView: View {
     /// mirrored from `PosterCardView` so the placeholder matches whichever look the
     /// real cards will render in.
     @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
 
     public init(
         style: Style = .poster,
@@ -149,7 +150,7 @@ public struct SkeletonCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     // The real caption rides up to the resting gap when unfocused (a pure
                     // offset, never a layout change); a skeleton is always at rest.
-                    .offset(y: -metrics.focusCaptionPush)
+                    .offset(y: -captionPush)
             }
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
@@ -208,7 +209,14 @@ public struct SkeletonCardView: View {
         case .poster: base = metrics.posterCaptionTopSpacing
         case .landscape: base = metrics.landscapeCaptionTopSpacing
         }
-        return base + metrics.focusCaptionPush
+        return base + captionPush
+    }
+
+    /// The real card's focus push for the active focus style — a skeleton has to
+    /// reserve exactly what the card it stands in for reserves, or the row shifts
+    /// the moment real content swaps in.
+    private var captionPush: CGFloat {
+        metrics.focusCaptionPush(for: focusStyle)
     }
 
     /// Approximate width available to the borderless caption pills — the card slot

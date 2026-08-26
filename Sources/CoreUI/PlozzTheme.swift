@@ -382,6 +382,16 @@ public enum PlozzTheme {
         /// behind the card that just took focus.
         public static let highlightSettleDuration: TimeInterval = 0.52
 
+        /// How much further a focused card's caption drops in the highlight style.
+        ///
+        /// The push exists to keep a growing card off its own title, so it has to
+        /// track how much the card actually grows. Highlight grows roughly twice
+        /// as far past its resting size as the outlined style does, so the caption
+        /// has to get out of the way by roughly twice as much or the card lands on
+        /// top of it. Expressed as a ratio rather than a second constant, so the
+        /// two can't drift apart when the scales are tuned.
+        public static let highlightCaptionPushRatio: CGFloat = 1.85
+
         /// How far a card tips as focus arrives on it, before unwinding flat.
         ///
         /// Small on purpose. This is meant to read as the card having mass — it
@@ -394,6 +404,18 @@ public enum PlozzTheme {
         /// size of a poster distorts it into a shape the artwork was never
         /// composed for.
         public static let highlightLeanPerspective: CGFloat = 0.55
+
+        // MARK: Card captions
+
+        /// How fast a focused card's caption walks its overflow into view.
+        ///
+        /// Reading pace, not scrolling pace: fast enough that a long title
+        /// finishes before you've moved on, slow enough to actually read.
+        public static let marqueePointsPerSecond: Double = 55
+        /// How long a caption sits still after taking focus before it starts to
+        /// move — long enough to read the beginning first, and long enough that
+        /// scrubbing through a row never sets anything moving.
+        public static let marqueeStartDelay: Double = 0.9
 
         // MARK: Focus caption movement
 

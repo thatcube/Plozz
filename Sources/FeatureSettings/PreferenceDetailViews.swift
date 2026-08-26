@@ -124,13 +124,14 @@ struct AppearanceDetailView: View {
             SettingsDetailGroup(title: "Watched Indicator") {
                 CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator, swatchHeight: 150)
             }
-            SettingsDetailGroup(title: "Focus") {
-                DescribedSegmentedPicker(
-                    options: CardFocusStyle.allCases,
-                    selection: $cardStyle.focusStyle,
-                    title: { $0.displayName },
-                    detail: { $0.detail }
+            SettingsDetailGroup(
+                title: LocalizedStringResource(
+                    "settings.cards.focus",
+                    defaultValue: "Focus",
+                    comment: "Section header in tvOS Settings > Appearance > Cards, above the picker that chooses what a media card does when the remote's focus lands on it. Not camera focus and not a concentration/Focus mode — this is the on-screen selection highlight."
                 )
+            ) {
+                CompactCardFocusStylePicker(selection: $cardStyle.focusStyle, swatchHeight: 150)
             }
         }
     }

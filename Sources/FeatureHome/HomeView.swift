@@ -1501,17 +1501,23 @@ private struct LibraryCardView: View {
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             VStack(alignment: .leading, spacing: 4) {
-                aggregated.library.displayName
-                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                    .foregroundStyle(titleColor)
-                    .lineLimit(1)
-                Text(subtitle.isEmpty ? " " : subtitle)
-                    .font(.system(size: metrics.cardSubtitleFontSize))
-                    .foregroundStyle(subtitleColor)
-                    .lineLimit(1)
-                    .opacity(subtitle.isEmpty ? 0 : 1)
+                PlozzMarqueeText(
+                    text: aggregated.library.displayName,
+                    font: .system(size: metrics.cardTitleFontSize, weight: .semibold),
+                    color: titleColor,
+                    inset: metrics.landscapeCaptionInset,
+                    isFocused: isFocused
+                )
+                PlozzMarqueeText(
+                    text: Text(subtitle.isEmpty ? " " : subtitle),
+                    font: .system(size: metrics.cardSubtitleFontSize),
+                    color: subtitleColor,
+                    inset: metrics.landscapeCaptionInset,
+                    isFocused: isFocused
+                )
+                .opacity(subtitle.isEmpty ? 0 : 1)
             }
-            .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
+            .padding(.bottom, metrics.landscapeCaptionInset)
             .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)
@@ -1534,7 +1540,8 @@ private struct LibraryCardView: View {
     /// with them in either card style.
     private var borderlessCard: some View {
         let width = metrics.landscapeCardSlotWidth - metrics.borderlessCardSideMargin * 2
-        return VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush) {
+        let push = metrics.focusCaptionPush(for: focusStyle)
+        return VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing + push) {
             Color.clear
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .frame(width: width)
@@ -1550,10 +1557,11 @@ private struct LibraryCardView: View {
             BorderlessCardCaption(
                 title: aggregated.library.displayName,
                 subtitle: subtitle.isEmpty ? nil : subtitle,
-                horizontalInset: metrics.landscapeCaptionInset
+                horizontalInset: metrics.landscapeCaptionInset,
+                isFocused: isFocused
             )
             .frame(width: width)
-            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+            .offset(y: isFocused ? 0 : -push)
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)

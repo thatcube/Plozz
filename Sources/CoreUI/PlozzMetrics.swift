@@ -63,6 +63,10 @@ public struct PlozzMetrics: Equatable, Sendable {
 
     /// Distance a focused tile's caption drops on focus (scaled). Shared by the
     /// circular artist/cast tiles and the borderless cards.
+    ///
+    /// Use ``focusCaptionPush(for:)`` at any call site that knows the focus
+    /// style — how far a card grows depends on it, and so does how far its
+    /// caption has to move to stay clear.
     public let focusCaptionPush: CGFloat
 
     // MARK: Borderless ("Posters") card style (scaled)
@@ -179,6 +183,19 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// true visible gap between cards rather than overlapping the glass.
     public var landscapeCardSlotWidth: CGFloat {
         landscapeWidth + cardInset * 2
+    }
+
+    /// How far a focused tile's caption drops, for the focus style in use.
+    ///
+    /// The push is only ever there to keep a growing card off its own title, so
+    /// it has to follow how far the card actually grows: the highlight style
+    /// grows about twice as far past its resting size as the outlined one, and a
+    /// caption that stays put gets sat on. The reserved gap slot and the caption's
+    /// own offset must both come from here, or the card's footprint changes with
+    /// focus and the whole row shifts.
+    public func focusCaptionPush(for focusStyle: CardFocusStyle) -> CGFloat {
+        guard !focusStyle.drawsFocusOutline else { return focusCaptionPush }
+        return (focusCaptionPush * PlozzTheme.Metrics.highlightCaptionPushRatio).rounded()
     }
 
     /// Exact rail footprint for a shared media card. Home uses this instead of a

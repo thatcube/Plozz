@@ -158,17 +158,23 @@ struct MusicCard: View {
                 .frame(width: scaledWidth, height: scaledWidth)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                    .foregroundStyle(titleColor)
-                    .lineLimit(1)
-                Text(subtitle ?? " ")
-                    .font(.system(size: metrics.cardSubtitleFontSize))
-                    .foregroundStyle(subtitleColor)
-                    .lineLimit(1)
-                    .opacity(subtitle == nil ? 0 : 1)
+                PlozzMarqueeText(
+                    text: Text(title),
+                    font: .system(size: metrics.cardTitleFontSize, weight: .semibold),
+                    color: titleColor,
+                    inset: metrics.landscapeCaptionInset,
+                    isFocused: isFocused
+                )
+                PlozzMarqueeText(
+                    text: Text(subtitle ?? " "),
+                    font: .system(size: metrics.cardSubtitleFontSize),
+                    color: subtitleColor,
+                    inset: metrics.landscapeCaptionInset,
+                    isFocused: isFocused
+                )
+                .opacity(subtitle == nil ? 0 : 1)
             }
-            .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
+            .padding(.bottom, metrics.landscapeCaptionInset)
             .frame(width: scaledWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)
@@ -201,13 +207,14 @@ struct MusicCard: View {
             BorderlessCardCaption(
                 title: Text(verbatim: title),
                 subtitle: subtitle,
-                horizontalInset: metrics.landscapeCaptionInset
+                horizontalInset: metrics.landscapeCaptionInset,
+                isFocused: isFocused
             )
             .frame(width: scaledWidth)
             // Push the caption down on focus with a pure transform (see
             // `borderlessCaptionSpacing`) so the footprint stays fixed and focusing
             // a tile never shifts the grid/row.
-            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+            .offset(y: isFocused ? 0 : -captionPush)
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
@@ -222,7 +229,13 @@ struct MusicCard: View {
     /// unfocused via a transform offset, so the tile's footprint never changes with
     /// focus and neighbours don't move.
     private var borderlessCaptionSpacing: CGFloat {
-        metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush
+        metrics.landscapeCaptionTopSpacing + captionPush
+    }
+
+    /// How far this card's caption drops on focus, for the active focus style —
+    /// the highlight style grows the card further, so the caption clears further.
+    private var captionPush: CGFloat {
+        metrics.focusCaptionPush(for: focusStyle)
     }
 
     @ViewBuilder

@@ -90,15 +90,17 @@ public extension View {
     ///   - outlineScale: the scale this card uses in the outlined style. Pass `1`
     ///     to ask for no lift at all (Reduce Motion) and neither style will add
     ///     one.
-    ///   - outlineReach: how far this card's outline extends past its layout
-    ///     bounds on each edge — the halo's padding for artwork-only cards.
-    ///     Defaults to the framed card's glass inset, which is what a card that
-    ///     lights its own surface grows by.
+    ///   - outlineReach: how far this card's outline extends **past its own
+    ///     bounds** on each edge — the halo's padding for an artwork-only card,
+    ///     which blooms outside the artwork. Defaults to `0`, which is right for
+    ///     a card that draws its own frame: that frame lives *inside* the card's
+    ///     footprint, so nothing is lost when it stops lighting up and there is
+    ///     no lost ground to grow back.
     func plozzCardFocusLift(
         isFocused: Bool,
         cornerRadius: CGFloat,
         outlineScale: CGFloat,
-        outlineReach: CGFloat? = nil
+        outlineReach: CGFloat = 0
     ) -> some View {
         modifier(CardFocusLiftModifier(
             isFocused: isFocused,
@@ -135,10 +137,9 @@ private struct CardFocusLiftModifier: ViewModifier {
     let isFocused: Bool
     let cornerRadius: CGFloat
     let outlineScale: CGFloat
-    let outlineReach: CGFloat?
+    let outlineReach: CGFloat
 
     @Environment(\.plozzCardFocusStyle) private var focusStyle
-    @Environment(\.plozzMetrics) private var metrics
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The card's own layout size, needed to work out how much growth replaces
@@ -170,7 +171,7 @@ private struct CardFocusLiftModifier: ViewModifier {
         return PlozzTheme.Metrics.highlightFocusScale(
             outlineScale: outlineScale,
             contentSize: measuredSize,
-            outlineReach: outlineReach ?? metrics.cardInset
+            outlineReach: outlineReach
         )
     }
 

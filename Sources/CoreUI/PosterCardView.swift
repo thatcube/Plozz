@@ -212,15 +212,9 @@ public struct PosterCardView: View {
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
-            VStack(alignment: .leading, spacing: 2) {
-                primaryText
-                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                    .foregroundStyle(titleColor)
-                    .lineLimit(1)
-                subtitleLine
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding([.horizontal, .bottom], metrics.posterCaptionInset)
+            captionBlock(inset: metrics.posterCaptionInset, spacing: 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, metrics.posterCaptionInset)
         }
         .plozzFramedMediaCard(
             innerCornerRadius: PlozzTheme.Metrics.posterArtCornerRadius,
@@ -271,15 +265,9 @@ public struct PosterCardView: View {
             // point of the treatment; a reserved-but-empty caption slot would just
             // read as a rendering bug.
             if !showsSeriesArtwork {
-                VStack(alignment: .leading, spacing: 4) {
-                    primaryText
-                        .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                        .foregroundStyle(titleColor)
-                        .lineLimit(1)
-                    subtitleLine
-                }
-                .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
-                .frame(width: size.width, alignment: .leading)
+                captionBlock(inset: metrics.landscapeCaptionInset, spacing: 4)
+                    .padding(.bottom, metrics.landscapeCaptionInset)
+                    .frame(width: size.width, alignment: .leading)
             }
         }
         .plozzFramedMediaCard(
@@ -318,7 +306,8 @@ public struct PosterCardView: View {
                     title: primaryText,
                     subtitle: subtitleText,
                     horizontalInset: borderlessCaptionInset,
-                    reservesSubtitleSpace: reservesSubtitleSpace
+                    reservesSubtitleSpace: reservesSubtitleSpace,
+                    isFocused: isFocused
                 )
                 // Push the caption down on focus with a pure transform, never a layout
                 // change: the gap slot is always reserved at its focused size (see
@@ -326,7 +315,7 @@ public struct PosterCardView: View {
                 // gap when unfocused, dropping back down on focus. Because it's an
                 // offset (like `scaleEffect`), the card's footprint is identical in both
                 // states, so focusing one card can't shift the row or the page.
-                .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+                .offset(y: isFocused ? 0 : -captionPush)
             }
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
@@ -381,7 +370,15 @@ public struct PosterCardView: View {
         case .poster: base = metrics.posterCaptionTopSpacing
         case .landscape: base = metrics.landscapeCaptionTopSpacing
         }
-        return base + metrics.focusCaptionPush
+        return base + captionPush
+    }
+
+    /// How far this card's caption drops on focus, for the active focus style —
+    /// the highlight style grows the card further, so the caption has to clear
+    /// further. Both the reserved slot above and the offset below read from here,
+    /// so the card's footprint stays identical either way.
+    private var captionPush: CGFloat {
+        metrics.focusCaptionPush(for: focusStyle)
     }
 
     /// Horizontal caption clearance for a borderless card — the same optical inset
@@ -394,13 +391,36 @@ public struct PosterCardView: View {
         }
     }
 
+    /// The framed card's caption: title over subtitle, both marqueed.
+    ///
+    /// The block spans the card's **full** content width and the lines carry
+    /// their own `inset` instead — that inset is the fade zone, so a long title
+    /// dissolves into the gap that keeps text off the rounded corners rather than
+    /// stopping short with an ellipsis. See `PlozzMarqueeText`.
     @ViewBuilder
-    private var subtitleLine: some View {
+    private func captionBlock(inset: CGFloat, spacing: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            PlozzMarqueeText(
+                text: primaryText,
+                font: .system(size: metrics.cardTitleFontSize, weight: .semibold),
+                color: titleColor,
+                inset: inset,
+                isFocused: isFocused
+            )
+            subtitleLine(inset: inset)
+        }
+    }
+
+    @ViewBuilder
+    private func subtitleLine(inset: CGFloat) -> some View {
         if let subtitleText {
-            Text(subtitleText)
-                .font(.system(size: metrics.cardSubtitleFontSize))
-                .foregroundStyle(subtitleColor)
-                .lineLimit(1)
+            PlozzMarqueeText(
+                text: Text(subtitleText),
+                font: .system(size: metrics.cardSubtitleFontSize),
+                color: subtitleColor,
+                inset: inset,
+                isFocused: isFocused
+            )
         } else if reservesSubtitleSpace {
             Text(verbatim: " ")
                 .font(.system(size: metrics.cardSubtitleFontSize))

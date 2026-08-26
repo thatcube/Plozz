@@ -330,9 +330,9 @@ public struct RootView: View {
                                     appState.beginLiveWatchSession(accountID: accountID, itemID: itemID)
                                 }
                             },
-                            finishPlayback: { accountID, itemID, watchedPercent, mutation in
+                            finishPlayback: { accountID, itemID, watchedPercent, mutation, item in
                                 Task { @MainActor in
-                                    appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation)
+                                    appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation, item: item)
                                 }
                             },
                             checkpoint: { mutation in

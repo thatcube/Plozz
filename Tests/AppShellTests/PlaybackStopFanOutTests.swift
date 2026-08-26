@@ -18,8 +18,8 @@ final class PlaybackStopFanOutTests: XCTestCase {
         // even though the warm identity union knows peer servers.
         let bridge = WatchOutboxBridge(
             beginLiveSession: { _, _ in },
-            finishPlayback: { accountID, itemID, _, mutation in
-                recorder.record(accountID: accountID, itemID: itemID, mutation: mutation)
+            finishPlayback: { accountID, itemID, _, mutation, item in
+                recorder.record(accountID: accountID, itemID: itemID, mutation: mutation, item: item)
             },
             checkpoint: { _ in },
             crossServerSync: { false }
@@ -65,8 +65,8 @@ final class PlaybackStopFanOutTests: XCTestCase {
         let recorder = PlaybackStopRecorder()
         let bridge = WatchOutboxBridge(
             beginLiveSession: { _, _ in },
-            finishPlayback: { accountID, itemID, _, mutation in
-                recorder.record(accountID: accountID, itemID: itemID, mutation: mutation)
+            finishPlayback: { accountID, itemID, _, mutation, item in
+                recorder.record(accountID: accountID, itemID: itemID, mutation: mutation, item: item)
             },
             checkpoint: { _ in },
             crossServerSync: { true }
@@ -101,6 +101,11 @@ final class PlaybackStopFanOutTests: XCTestCase {
             ],
             "Targets must come from the live warmed identity snapshot at stop time, not the empty creation-time snapshot"
         )
+        XCTAssertEqual(
+            call?.item?.id,
+            "origin-item",
+            "The played card rides along, so a row that has never carried this title can show it without asking a server that may not have recorded the play yet"
+        )
     }
 
     func testPlaybackCheckpointFansOutToUnionWithoutEndingSession() {
@@ -117,7 +122,7 @@ final class PlaybackStopFanOutTests: XCTestCase {
         var finishCalls = 0
         let bridge = WatchOutboxBridge(
             beginLiveSession: { _, _ in },
-            finishPlayback: { _, _, _, _ in finishCalls += 1 },
+            finishPlayback: { _, _, _, _, _ in finishCalls += 1 },
             checkpoint: { mutation in checkpoints.record(mutation) },
             crossServerSync: { true }
         )
@@ -197,6 +202,10 @@ private final class PlaybackStopRecorder: @unchecked Sendable {
         let accountID: String?
         let itemID: String
         let mutation: WatchMutation?
+        /// The played card. Carried so a surface can show a title it was not
+        /// already showing — the first play of something is precisely the case
+        /// Continue Watching has no existing card to update.
+        let item: MediaItem?
     }
 
     private let lock = NSLock()
@@ -209,9 +218,9 @@ private final class PlaybackStopRecorder: @unchecked Sendable {
         return calls.first
     }
 
-    func record(accountID: String?, itemID: String, mutation: WatchMutation?) {
+    func record(accountID: String?, itemID: String, mutation: WatchMutation?, item: MediaItem?) {
         lock.lock()
-        calls.append(Call(accountID: accountID, itemID: itemID, mutation: mutation))
+        calls.append(Call(accountID: accountID, itemID: itemID, mutation: mutation, item: item))
         lock.unlock()
     }
 }

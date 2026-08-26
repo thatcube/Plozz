@@ -243,6 +243,13 @@ public enum ContinueWatchingDiagnostics {
         return line
     }
 
+    /// Cards kept on the row because the server has not caught up with a write we
+    /// have already made. Bounded, so this list emptying is the normal end state.
+    public static func carryForwardLine(titles: [String]) -> String {  // l10n:content — developer-facing diagnostic
+        "carry-forward kept=\(titles.count) titles=[\(titles.joined(separator: ", "))] "
+            + "reason=written-but-not-yet-in-feed"
+    }
+
     private static func timestamp(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]

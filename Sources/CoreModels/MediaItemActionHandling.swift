@@ -135,6 +135,21 @@ public struct MediaItemMutation: Sendable, Equatable {
     /// New fractional watched progress in `0...1`, or `nil` if unchanged. Drives the
     /// poster-card progress bar directly (`PosterCardView` reads `playedPercentage`).
     public let playedPercentage: Double?
+    /// The card this mutation is about, when the sender had it.
+    ///
+    /// Carried so a surface can show a title it was not already showing. Every
+    /// other field describes a *change* to a card a screen is assumed to hold
+    /// already, which is true for a badge or a progress bar and false for the one
+    /// case that matters most: the first time something is played, Continue
+    /// Watching has never carried it. Home would then have nothing to update, and
+    /// would have to ask a server that has not necessarily recorded the play yet —
+    /// measured on device losing that race routinely, leaving the title missing
+    /// until the app was relaunched.
+    ///
+    /// The player is holding the real card the whole time it plays, so passing it
+    /// along costs nothing and removes the question entirely. `nil` from senders
+    /// that genuinely have only ids, such as a context-menu toggle.
+    public let item: MediaItem?
 
     public init(
         itemIDs: Set<String>,
@@ -142,7 +157,8 @@ public struct MediaItemMutation: Sendable, Equatable {
         played: Bool? = nil,
         favorite: Bool? = nil,
         resumePosition: TimeInterval? = nil,
-        playedPercentage: Double? = nil
+        playedPercentage: Double? = nil,
+        item: MediaItem? = nil
     ) {
         self.itemIDs = itemIDs
         self.scopedItemIDs = scopedItemIDs
@@ -150,6 +166,7 @@ public struct MediaItemMutation: Sendable, Equatable {
         self.favorite = favorite
         self.resumePosition = resumePosition
         self.playedPercentage = playedPercentage
+        self.item = item
     }
 
     /// Reconstructs the optimistic UI portion of a durable outbox mutation. This
@@ -176,6 +193,7 @@ public struct MediaItemMutation: Sendable, Equatable {
         static let favorite = "favorite"
         static let resumePosition = "resumePosition"
         static let playedPercentage = "playedPercentage"
+        static let item = "item"
     }
 
     /// Account-scoped key for one physical copy, matching ``MediaSourceRef/id``.
@@ -264,6 +282,10 @@ public struct MediaItemMutation: Sendable, Equatable {
         if let favorite { userInfo[Key.favorite] = favorite }
         if let resumePosition { userInfo[Key.resumePosition] = resumePosition }
         if let playedPercentage { userInfo[Key.playedPercentage] = playedPercentage }
+        // Passed by reference through the notification rather than encoded: the
+        // observers are all in-process, and a round trip through Data would cost a
+        // needless encode on the main thread at the moment playback stops.
+        if let item { userInfo[Key.item] = item }
         NotificationCenter.default.post(
             name: .mediaItemDidMutate,
             object: nil,
@@ -289,7 +311,8 @@ public struct MediaItemMutation: Sendable, Equatable {
             played: played,
             favorite: favorite,
             resumePosition: resumePosition,
-            playedPercentage: playedPercentage
+            playedPercentage: playedPercentage,
+            item: notification.userInfo?[Key.item] as? MediaItem
         )
     }
 }

@@ -666,9 +666,9 @@ private struct PlozziOSHeroPlaybackID: Equatable {
 /// would crop it by a different amount on every phone. Mirroring buys the height
 /// back and leaves the picture alone.
 ///
-/// The picture is handed a `layout` rather than a plain size because the flipped
-/// copy is not free to render everything the upright one does — see
-/// ``PlozziOSHeroPictureLayout/isMirror``.
+/// Only ever mirrors a still. Video cannot be mirrored — one AVPlayer renders in
+/// one AVPlayerLayer at a time — so a hero playing a trailer fills the stage with
+/// it instead; see ``PlozziOSHeroBackdrop``.
 private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
     /// How far the mirror is drawn up *behind* the picture's bottom edge, so the
     /// two overlap instead of meeting at a line that splits open the moment the
@@ -687,7 +687,7 @@ private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
                 height: height
             )
             ZStack(alignment: .top) {
-                sizedPicture(geometry, isMirror: false)
+                sizedPicture(geometry)
                 if geometry.reflectionHeight > 0 {
                     mirror(geometry, width: width)
                         .offset(y: geometry.pictureHeight - Self.seamOverlap)
@@ -716,14 +716,12 @@ private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
     }
 
     private func sizedPicture(
-        _ geometry: ExtendedArtworkGeometry,
-        isMirror: Bool
+        _ geometry: ExtendedArtworkGeometry
     ) -> some View {
         picture(
             PlozziOSHeroPictureLayout(
                 width: geometry.renderedWidth,
-                height: geometry.pictureHeight,
-                isMirror: isMirror
+                height: geometry.pictureHeight
             )
         )
         .frame(width: geometry.renderedWidth, height: geometry.pictureHeight)
@@ -747,7 +745,7 @@ private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
                 height: geometry.reflectionHeight + Self.seamOverlap
             )
             .overlay(alignment: .top) {
-                sizedPicture(geometry, isMirror: true)
+                sizedPicture(geometry)
                     .scaleEffect(x: 1, y: -1)
             }
             .mask {
@@ -775,15 +773,6 @@ private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
 private struct PlozziOSHeroPictureLayout {
     let width: CGFloat
     let height: CGFloat
-    /// True for the flipped copy.
-    ///
-    /// Callers must not put `HeroTrailerVideoLayer` in a mirrored copy: it does
-    /// not create a player layer, it **moves** the controller's single surface
-    /// view into whichever host asks last, so a second instance would tear the
-    /// trailer out of the upright picture. Mirror the trailer with
-    /// `PlozziOSMirrorVideoLayer`, which owns its own layer over the same player
-    /// — the same split the sidebar reflection already makes.
-    let isMirror: Bool
 }
 
 private struct PlozziOSHeroBackdrop: View {
@@ -807,12 +796,23 @@ private struct PlozziOSHeroBackdrop: View {
         ZStack {
             if extendsArtwork {
                 PlozziOSExtendedHeroArtwork(height: height) { layout in
-                    artwork(layout: layout)
+                    stillArtwork()
                         .frame(width: layout.width, height: layout.height)
                         .clipped()
                 }
+                // A trailer fills the stage rather than being mirrored into it.
+                //
+                // One AVPlayer renders in exactly one AVPlayerLayer at a time,
+                // so a mirrored copy is not something that can be drawn: the
+                // second layer stays empty and shows the still image behind it,
+                // which is a different picture from the frame playing above it.
+                // That read as a hard line across the hero — the artwork simply
+                // stopped and something else started. The mirror is there to buy
+                // height without cropping the picture harder, and video is the
+                // one case where it cannot, so video takes the crop instead.
+                trailerLayer
             } else {
-                artwork(layout: nil)
+                artwork()
             }
 
             // Gentle black legibility darkening behind the title (kept true to the
@@ -844,40 +844,43 @@ private struct PlozziOSHeroBackdrop: View {
         )
     }
 
-    /// The picture itself: artwork, plus the trailer once it is rolling.
-    ///
-    /// `layout` is nil for the ordinary fill-the-stage case and set when this is
-    /// being laid into (or mirrored beneath) an extended stage.
-    @ViewBuilder
-    private func artwork(layout: PlozziOSHeroPictureLayout?) -> some View {
+    /// The picture itself: artwork, plus the trailer once it is rolling, filling
+    /// one band. The extended stage composes those two halves itself, because
+    /// there the trailer spans the whole stage while the still is mirrored into
+    /// it.
+    private func artwork() -> some View {
         ZStack {
-            FallbackAsyncImage(
-                references: presentation.artworkReferences,
-                variant: .heroBackdrop,
-                // Put a real picture up while the 2000px pass decodes, rather
-                // than a flat colour. The 768px frame is what warming caches for
-                // the whole carousel, so a swipe lands on an image immediately
-                // and sharpens, instead of waiting out a full-size download.
-                previewVariant: .heroPreview
-            ) {
-                palette.backgroundBase
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
+            stillArtwork()
+            trailerLayer
+        }
+    }
 
-            if showsTrailer,
-               trailerController.currentItemID == itemID,
-               trailerController.isPlaying {
-                if layout?.isMirror == true {
-                    PlozziOSMirrorVideoLayer(player: trailerController.player)
-                } else {
-                    HeroTrailerVideoLayer(
-                        controller: trailerController,
-                        role: surfaceRole
-                    )
-                    .transition(.opacity)
-                }
-            }
+    private func stillArtwork() -> some View {
+        FallbackAsyncImage(
+            references: presentation.artworkReferences,
+            variant: .heroBackdrop,
+            // Put a real picture up while the 2000px pass decodes, rather
+            // than a flat colour. The 768px frame is what warming caches for
+            // the whole carousel, so a swipe lands on an image immediately
+            // and sharpens, instead of waiting out a full-size download.
+            previewVariant: .heroPreview
+        ) {
+            palette.backgroundBase
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    @ViewBuilder
+    private var trailerLayer: some View {
+        if showsTrailer,
+           trailerController.currentItemID == itemID,
+           trailerController.isPlaying {
+            HeroTrailerVideoLayer(
+                controller: trailerController,
+                role: surfaceRole
+            )
+            .transition(.opacity)
         }
     }
 }

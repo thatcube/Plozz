@@ -149,6 +149,77 @@ final class HomeViewModelCarryForwardTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["jf-1"])
     }
 
+    // MARK: Once the server has answered, it keeps answering
+
+    /// The Zorro case, reduced. Play something, remove it in the Plex app a minute
+    /// later, and the row must let it go — even though our write is still "recent"
+    /// by the clock. Once the server has shown us the card, its later silence is an
+    /// answer rather than lag.
+    func testACardTheServerAlreadyShowedUsIsNotCarriedWhenItLaterDisappears() {
+        let confirmed: Set<String> = ["plex\u{1}removed-after-playing"]
+        let result = HomeViewModel.reconcileContinueWatching(
+            [],
+            pending: [],
+            appliedRecency: applied("removed-after-playing", secondsAgo: 30),
+            carryForward: [card("removed-after-playing")],
+            serverConfirmed: confirmed,
+            now: now
+        )
+        XCTAssertTrue(
+            result.isEmpty,
+            "A removal made after the server acknowledged the play must take effect at once, not after the carry window"
+        )
+    }
+
+    /// The counterpart that must keep working: before any acknowledgement, the
+    /// same absence still means the server has not caught up.
+    func testACardTheServerHasNotYetShownUsIsStillCarried() {
+        let result = HomeViewModel.reconcileContinueWatching(
+            [],
+            pending: [],
+            appliedRecency: applied("just-played", secondsAgo: 3),
+            carryForward: [card("just-played")],
+            serverConfirmed: [],
+            now: now
+        )
+        XCTAssertEqual(result.map(\.id), ["just-played"])
+    }
+
+    /// Confirmation is per title, so acknowledging one says nothing about another.
+    func testConfirmingOneTitleDoesNotAffectAnother() {
+        let result = HomeViewModel.reconcileContinueWatching(
+            [],
+            pending: [],
+            appliedRecency: applied("just-played", secondsAgo: 3),
+            carryForward: [card("just-played")],
+            serverConfirmed: ["plex\u{1}something-else"],
+            now: now
+        )
+        XCTAssertEqual(result.map(\.id), ["just-played"])
+    }
+
+    /// A merged card is confirmed if *any* of its servers has shown it, since one
+    /// acknowledgement is enough to prove the write was seen.
+    func testConfirmationOnAnySourceOfAMergedCardCounts() {
+        var merged = MediaItem(id: "jf-1", title: "Merged", kind: .movie)
+        merged.sourceAccountID = "jellyfin"
+        merged.resumePosition = 600
+        merged.sources = [
+            MediaSourceRef(accountID: "jellyfin", itemID: "jf-1"),
+            MediaSourceRef(accountID: "plex", itemID: "px-1")
+        ]
+
+        let result = HomeViewModel.reconcileContinueWatching(
+            [],
+            pending: [],
+            appliedRecency: applied("px-1", secondsAgo: 30),
+            carryForward: [merged],
+            serverConfirmed: ["plex\u{1}px-1"],
+            now: now
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
     // MARK: Inertness
 
     func testNothingHappensWithoutPendingOrAppliedWrites() {

@@ -411,11 +411,13 @@ public final class HomeViewModel {
             guard !aggregationTask.isCancelled else { return }
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
+            noteServerConfirmed(merged.continueWatching)
             let reconciledCW = Self.reconcileContinueWatching(
                 merged.continueWatching,
                 pending: pending,
                 appliedRecency: appliedRecency,
-                carryForward: onScreenContinueWatching
+                carryForward: onScreenContinueWatching,
+                serverConfirmed: serverConfirmedTargets
             )
             Self.logOverlay(fetched: merged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
@@ -440,11 +442,13 @@ public final class HomeViewModel {
             guard !unmergedTask.isCancelled else { return }
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
+            noteServerConfirmed(unmerged.continueWatching)
             let reconciledCW = Self.reconcileContinueWatching(
                 unmerged.continueWatching,
                 pending: pending,
                 appliedRecency: appliedRecency,
-                carryForward: onScreenContinueWatching
+                carryForward: onScreenContinueWatching,
+                serverConfirmed: serverConfirmedTargets
             )
             Self.logOverlay(fetched: unmerged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
@@ -583,6 +587,16 @@ public final class HomeViewModel {
             card.lastPlayedAt = Date()
             content.continueWatching.insert(card, at: 0)
             placedCard = true
+        }
+        if isInProgressResume {
+            // A new play is a new prediction, so it needs a new acknowledgement:
+            // whatever the servers told us about this title before this moment no
+            // longer settles anything. Without this a title played, removed, and
+            // then played again would be treated as already-confirmed and dropped
+            // on the next refresh, even though the fresh play genuinely belongs.
+            for target in Self.mutationScopeKeys(mutation, card: mutation.item) {
+                serverConfirmedTargets.remove(target)
+            }
         }
         if isInProgressResume && !alreadyOnHome {
             // Still refresh, so the placed card is reconciled with the server's own
@@ -751,9 +765,55 @@ public final class HomeViewModel {
         contentStore.clearHero()
     }
 
+    /// Targets a server has shown us since we last wrote to them, keyed like
+    /// ``MediaSourceRef/id``.
+    ///
+    /// Turns "absent from the feed" — which on its own is ambiguous — into two
+    /// distinguishable things. Before a server has acknowledged our write, absence
+    /// means it has not caught up and the just-played card deserves to be carried.
+    /// Once it has returned that card even once, the prediction is fulfilled, and a
+    /// later absence is the server saying the title is gone: watched elsewhere, or
+    /// dismissed in its own app. Without this distinction a title removed moments
+    /// after being played stayed on the row until the carry window expired, which is
+    /// the mirror of the bug the window exists to prevent.
+    ///
+    /// A fresh play removes its targets again, because that is a new prediction
+    /// awaiting a new acknowledgement.
+    private var serverConfirmedTargets: Set<String> = []
+
     /// In-flight guard so a burst of resume ticks for a not-yet-loaded title
     /// coalesces into a single silent re-aggregation instead of stacking reloads.
     private var newResumeReloadInFlight = false
+
+    /// The scope keys a mutation addresses. `scopedItemIDs` already carries the
+    /// exact `(account, item)` pairs the fan-out targeted; the played card
+    /// contributes its own servers so a merged title is fully covered.
+    nonisolated static func mutationScopeKeys(_ mutation: MediaItemMutation, card: MediaItem?) -> Set<String> {
+        // `scopedItemIDs` joins with ":", and an item id may itself contain one, so
+        // split on the FIRST separator only — the account id never does.
+        var keys = Set(mutation.scopedItemIDs.compactMap { scoped -> String? in
+            guard let separator = scoped.firstIndex(of: ":") else { return nil }
+            return String(scoped[scoped.startIndex..<separator])
+                + "\u{1}"
+                + String(scoped[scoped.index(after: separator)...])
+        })
+        if let card { keys.formUnion(scopeKeys(of: card)) }
+        return keys
+    }
+
+    /// The scope keys a card answers to: every server that holds it, plus its own
+    /// account-and-id pair for an unmerged single-source card.
+    nonisolated static func scopeKeys(of item: MediaItem) -> Set<String> {
+        var keys = Set(item.sources.map { $0.accountID + "\u{1}" + $0.itemID })
+        if let account = item.sourceAccountID { keys.insert(account + "\u{1}" + item.id) }
+        return keys
+    }
+
+    /// Records that the servers have acknowledged these cards, so a later absence
+    /// reads as a removal rather than as lag. See ``serverConfirmedTargets``.
+    private func noteServerConfirmed(_ fetched: [MediaItem]) {
+        for item in fetched { serverConfirmedTargets.formUnion(Self.scopeKeys(of: item)) }
+    }
 
     /// Silently re-aggregates Home so a brand-new resume is backed by real server
     /// data as soon as the servers have it.
@@ -827,6 +887,7 @@ public final class HomeViewModel {
         pending: [WatchMutation],
         appliedRecency: [String: AppliedResumeRecord] = [:],
         carryForward: [MediaItem] = [],
+        serverConfirmed: Set<String> = [],
         now: Date = Date(),
         clampFreshness: TimeInterval = 30 * 60,
         carryForwardWindow: TimeInterval = 5 * 60
@@ -891,6 +952,7 @@ public final class HomeViewModel {
             fetched: items,
             pending: pending,
             appliedRecency: appliedRecency,
+            serverConfirmed: serverConfirmed,
             now: now,
             window: carryForwardWindow
         ))
@@ -909,6 +971,7 @@ public final class HomeViewModel {
         fetched: [MediaItem],
         pending: [WatchMutation],
         appliedRecency: [String: AppliedResumeRecord],
+        serverConfirmed: Set<String>,
         now: Date,
         window: TimeInterval
     ) -> [MediaItem] {
@@ -944,6 +1007,9 @@ public final class HomeViewModel {
             if let account = candidate.sourceAccountID { keys.insert(scopeKey(account, candidate.id)) }
             guard !keys.isDisjoint(with: queued) || !keys.isDisjoint(with: recentlyWritten) else { continue }
             guard keys.isDisjoint(with: present) else { continue }
+            // The server already acknowledged this write once. Its absence now is an
+            // answer, not a lag, and it outranks anything we predicted.
+            guard keys.isDisjoint(with: serverConfirmed) else { continue }
             carried.append(candidate)
         }
         if !carried.isEmpty {

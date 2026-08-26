@@ -50,6 +50,7 @@ private struct FocusHaloModifier: ViewModifier {
 
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.plozzCardFocusStyle) private var focusStyle
+    @Environment(\.themePalette) private var palette
 
     func body(content: Content) -> some View {
         if focusStyle.drawsFocusOutline {
@@ -59,14 +60,28 @@ private struct FocusHaloModifier: ViewModifier {
             // glistens instead. It keeps the halo's drop shadow, though — that
             // shadow is what lifted the tile off the page, and an artwork-only
             // card with neither outline nor shadow reads as flat rather than
-            // focused. Expressed as animatable values rather than an `if` so it
-            // fades with the lift; a fully transparent shadow draws nothing.
+            // focused.
+            //
+            // Cast by a shape BUILT ONLY WHEN FOCUSED, exactly as the halo below
+            // is, and for the same reason. A `.shadow` modifier carrying zero
+            // opacity at rest would sit on every tile in a poster wall — dozens
+            // of them — for the benefit of the one that has focus. The caster is
+            // the tile's own shape, so the opaque artwork hides it completely
+            // and only its shadow shows.
             content
-                .shadow(
-                    color: .black.opacity(isFocused ? 0.36 : 0),
-                    radius: isFocused ? 20 : 0,
-                    y: isFocused ? 10 : 0
-                )
+                .background {
+                    // The caster is the tile's own shape in the theme's card
+                    // surface, so opaque artwork hides it completely and only its
+                    // shadow shows — and where artwork is transparent or still
+                    // loading, what shows through is a card surface rather than a
+                    // black plate.
+                    if isFocused {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(palette.cardSurface)
+                            .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
+                            .transition(.opacity)
+                    }
+                }
                 .plozzCardFocusLift(
                     isFocused: isFocused,
                     cornerRadius: cornerRadius,

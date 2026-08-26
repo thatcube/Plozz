@@ -57,6 +57,29 @@ import CoreModels
 /// away from the focus engine. **Finger-tracking tilt is therefore off the table
 /// for our cards.** What this file does instead — grow, sweep, settle — is
 /// driven purely by focus, which is the input we actually have.
+///
+/// ## What this costs, per card (keep it this way)
+///
+/// A poster wall is dozens of cards and one of them has focus, so the rule for
+/// everything here is: **at rest it must cost nothing.** As it stands, a resting
+/// card pays for two geometry observations and an identity transform, and a
+/// focused card pays for two gradient fills and a shadow:
+///
+/// - **Nothing is built for an unfocused card.** The sheen and the focus shadow
+///   both live inside `if isFocused`, following the rule the halo learned the
+///   hard way — a focus surface hidden with `.opacity(0)` still renders, and a
+///   row of them measured ~100 offscreen passes a frame on an A12.
+/// - **The lean's transform is fully identity at rest** — real axis, zero angle,
+///   zero perspective — so a resting card isn't handed a projection to composite.
+/// - **Geometry is observed, not published.** Size goes to `@State` but only
+///   changes on layout; position goes to a reference box, because it changes on
+///   every frame of a scrolling rail and putting that in `@State` would
+///   re-render every visible card sixty times a second for a value none of them
+///   draw.
+/// - **No blend modes, no `drawingGroup`, no live glass.** The sheen is plain
+///   alpha. And the highlight style is in fact *lighter* than the outlined one:
+///   the focused card gets no `.glassEffect` lift and no glass halo, which is
+///   the most expensive thing a focused card can do here.
 public extension View {
     /// The focus lift for a card, in whichever style the profile has chosen.
     ///
@@ -223,9 +246,14 @@ private final class CardFraming {
 ///
 /// The rotation axis is perpendicular to the travel, so moving sideways rocks
 /// the card about its vertical axis and moving up or down about its horizontal
-/// one. At rest that axis would be `(0, 0, 0)`, which is a degenerate rotation
-/// rather than a harmless identity one, so a resting card is given a real axis
-/// and a zero angle instead.
+/// one.
+///
+/// A resting card is handed a **fully identity** transform — a real axis, a zero
+/// angle, and zero perspective. Two reasons, and only the first is cosmetic: a
+/// `(0, 0, 0)` axis is a degenerate rotation rather than a harmless identity one,
+/// and a projection with perspective is the kind of thing a renderer gives its
+/// own layer to. Every card in a grid carries this modifier, and all but one of
+/// them are at rest at any moment, so at rest it must cost nothing.
 private struct CardArrivalLean: ViewModifier {
     let lean: CGVector
     let isEnabled: Bool
@@ -236,10 +264,11 @@ private struct CardArrivalLean: ViewModifier {
 
     func body(content: Content) -> some View {
         if isEnabled {
+            let leaning = magnitude > 0
             content.rotation3DEffect(
                 .degrees(PlozzTheme.Metrics.highlightLeanDegrees * Double(magnitude)),
-                axis: magnitude > 0 ? (x: lean.dy, y: lean.dx, z: 0) : (x: 0, y: 1, z: 0),
-                perspective: PlozzTheme.Metrics.highlightLeanPerspective
+                axis: leaning ? (x: lean.dy, y: lean.dx, z: 0) : (x: 0, y: 1, z: 0),
+                perspective: leaning ? PlozzTheme.Metrics.highlightLeanPerspective : 0
             )
         } else {
             content
@@ -313,14 +342,18 @@ private struct CardFocusSheen: View {
 
     var body: some View {
         ZStack {
-            // The steady specular: a card under focus is lit from above, which is
-            // what keeps it looking raised once the sweep has passed.
+            // The steady specular: a card under focus is lit from above. It
+            // covers the WHOLE card rather than fading out halfway — a light
+            // that stops in the middle reads as a gradient someone drew on the
+            // artwork, where an even wash that is simply brighter at the top
+            // reads as the card being lit. So the bottom keeps a real value
+            // instead of falling to clear.
             shape.fill(
                 LinearGradient(
-                    colors: [
-                        .white.opacity(0.16),
-                        .white.opacity(0.04),
-                        .clear
+                    stops: [
+                        .init(color: .white.opacity(0.20), location: 0),
+                        .init(color: .white.opacity(0.12), location: 0.45),
+                        .init(color: .white.opacity(0.07), location: 1)
                     ],
                     startPoint: .top,
                     endPoint: .bottom

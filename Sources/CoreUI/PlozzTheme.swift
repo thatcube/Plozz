@@ -382,6 +382,19 @@ public enum PlozzTheme {
         /// behind the card that just took focus.
         public static let highlightSettleDuration: TimeInterval = 0.52
 
+        /// How far a card tips as focus arrives on it, before unwinding flat.
+        ///
+        /// Small on purpose. This is meant to read as the card having mass — it
+        /// took the push that moved focus — not as an animation playing. Past a
+        /// few degrees it stops looking like weight and starts looking like a
+        /// trick, and a trick is exactly the thing that gets old.
+        public static let highlightLeanDegrees: Double = 5
+
+        /// Perspective for that tip. Shallow: a strong perspective on a card the
+        /// size of a poster distorts it into a shape the artwork was never
+        /// composed for.
+        public static let highlightLeanPerspective: CGFloat = 0.55
+
         // MARK: Focus caption movement
 
         /// Vertical distance a focused tile's caption drops on focus, shared by the

@@ -122,8 +122,25 @@ private struct CardFocusLiftModifier: ViewModifier {
     /// the outline. Measured only in the highlight style — the outlined style
     /// never reads it, so it never pays for the measurement.
     @State private var measuredSize: CGSize = .zero
+    /// The card's position on screen, kept in a reference box rather than
+    /// `@State` **on purpose**: a card's global frame changes on every frame of a
+    /// scrolling rail, and storing that in `@State` would invalidate every
+    /// visible card sixty times a second for a value none of them draw. Only the
+    /// arrival lean reads it, once, at the instant focus lands.
+    @State private var framing = CardFraming()
+    /// Which way focus was travelling when it arrived here. Set the moment the
+    /// card takes focus and then animated back to zero, so the card rocks once
+    /// and settles flat.
+    @State private var lean: CGVector = .zero
+    /// Bumped each time a lean is set, to drive the unwind. The unwind can't
+    /// happen in the same breath as the tilt: two writes to `lean` in one turn
+    /// coalesce into a single update, the card renders only the final value, and
+    /// the tilt is never seen. Changing this identifier hands the unwind to a
+    /// `task`, which runs after the tilt has been committed.
+    @State private var arrival = 0
 
     private var isHighlight: Bool { !focusStyle.drawsFocusOutline }
+    private var leansOnArrival: Bool { isHighlight && !reduceMotion }
 
     private var scale: CGFloat {
         guard isHighlight else { return outlineScale }
@@ -136,7 +153,11 @@ private struct CardFocusLiftModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .modifier(CardSizeReader(isEnabled: isHighlight, size: $measuredSize))
+            .modifier(CardSizeReader(
+                isEnabled: isHighlight,
+                size: $measuredSize,
+                framing: leansOnArrival ? framing : nil
+            ))
             .overlay {
                 // Built only while focused, and only in the style that uses it —
                 // the same rule the focus halo follows (see `FocusHaloModifier`).
@@ -148,22 +169,119 @@ private struct CardFocusLiftModifier: ViewModifier {
                 }
             }
             .scaleEffect(isFocused ? scale : 1)
+            .modifier(CardArrivalLean(
+                lean: lean,
+                isEnabled: leansOnArrival
+            ))
+            .onChange(of: isFocused) { _, focused in applyArrivalLean(focused) }
+            .task(id: arrival) { await unwindLean() }
+    }
+
+    /// Tips the card as focus lands, in whichever direction focus travelled to
+    /// reach it. Nothing is animated here — the lean is the card's *starting*
+    /// position, not something to ease into.
+    private func applyArrivalLean(_ focused: Bool) {
+        guard leansOnArrival, focused,
+              let travel = CardFocusMomentum.shared.arrive(at: framing.frame) else {
+            // Always land flat. Holding a stale direction would make the next
+            // arrival start from the wrong tilt.
+            lean = .zero
+            return
+        }
+        var immediate = Transaction()
+        immediate.disablesAnimations = true
+        withTransaction(immediate) {
+            lean = travel
+            arrival &+= 1
+        }
+    }
+
+    /// Unwinds the tilt on the focus spring, one update after it was applied —
+    /// so the card is seen leaning before it rocks back flat.
+    private func unwindLean() async {
+        guard lean != .zero else { return }
+        withAnimation(
+            PlozzTheme.Metrics.cardFocusAnimation(
+                isFocused: true,
+                focusStyle: focusStyle,
+                reduceMotion: reduceMotion
+            )
+        ) {
+            lean = .zero
+        }
     }
 }
 
-/// Reports the view's layout size, but only when the active focus style needs
-/// it. A `ViewModifier` rather than an inline `if` so the geometry observation
-/// is attached or absent, never toggled per frame.
-private struct CardSizeReader: ViewModifier {
+/// Holds a card's on-screen frame without publishing it. See `framing`.
+private final class CardFraming {
+    var frame: CGRect = .zero
+}
+
+/// The arrival lean: a card that has just been reached tips away from the
+/// direction focus came from — as if the push that moved focus also moved the
+/// card — and unwinds flat on the settle spring.
+///
+/// The rotation axis is perpendicular to the travel, so moving sideways rocks
+/// the card about its vertical axis and moving up or down about its horizontal
+/// one. At rest that axis would be `(0, 0, 0)`, which is a degenerate rotation
+/// rather than a harmless identity one, so a resting card is given a real axis
+/// and a zero angle instead.
+private struct CardArrivalLean: ViewModifier {
+    let lean: CGVector
     let isEnabled: Bool
-    @Binding var size: CGSize
+
+    /// 1 for a straight move, a little more for a diagonal one — the dominant
+    /// axis is normalised to ±1 by `CardFocusMomentum`.
+    private var magnitude: CGFloat { max(abs(lean.dx), abs(lean.dy)) }
 
     func body(content: Content) -> some View {
         if isEnabled {
-            content.onGeometryChange(for: CGSize.self) { proxy in
-                proxy.size
-            } action: { newSize in
-                size = newSize
+            content.rotation3DEffect(
+                .degrees(PlozzTheme.Metrics.highlightLeanDegrees * Double(magnitude)),
+                axis: magnitude > 0 ? (x: lean.dy, y: lean.dx, z: 0) : (x: 0, y: 1, z: 0),
+                perspective: PlozzTheme.Metrics.highlightLeanPerspective
+            )
+        } else {
+            content
+        }
+    }
+}
+
+/// Reports the view's layout size, and — when the arrival lean needs it — its
+/// position, but only when the active focus style uses them. A `ViewModifier`
+/// rather than an inline `if` so the geometry observation is attached or absent,
+/// never toggled per frame.
+private struct CardSizeReader: ViewModifier {
+    let isEnabled: Bool
+    @Binding var size: CGSize
+    /// Non-nil only when the arrival lean is active. Written straight through to
+    /// a reference box, so a scrolling rail doesn't invalidate every card in it.
+    let framing: CardFraming?
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .onGeometryChange(for: CGSize.self) { proxy in
+                    proxy.size
+                } action: { newSize in
+                    size = newSize
+                }
+                .modifier(CardFrameReader(framing: framing))
+        } else {
+            content
+        }
+    }
+}
+
+private struct CardFrameReader: ViewModifier {
+    let framing: CardFraming?
+
+    func body(content: Content) -> some View {
+        if let framing {
+            content.onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { newFrame in
+                framing.frame = newFrame
             }
         } else {
             content

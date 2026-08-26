@@ -198,6 +198,51 @@ public enum ContinueWatchingDiagnostics {
         "refresh trigger=\(trigger) willReload=\(willReload) reason=\(reason)"
     }
 
+    /// (1b) The decisive test for "a title I removed keeps coming back".
+    ///
+    /// A dismissal is invisible in a resume feed: the title keeps its position and
+    /// reads as ordinary mid-progress content, indistinguishable from something
+    /// genuinely half-watched. It is only detectable by *comparison* — the hub
+    /// applies the exclusion, the older feed does not, so a title in the feed and
+    /// absent from the hub is one the server considers dismissed and we are
+    /// showing anyway.
+    ///
+    /// `feedOnly` is therefore the finding. `hubOnly` is the mirror case and is
+    /// expected to be small or empty; a large one means the two lists are simply
+    /// not comparable on this server and the whole diff should be distrusted,
+    /// which is why it is reported rather than hidden.
+    ///
+    /// `hubUnavailable` distinguishes "the hub says this title is gone" from "we
+    /// could not ask" — a failed request must never be read as a dismissal.
+    public static func feedVersusHubLine(  // l10n:content — developer-facing diagnostic
+        feed: [ServerRow],
+        hub: [ServerRow]?,
+        hubEndpoint: String,  // l10n:content — developer-facing diagnostic
+        hubError: String? = nil  // l10n:content — developer-facing diagnostic
+    ) -> String {
+        guard let hub else {
+            return "diff hub=\(hubEndpoint) UNAVAILABLE error=\(hubError ?? "unknown") "
+                + "<<CANNOT-CONFIRM-DISMISSALS"
+        }
+        let feedIDs = feed.map(\.id)
+        let hubIDs = Set(hub.map(\.id))
+        let feedIDSet = Set(feedIDs)
+        let feedOnly = feed.filter { !hubIDs.contains($0.id) }
+        let hubOnly = hub.filter { !feedIDSet.contains($0.id) }
+
+        var line = "diff hub=\(hubEndpoint) feed=\(feed.count) hub=\(hub.count) "
+            + "feedOnly=\(feedOnly.count) hubOnly=\(hubOnly.count)"
+        for row in feedOnly {
+            line += "\n  FEED-ONLY " + describe(row)
+                + " <<SHOWN-BY-US-BUT-NOT-BY-PLEX"
+        }
+        for row in hubOnly {
+            line += "\n  HUB-ONLY " + describe(row)
+                + " <<PLEX-SHOWS-IT-WE-DO-NOT"
+        }
+        return line
+    }
+
     private static func timestamp(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]

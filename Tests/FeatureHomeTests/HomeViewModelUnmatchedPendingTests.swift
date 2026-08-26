@@ -188,3 +188,82 @@ final class ContinueWatchingDiagnosticsRowTests: XCTestCase {
         XCTAssertFalse(handled.contains("<<DROPPED-NO-ROW-UPDATE"))
     }
 }
+
+/// Covers the feed-versus-hub diff, which is the only way to see a dismissal.
+///
+/// A title removed from Continue Watching keeps its resume position and reads as
+/// ordinary half-watched content in a resume feed — there is no field that says
+/// the viewer dismissed it. Only the hub applies the exclusion, so the difference
+/// between the two lists *is* the evidence.
+final class ContinueWatchingDiagnosticsDiffTests: XCTestCase {
+
+    private func row(_ id: String, _ title: String, pct: Int = 40) -> ContinueWatchingDiagnostics.ServerRow {
+        .init(id: id, kind: "movie", title: title, viewOffsetMS: pct * 100, durationMS: 10_000, viewCount: nil)
+    }
+
+    /// The reported symptom: we show it, Plex does not.
+    func testTitleInFeedButNotInHubIsFlagged() {
+        let line = ContinueWatchingDiagnostics.feedVersusHubLine(
+            feed: [row("1", "Kept"), row("2", "Dismissed")],
+            hub: [row("1", "Kept")],
+            hubEndpoint: "/hubs/home/continueWatching"
+        )
+        XCTAssertTrue(line.contains("feedOnly=1"))
+        XCTAssertTrue(line.contains("FEED-ONLY"))
+        XCTAssertTrue(line.contains("<<SHOWN-BY-US-BUT-NOT-BY-PLEX"))
+        XCTAssertTrue(line.contains("Dismissed"))
+    }
+
+    /// A dismissed title is mid-progress and otherwise unremarkable — proving the
+    /// diff catches what the per-row heuristic cannot.
+    func testDismissedTitleIsNotOtherwiseSuspicious() {
+        let dismissed = row("2", "Dismissed", pct: 40)
+        XCTAssertFalse(
+            dismissed.looksAlreadyWatched,
+            "Nothing about the row itself betrays the dismissal; only the diff can"
+        )
+        XCTAssertTrue(
+            ContinueWatchingDiagnostics
+                .feedVersusHubLine(feed: [dismissed], hub: [], hubEndpoint: "/hubs/home/continueWatching")
+                .contains("<<SHOWN-BY-US-BUT-NOT-BY-PLEX")
+        )
+    }
+
+    func testAgreeingListsProduceNoFindings() {
+        let line = ContinueWatchingDiagnostics.feedVersusHubLine(
+            feed: [row("1", "A"), row("2", "B")],
+            hub: [row("2", "B"), row("1", "A")],
+            hubEndpoint: "/hubs/home/continueWatching"
+        )
+        XCTAssertTrue(line.contains("feedOnly=0"))
+        XCTAssertTrue(line.contains("hubOnly=0"))
+        XCTAssertFalse(line.contains("<<"), "Order alone is not a disagreement")
+    }
+
+    /// The mirror case — Plex offers something we never show.
+    func testTitleInHubButNotInFeedIsReportedSeparately() {
+        let line = ContinueWatchingDiagnostics.feedVersusHubLine(
+            feed: [],
+            hub: [row("9", "Missing from our row")],
+            hubEndpoint: "/hubs/home/continueWatching"
+        )
+        XCTAssertTrue(line.contains("hubOnly=1"))
+        XCTAssertTrue(line.contains("<<PLEX-SHOWS-IT-WE-DO-NOT"))
+    }
+
+    /// A failed request must never read as a dismissal — the whole diff is void.
+    func testUnavailableHubIsNotReadAsDismissal() {
+        let line = ContinueWatchingDiagnostics.feedVersusHubLine(
+            feed: [row("1", "A")],
+            hub: nil,
+            hubEndpoint: "/hubs/continueWatching",
+            hubError: "notFound"
+        )
+        XCTAssertTrue(line.contains("UNAVAILABLE"))
+        XCTAssertTrue(line.contains("<<CANNOT-CONFIRM-DISMISSALS"))
+        XCTAssertFalse(
+            line.contains("<<SHOWN-BY-US-BUT-NOT-BY-PLEX"),
+            "A hub we could not reach proves nothing about any title"
+        )
+    }
+}

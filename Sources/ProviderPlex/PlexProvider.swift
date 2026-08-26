@@ -143,17 +143,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// raw feed can tell us that is what happened. Gated and free when off.
     private func logContinueWatchingFeed(_ onDeck: [PlexMetadata]) {
         guard ContinueWatchingDiagnostics.isEnabled else { return }
-        let rows = onDeck.map { meta in
-            ContinueWatchingDiagnostics.ServerRow(
-                id: meta.ratingKey ?? "nil",
-                kind: meta.type ?? "nil",
-                title: [meta.grandparentTitle, meta.title].compactMap { $0 }.joined(separator: " – "),
-                viewOffsetMS: meta.viewOffset,
-                durationMS: meta.duration,
-                viewCount: meta.viewCount,
-                lastViewedAt: meta.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
-            )
-        }
+        let rows = onDeck.map(Self.diagnosticRow)
         ContinueWatchingDiagnostics.emit(
             ContinueWatchingDiagnostics.serverFeedLine(
                 provider: "plex",
@@ -161,6 +151,59 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 endpoint: "/library/onDeck",
                 rows: rows
             )
+        )
+        // Ask the real hub the same question and diff the answers. Detached and
+        // unawaited so Home's load never waits on a diagnostic, and read-only —
+        // nothing consumes the hub but this log line.
+        let client = self.client
+        let limit = max(onDeck.count, 20)
+        Task.detached(priority: .utility) {
+            await Self.logFeedVersusHub(feed: rows, client: client, limit: limit)
+        }
+    }
+
+    /// Diffs the onDeck feed against Plex's Continue Watching hub. Best-effort:
+    /// tries the Home variant first and falls back to the plain one, because older
+    /// servers route only the latter — and an unroutable path must be reported as
+    /// "could not ask", never as "the title was dismissed".
+    private static func logFeedVersusHub(
+        feed: [ContinueWatchingDiagnostics.ServerRow],
+        client: PlexClient,
+        limit: Int
+    ) async {
+        var endpoint = "/hubs/home/continueWatching"
+        var hub: [PlexMetadata]?
+        var failure: String?
+        do {
+            hub = try await client.continueWatchingHub(limit: limit, homeVariant: true)
+        } catch {
+            do {
+                endpoint = "/hubs/continueWatching"
+                hub = try await client.continueWatchingHub(limit: limit, homeVariant: false)
+            } catch let fallbackError {
+                failure = String(describing: fallbackError)
+            }
+        }
+        ContinueWatchingDiagnostics.emit(
+            ContinueWatchingDiagnostics.feedVersusHubLine(
+                feed: feed,
+                hub: hub.map { $0.map(diagnosticRow) },
+                hubEndpoint: endpoint,
+                hubError: failure
+            )
+        )
+    }
+
+    /// One Plex row in the diagnostics' server-facing vocabulary.
+    private static func diagnosticRow(_ meta: PlexMetadata) -> ContinueWatchingDiagnostics.ServerRow {
+        ContinueWatchingDiagnostics.ServerRow(
+            id: meta.ratingKey ?? "nil",
+            kind: meta.type ?? "nil",
+            title: [meta.grandparentTitle, meta.title].compactMap { $0 }.joined(separator: " – "),
+            viewOffsetMS: meta.viewOffset,
+            durationMS: meta.duration,
+            viewCount: meta.viewCount,
+            lastViewedAt: meta.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }
 

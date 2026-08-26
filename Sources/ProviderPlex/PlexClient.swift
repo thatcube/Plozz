@@ -432,6 +432,39 @@ public struct PlexClient: Sendable {
         ).MediaContainer.Hub ?? []
     }
 
+    /// `GET /hubs/home/continueWatching` — the **actual** Continue Watching hub
+    /// the Plex apps render, as opposed to the older `/library/onDeck` feed this
+    /// client reads for the row.
+    ///
+    /// The two are not the same list and are not meant to be. The hub is the one
+    /// that honours Plex's "Remove from Continue Watching": dismissing a title
+    /// records an exclusion the hub applies and `onDeck` knows nothing about, so a
+    /// dismissed title keeps its `viewOffset` and keeps coming back through
+    /// `onDeck` forever. The hub also excludes next-up suggestions that `onDeck`
+    /// happily volunteers.
+    ///
+    /// Read **only** by the diagnostics path, to diff the two lists and prove
+    /// which of them a wrong row came from. Nothing user-facing consumes it, so
+    /// this cannot change what the row shows. Older servers may not route the
+    /// `home` variant; the caller falls back.
+    func continueWatchingHub(limit: Int, homeVariant: Bool = true) async throws -> [PlexMetadata] {
+        let container = try await decode(
+            PlexMediaContainerResponse.self,
+            Endpoint(
+                path: homeVariant ? "/hubs/home/continueWatching" : "/hubs/continueWatching",
+                queryItems: containerQuery(start: 0, size: limit),
+                headers: headers
+            )
+        ).MediaContainer
+        // The payload is a MediaContainer of Hubs; some servers inline the items
+        // directly instead. Accept both so a shape difference doesn't read as an
+        // empty hub, which would look exactly like "everything was dismissed".
+        if let hubs = container.Hub, !hubs.isEmpty {
+            return hubs.flatMap { $0.Metadata ?? [] }
+        }
+        return container.Metadata ?? []
+    }
+
     /// `GET /library/sections/{id}/firstCharacter` — the section's title
     /// first-character facet: one `Directory` per present letter (in ascending
     /// `titleSort` order) carrying its `titleSort` (`"A"`, `"1-9"`, `"#"`, …)

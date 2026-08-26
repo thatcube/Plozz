@@ -35,7 +35,7 @@ public enum TopShelfPosterComposer {
     /// those renders; `TopShelfStore.pruneArtwork` then deletes them.
     ///
     /// 1: brand-blue fill. 2: white chrome matching `PlozzMediaChrome`.
-    static let barStyleGeneration = 4
+    static let barStyleGeneration = 5
 
     /// Internal rather than private so `PlozzMediaChromeParityTests` can pin the
     /// two greys to CoreUI's live values.
@@ -61,7 +61,11 @@ public enum TopShelfPosterComposer {
         ///
         /// The vertical inset is left alone. Whatever the shelf trims, it did not
         /// show at the bottom.
-        static let chipHorizontalInsetFraction: CGFloat = 34.0 / 280.0
+        ///
+        /// A plain fraction rather than a ratio of the in-app numbers: it is not
+        /// derived from them, it is what the shelf turned out to need, and dressing
+        /// it up as `x / 280` would imply a relationship that does not exist.
+        static let chipHorizontalInsetFraction: CGFloat = 0.09
 
         static let heightFraction: CGFloat = 12.0 / 280.0
         static let insetFraction: CGFloat = 22.0 / 280.0

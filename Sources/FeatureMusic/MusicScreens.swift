@@ -143,9 +143,14 @@ private struct BrowseButton: View {
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
+
+    /// The glass lift is this button's focus outline, so with the outline off it
+    /// keeps its resting surface (and therefore its resting ink) on focus.
+    private var surfaceFocused: Bool { isFocused && focusStyle.drawsFocusOutline }
 
     private var titleColor: Color {
-        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+        PlozzCardCaption.titleColor(isFocused: surfaceFocused, reduceTransparency: reduceTransparency)
     }
 
     var body: some View {
@@ -154,13 +159,16 @@ private struct BrowseButton: View {
             .foregroundStyle(titleColor)
             .padding(.horizontal, PlozzTheme.Spacing.xLarge)
             .frame(height: NowPlayingCard.nominalHeight)
-            .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+            .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: surfaceFocused)
             .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
             .plozzCardRasterize(reduceTransparency: reduceTransparency)
             .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
-            .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
-            .zIndex(isFocused ? 2 : 0)
-            .animation(.easeOut(duration: 0.18), value: isFocused)
+            .plozzCardFocusLift(
+                isFocused: isFocused,
+                cornerRadius: metrics.landscapeCardCornerRadius,
+                outlineScale: PlozzTheme.Metrics.mediumFocusedCardScale
+            )
+            .plozzCardFocusTransition(isFocused: isFocused)
     }
 }
 
@@ -320,6 +328,12 @@ private struct GenreCard: View {
     let action: () -> Void
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
+
+    /// This tile's focus outline is its bright white rim, so with the outline
+    /// switched off it keeps the resting hairline and reads as focused through
+    /// the grow-and-glisten highlight instead.
+    private var showsFocusRim: Bool { isFocused && focusStyle.drawsFocusOutline }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
@@ -351,7 +365,7 @@ private struct GenreCard: View {
         .frame(width: 280, height: 160)
         .clipShape(shape)
         .overlay {
-            shape.strokeBorder(.white.opacity(isFocused ? 0.95 : 0.10), lineWidth: isFocused ? 4 : 1)
+            shape.strokeBorder(.white.opacity(showsFocusRim ? 0.95 : 0.10), lineWidth: showsFocusRim ? 4 : 1)
         }
         // Same proven modifier order as MusicCard (works in this exact grid):
         // visual → focusableCard → rasterize → shadow → scale. `plozzCardRasterize`
@@ -360,8 +374,12 @@ private struct GenreCard: View {
         .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.Radius.card, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.4 : 0.15), radius: isFocused ? 22 : 8, y: isFocused ? 12 : 4)
-        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusLift(
+            isFocused: isFocused,
+            cornerRadius: PlozzTheme.Metrics.Radius.card,
+            outlineScale: PlozzTheme.Metrics.mediumFocusedCardScale
+        )
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 }
 

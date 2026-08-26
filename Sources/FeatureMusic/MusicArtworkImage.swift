@@ -104,6 +104,7 @@ struct MusicCard: View {
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
 
     /// The artwork edge length, scaled by the active UI density so music tiles
     /// grow/shrink in step with the movie/show cards.
@@ -127,14 +128,19 @@ struct MusicCard: View {
         self.action = action
     }
 
+    /// Whether the card's surface should read as focused: the glass lift is the
+    /// framed card's focus outline, so with the outline off it stays at rest and
+    /// the caption keeps its resting ink.
+    private var surfaceFocused: Bool { isFocused && focusStyle.drawsFocusOutline }
+
     /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
     /// "lift" surface. Centralised in `PlozzCardCaption` (CoreUI) so every card
     /// type flips identically.
     private var titleColor: Color {
-        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+        PlozzCardCaption.titleColor(isFocused: surfaceFocused, reduceTransparency: reduceTransparency)
     }
     private var subtitleColor: Color {
-        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+        PlozzCardCaption.subtitleColor(isFocused: surfaceFocused, reduceTransparency: reduceTransparency)
     }
 
     var body: some View {
@@ -166,13 +172,16 @@ struct MusicCard: View {
             .frame(width: scaledWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)
-        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: surfaceFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
-        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusLift(
+            isFocused: isFocused,
+            cornerRadius: metrics.landscapeCardCornerRadius,
+            outlineScale: PlozzTheme.Metrics.mediumFocusedCardScale
+        )
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 
     /// Borderless ("Posters") music card: the square artwork with no glass
@@ -205,8 +214,7 @@ struct MusicCard: View {
         // See PosterCardView.borderlessCard: composite (never rasterize) so the
         // focus halo + scale bloom that extend beyond the bounds aren't clipped.
         .compositingGroup()
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 
     /// Artwork↔caption gap for the borderless music card. Always reserved at its

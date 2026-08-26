@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreModels
 
 /// Centralised design tokens so spacing/sizing stay consistent and tweakable
 /// in one place across all features. Think of this as the app's design-token
@@ -306,6 +307,80 @@ public enum PlozzTheme {
         public static let readOnlyFocusedCardScale: CGFloat = 1.02
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
+
+        // MARK: Focus — "Highlight" style (outline off)
+
+        /// The scale a focused card grows to when the focus outline is switched
+        /// off (`CardFocusStyle.highlight`), given the card's measured size and
+        /// how far its outline used to reach *beyond* that size.
+        ///
+        /// The rule is "no smaller than before": with the outline gone, the card
+        /// has to cover at least the ground the outlined card covered, outline
+        /// included. So the ordinary focus scale is multiplied by how much the
+        /// outline grew the card — per axis, taking whichever axis the outline
+        /// grew more (a short card's outline is proportionally a bigger share of
+        /// its height than of its width), so the enlarged card is at least as
+        /// large in *both* directions.
+        ///
+        /// - Parameters:
+        ///   - outlineScale: the scale this card uses in the outlined style.
+        ///   - contentSize: the card's own (unscaled) layout size.
+        ///   - outlineReach: how far the outline extended past that size on each
+        ///     edge — the halo's padding for artwork-only cards, the glass
+        ///     frame's inset for framed ones.
+        public static func highlightFocusScale(
+            outlineScale: CGFloat,
+            contentSize: CGSize,
+            outlineReach: CGFloat
+        ) -> CGFloat {
+            // A caller asking for no lift at all (Reduce Motion) must not be
+            // handed one by the multiplier.
+            guard outlineScale > 1 else { return outlineScale }
+            guard contentSize.width > 0, contentSize.height > 0, outlineReach > 0 else {
+                return outlineScale * highlightFocusFallbackRatio
+            }
+            let ratio = max(
+                (contentSize.width + outlineReach * 2) / contentSize.width,
+                (contentSize.height + outlineReach * 2) / contentSize.height
+            )
+            return outlineScale * min(max(ratio, 1), highlightFocusMaxRatio)
+        }
+
+        /// Growth used for the frame or two before a card has been measured, and
+        /// for anything that can't be. Sized from the *smallest* card in the app
+        /// (a cast portrait), whose outline is proportionally the largest, so the
+        /// "no smaller than before" rule holds everywhere on the fallback too.
+        public static let highlightFocusFallbackRatio: CGFloat = 1.11
+        /// Ceiling on that growth, so a small or oddly-shaped card can't be
+        /// blown up into its neighbours.
+        public static let highlightFocusMaxRatio: CGFloat = 1.22
+
+        /// Duration of the specular sweep that crosses a card as it takes focus.
+        public static let highlightSheenDuration: TimeInterval = 0.85
+
+        /// The focus animation for a card, which is where the two styles differ
+        /// most: the outlined card cross-fades a surface, so a short ease is all
+        /// it needs, while the highlighted card is pure movement and reads as
+        /// physical — it springs up with a little life, and eases back down more
+        /// slowly than it came, so leaving a card looks like it settling rather
+        /// than snapping off.
+        public static func cardFocusAnimation(
+            isFocused: Bool,
+            focusStyle: CardFocusStyle,
+            reduceMotion: Bool
+        ) -> Animation {
+            guard focusStyle == .highlight, !reduceMotion else {
+                return .easeOut(duration: 0.18)
+            }
+            return isFocused
+                ? .spring(response: 0.30, dampingFraction: 0.66)
+                : .spring(response: 0.52, dampingFraction: 0.82)
+        }
+
+        /// How long a card keeps its raised z-position after losing focus, so the
+        /// slower settle finishes *above* its neighbours instead of being clipped
+        /// behind the card that just took focus.
+        public static let highlightSettleDuration: TimeInterval = 0.52
 
         // MARK: Focus caption movement
 

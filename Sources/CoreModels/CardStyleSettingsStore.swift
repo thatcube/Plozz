@@ -39,6 +39,11 @@ public final class CardStyleSettingsStore: CardStyleSettingsStoring, @unchecked 
 /// Observable wrapper so SwiftUI settings screens can two-way bind and have the
 /// chosen style persisted + broadcast to the view tree. Mirrors
 /// `UIDensitySettingsModel`.
+///
+/// Carries the card's **focus** treatment too. The two are one preference in the
+/// user's head — "how my cards look" — they're edited in the same Settings pane,
+/// and keeping them together means adding a card preference doesn't widen the
+/// per-profile settings facet (which is capped; see `tools/arch-guard.py`).
 @MainActor
 @Observable
 public final class CardStyleSettingsModel {
@@ -46,10 +51,21 @@ public final class CardStyleSettingsModel {
         didSet { store.save(style) }
     }
 
-    private let store: CardStyleSettingsStoring
+    /// What focus does to a card: outline it, or grow and glisten it.
+    public var focusStyle: CardFocusStyle {
+        didSet { focusStore.save(focusStyle) }
+    }
 
-    public init(store: CardStyleSettingsStoring = CardStyleSettingsStore()) {
+    private let store: CardStyleSettingsStoring
+    private let focusStore: CardFocusStyleSettingsStoring
+
+    public init(
+        store: CardStyleSettingsStoring = CardStyleSettingsStore(),
+        focusStore: CardFocusStyleSettingsStoring = CardFocusStyleSettingsStore()
+    ) {
         self.store = store
+        self.focusStore = focusStore
         self.style = store.load()
+        self.focusStyle = focusStore.load()
     }
 }

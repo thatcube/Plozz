@@ -139,8 +139,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
         .focusEffectDisabled()
         .onTapGesture(perform: action)
         .accessibilityAddTraits(.isButton)
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 }
 #endif

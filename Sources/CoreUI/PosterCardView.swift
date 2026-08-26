@@ -67,6 +67,10 @@ public struct PosterCardView: View {
     @Environment(\.plozzMetrics) private var metrics
     /// Per-profile card presentation (framed glass card vs borderless artwork).
     @Environment(\.plozzCardStyle) private var cardStyle
+    /// Per-profile focus treatment. With the outline off, a framed card keeps its
+    /// resting surface on focus (no glass lift, so no glowing frame) and reads as
+    /// focused through movement and light instead — see `plozzCardFocusLift`.
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
 
     public init(
         item: MediaItem,
@@ -122,14 +126,21 @@ public struct PosterCardView: View {
     }
     private var hideText: Bool { spoilerSettings.shouldHideText(for: item) }
 
+    /// Whether the card's **surface** should read as focused. The glass lift is
+    /// the framed card's focus outline, so with the outline turned off the
+    /// surface stays exactly as it is at rest and the caption keeps its resting
+    /// ink — the lift's white plate is what made dark text legible, and there is
+    /// no plate now.
+    private var surfaceFocused: Bool { isFocused && focusStyle.drawsFocusOutline }
+
     /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
     /// "lift" surface. Centralised in `PlozzCardCaption` so every card type flips
     /// identically.
     private var titleColor: Color {
-        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+        PlozzCardCaption.titleColor(isFocused: surfaceFocused, reduceTransparency: reduceTransparency)
     }
     private var subtitleColor: Color {
-        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+        PlozzCardCaption.subtitleColor(isFocused: surfaceFocused, reduceTransparency: reduceTransparency)
     }
 
     private var size: CGSize {
@@ -213,7 +224,7 @@ public struct PosterCardView: View {
         }
         .plozzFramedMediaCard(
             innerCornerRadius: PlozzTheme.Metrics.posterArtCornerRadius,
-            isFocused: isFocused
+            isFocused: surfaceFocused
         )
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.posterCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
@@ -223,9 +234,12 @@ public struct PosterCardView: View {
         // (no live-glass per-frame cost), so the surface returns without the scroll
         // lag that a live resting `.glassEffect` caused.
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
-        .scaleEffect(isFocused ? PlozzTheme.Metrics.focusedCardScale : 1)
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusLift(
+            isFocused: isFocused,
+            cornerRadius: metrics.posterCardCornerRadius,
+            outlineScale: PlozzTheme.Metrics.focusedCardScale
+        )
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 
     // MARK: Landscape (medium) card
@@ -270,14 +284,17 @@ public struct PosterCardView: View {
         }
         .plozzFramedMediaCard(
             innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
-            isFocused: isFocused
+            isFocused: surfaceFocused
         )
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
-        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusLift(
+            isFocused: isFocused,
+            cornerRadius: metrics.landscapeCardCornerRadius,
+            outlineScale: PlozzTheme.Metrics.mediumFocusedCardScale
+        )
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 
     // MARK: Borderless (no card background)
@@ -319,8 +336,7 @@ public struct PosterCardView: View {
         // `drawingGroup` (what `plozzCardRasterize` uses under Reduce Transparency)
         // would rasterize to the layout bounds and shear off the halo + bloom.
         .compositingGroup()
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 
     /// The full-bleed artwork for a borderless card, clipped to the outer radius

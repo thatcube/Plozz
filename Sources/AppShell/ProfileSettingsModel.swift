@@ -283,7 +283,10 @@ public final class ProfileSettingsModel {
             musicPlayerModel: musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns)),
             homeLibraryVisibilityModel: homeLibraryVisibilityModel ?? HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns)),
             uiDensityModel: uiDensityModel ?? UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns)),
-            cardStyleModel: cardStyleModel ?? CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns)),
+            cardStyleModel: cardStyleModel ?? CardStyleSettingsModel(
+                store: CardStyleSettingsStore(namespace: ns),
+                focusStore: CardFocusStyleSettingsStore(namespace: ns)
+            ),
             watchStatusIndicatorModel: watchStatusIndicatorModel ?? WatchStatusIndicatorSettingsModel(store: WatchStatusIndicatorSettingsStore(namespace: ns)),
             navigationStyleModel: navigationStyleModel ?? NavigationStyleSettingsModel(store: NavigationStyleSettingsStore(namespace: ns)),
             transparencyModel: transparencyModel ?? TransparencyPreferenceModel(store: TransparencyPreferenceStore(namespace: ns)),

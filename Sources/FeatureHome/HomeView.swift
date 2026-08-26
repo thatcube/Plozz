@@ -1463,15 +1463,25 @@ private struct LibraryCardView: View {
     /// the framed glass card and the borderless "Posters" look with every other
     /// card on Home.
     @Environment(\.plozzCardStyle) private var cardStyle
+    /// Per-profile focus treatment — with the outline off the tile keeps its
+    /// resting surface on focus and grows/glistens instead (see
+    /// `plozzCardFocusLift`).
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
+
+    /// Whether the card's surface should read as focused: the glass lift is the
+    /// framed card's focus outline, so it stays at rest when the outline is off —
+    /// and the caption keeps its resting ink, since the lift's white plate is
+    /// what dark text needed to stay legible.
+    private var surfaceFocused: Bool { isFocused && focusStyle.drawsFocusOutline }
 
     /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
     /// "lift" surface — shared with every other card via `PlozzCardCaption` so the
     /// Libraries tile flips contrast on focus just like Continue Watching / Latest.
     private var titleColor: Color {
-        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+        PlozzCardCaption.titleColor(isFocused: surfaceFocused, reduceTransparency: reduceTransparency)
     }
     private var subtitleColor: Color {
-        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+        PlozzCardCaption.subtitleColor(isFocused: surfaceFocused, reduceTransparency: reduceTransparency)
     }
 
     var body: some View {
@@ -1505,13 +1515,16 @@ private struct LibraryCardView: View {
             .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)
-        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: surfaceFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
-        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusLift(
+            isFocused: isFocused,
+            cornerRadius: metrics.landscapeCardCornerRadius,
+            outlineScale: PlozzTheme.Metrics.mediumFocusedCardScale
+        )
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 
     /// The borderless ("Posters") Libraries tile: the library artwork with no glass
@@ -1545,8 +1558,7 @@ private struct LibraryCardView: View {
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .compositingGroup()
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusTransition(isFocused: isFocused)
     }
 
     @ViewBuilder

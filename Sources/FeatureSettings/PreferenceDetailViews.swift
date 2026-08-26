@@ -110,10 +110,10 @@ struct AppearanceDetailView: View {
         }
     }
 
-    /// The two media-card controls in one pane — style (framed vs poster) and the
-    /// watched indicator — since both are "how a card looks". Shorter swatches so
-    /// the two preview rows sit together without heavy scrolling; each headed by a
-    /// shared uppercase section header.
+    /// The media-card controls in one pane — style (framed vs poster), the
+    /// watched indicator, and what focus does to a card — since all three are
+    /// "how a card looks". Shorter swatches so the preview rows sit together
+    /// without heavy scrolling; each headed by a shared uppercase section header.
     @ViewBuilder private var cardsControls: some View {
         @Bindable var cardStyle = cardStyle
         @Bindable var watchStatusIndicator = watchStatusIndicator
@@ -123,6 +123,14 @@ struct AppearanceDetailView: View {
             }
             SettingsDetailGroup(title: "Watched Indicator") {
                 CompactWatchIndicatorPicker(selection: $watchStatusIndicator.indicator, swatchHeight: 150)
+            }
+            SettingsDetailGroup(title: "Focus") {
+                DescribedSegmentedPicker(
+                    options: CardFocusStyle.allCases,
+                    selection: $cardStyle.focusStyle,
+                    title: { $0.displayName },
+                    detail: { $0.detail }
+                )
             }
         }
     }

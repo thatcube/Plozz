@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreModels
 
 /// Shared building blocks for the borderless ("Posters") `CardStyle` — the
 /// artwork-only look with **no** glass surface. Both the movie/show
@@ -20,6 +21,12 @@ public extension View {
     /// keeps hugging the artwork and stays `circleFocusPadding` wide at any tile
     /// size. Being a pure render treatment (`background` + `scaleEffect`), it never
     /// alters the tile's footprint, so focusing can't nudge the row or neighbours.
+    ///
+    /// When the profile has turned the focus outline **off**
+    /// (`CardFocusStyle.highlight`) there is no halo at all: the tile takes tvOS's
+    /// native treatment instead, growing by whatever the halo used to add to its
+    /// size and catching a specular sweep (see `plozzCardFocusLift`). Callers don't
+    /// choose — they keep asking for a halo and get whichever the profile wants.
     ///
     /// Pass `cornerRadius: side / 2` for a circular avatar (the band becomes a ring)
     /// or the artwork's outer radius for a rounded-rect card.
@@ -42,10 +49,36 @@ private struct FocusHaloModifier: ViewModifier {
     let isFocused: Bool
 
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
 
     func body(content: Content) -> some View {
+        if focusStyle.drawsFocusOutline {
+            outlined(content)
+        } else {
+            // No halo: the tile grows into the space the halo occupied and
+            // glistens instead. It keeps the halo's drop shadow, though — that
+            // shadow is what lifted the tile off the page, and an artwork-only
+            // card with neither outline nor shadow reads as flat rather than
+            // focused. Expressed as animatable values rather than an `if` so it
+            // fades with the lift; a fully transparent shadow draws nothing.
+            content
+                .shadow(
+                    color: .black.opacity(isFocused ? 0.36 : 0),
+                    radius: isFocused ? 20 : 0,
+                    y: isFocused ? 10 : 0
+                )
+                .plozzCardFocusLift(
+                    isFocused: isFocused,
+                    cornerRadius: cornerRadius,
+                    outlineScale: focusScale,
+                    outlineReach: metrics.circleFocusPadding
+                )
+        }
+    }
+
+    private func outlined(_ content: Content) -> some View {
         let pad = metrics.circleFocusPadding
-        content
+        return content
             .background {
                 // The shared liquid-glass focus surface, bloomed into a band around
                 // the artwork: sized to the artwork by `.background`, then grown

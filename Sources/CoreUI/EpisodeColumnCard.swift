@@ -147,8 +147,7 @@ public struct EpisodeColumnCard: View, Equatable {
             action: action
         )
         .compositingGroup()
-        .zIndex(isFocused ? 2 : 0)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
+        .plozzCardFocusTransition(isFocused: isFocused, animates: !reduceMotion)
         .task(id: synopsisTaskID) {
             synopsisVisible = false
             synopsisAtRest = false

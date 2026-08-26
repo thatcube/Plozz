@@ -46,13 +46,15 @@ public struct HomeAggregator: Sendable {
     /// servers) so it reflects what was actually watched last.
     public func content(
         from accounts: [ResolvedAccount],
-        continueWatchingLimit: Int = 20,
+        policy: ContinueWatchingPolicy = .default,
+        continueWatchingLimit: Int? = nil,
         latestLimit: Int = 20,
         watchlistLimit: Int = 20,
         visibility: HomeLibraryVisibility = .default,
         forceLibraryScoping: Bool = false,
         identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) async -> Content {
+        let continueWatchingLimit = continueWatchingLimit ?? policy.rowLimit
         let clock = ContinuousClock()
         let started = clock.now
         let perAccount = await Self.loadPerAccount(accounts) { resolved in
@@ -78,11 +80,17 @@ public struct HomeAggregator: Sendable {
         let serverInfo = accounts.sourceServerInfo()
         let resolve: (String) -> SourceServerInfo? = { serverInfo[$0] }
 
-        Self.logContinueWatchingMergeInputs(perAccount.map(\.continueWatching))
+        // Retire stale next-up suggestions BEFORE the merge, so the row's limited
+        // slots are filled with titles worth showing instead of being spent on
+        // suggestions for series abandoned months ago. In-progress titles are never
+        // touched — see `ContinueWatchingPolicy`.
+        let curatedContinueWatching = perAccount.map { policy.curated($0.continueWatching) }
+        Self.logContinueWatchingCuration(perAccount.map(\.continueWatching), curated: curatedContinueWatching)
+        Self.logContinueWatchingMergeInputs(curatedContinueWatching)
 
         return Content(
             continueWatching: Self.mergedRow(
-                from: perAccount.map(\.continueWatching),
+                from: curatedContinueWatching,
                 limit: continueWatchingLimit,
                 serverInfo: resolve,
                 identitySources: identitySources,
@@ -235,7 +243,8 @@ public struct HomeAggregator: Sendable {
     /// full inventory for the Libraries tiles (browse entry points).
     public func unmergedContent(
         from accounts: [ResolvedAccount],
-        continueWatchingLimit: Int = 20,
+        policy: ContinueWatchingPolicy = .default,
+        continueWatchingLimit: Int? = nil,
         latestLimit: Int = 20,
         watchlistLimit: Int = 20,
         perLibraryLimit: Int = 20,
@@ -243,9 +252,11 @@ public struct HomeAggregator: Sendable {
         identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) async -> UnmergedContent {
         // Global rows + full (tagged) library inventory come from the merged path,
-        // so Continue Watching / Watchlist stay identical to merged mode.
+        // so Continue Watching / Watchlist stay identical to merged mode — including
+        // the policy's curation and limit, which are applied there.
         let merged = await content(
             from: accounts,
+            policy: policy,
             continueWatchingLimit: continueWatchingLimit,
             latestLimit: latestLimit,
             watchlistLimit: watchlistLimit,
@@ -608,6 +619,23 @@ public struct HomeAggregator: Sendable {
     /// TEMPORARY on-device diagnostic for the Continue Watching duplicate bug.
     /// Emits one line per pre-merge card so a duplicate pair can be compared by
     /// the exact fields the merge keys on. Remove once the cause is confirmed.
+    /// Names every next-up suggestion the policy retired, so a title vanishing from
+    /// the row is an observation rather than a mystery. Gated; free when off.
+    private static func logContinueWatchingCuration(_ raw: [[MediaItem]], curated: [[MediaItem]]) {
+        guard ContinueWatchingDiagnostics.isEnabled else { return }
+        let keptIDs = Set(curated.flatMap { $0 }.map(\.id))
+        let dropped = raw.flatMap { $0 }.filter { !keptIDs.contains($0.id) }
+        guard !dropped.isEmpty else { return }
+        var line = "curation dropped=\(dropped.count) reason=stale-next-up"
+        for item in dropped {
+            let age = item.lastPlayedAt.map { Int(Date().timeIntervalSince($0) / 86_400) }
+            line += "\n  DROPPED id=\(item.id) title=\"\(item.title)\" "
+                + "resume=\(item.resumePosition.map { String(format: "%.0f", $0) } ?? "nil") "
+                + "ageDays=\(age.map(String.init) ?? "nil")"
+        }
+        ContinueWatchingDiagnostics.emit(line)
+    }
+
     private static func logContinueWatchingMergeInputs(_ groups: [[MediaItem]]) {
         let all = groups.flatMap { $0 }
         FanoutDiagnostics.emit("CWDUP begin items=\(all.count) episodes=\(all.filter { $0.kind == .episode }.count)")

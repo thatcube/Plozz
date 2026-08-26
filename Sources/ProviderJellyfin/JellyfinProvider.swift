@@ -198,6 +198,19 @@ public struct JellyfinProvider: MediaProvider {
     /// merged Continue Watching row instead of inheriting a foreign timestamp or
     /// sinking to the bottom. In-progress Resume items (already timestamped) and
     /// non-series items are returned unchanged.
+    /// Stamps a Continue Watching item that carries no play timestamp of its own —
+    /// a next-episode suggestion whose `lastPlayedAt` is nil — with its series'
+    /// last-viewed date, so a just-finished show sorts by real recency in a merged
+    /// Continue Watching row instead of sinking to the bottom.
+    ///
+    /// The stamp is also what lets ``ContinueWatchingPolicy`` retire a suggestion
+    /// for a series left alone for months. Jellyfin bounds its own `Shows/NextUp`
+    /// with a server setting that defaults to a full year and is the viewer's to
+    /// choose, so Plozz deliberately does **not** override it with a
+    /// `NextUpDateCutoff` on the request; the shared policy applies the same
+    /// client-side rule here that it applies to every other backend. Removing this
+    /// stamp would silently exempt Jellyfin and Emby from that rule, because a
+    /// suggestion with no recency is kept fail-open.
     private func stampingSeriesRecency(_ item: MediaItem, using seriesDates: [String: Date]) -> MediaItem {
         guard item.lastPlayedAt == nil,
               let seriesID = item.seriesID,

@@ -122,15 +122,48 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         }
     }
 
+    /// Continue Watching, read from Plex's **own hub** wherever the server offers
+    /// it, falling back to the older `/library/onDeck` feed when it does not.
+    ///
+    /// The two disagree, and the hub is the one the Plex apps themselves render.
+    /// It honours "Remove from Continue Watching" — a dismissal records an
+    /// exclusion the hub applies and `onDeck` never sees, so a dismissed title
+    /// keeps its resume point and returns through `onDeck` indefinitely. It also
+    /// retires next-up suggestions for series left alone months ago, which
+    /// `onDeck` keeps offering forever. Reading the hub is therefore what makes
+    /// this row agree with Plex rather than merely resemble it.
+    ///
+    /// The fallback is not a formality: only newer servers route the `home`
+    /// variant, and a viewer on an older one must still get a row. The plain hub
+    /// is tried next, and `onDeck` last.
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
-        // Fetch the recently-viewed-shows map concurrently with onDeck so stamping
-        // adds no latency to the common path.
-        async let onDeckTask = client.onDeck(limit: limit)
+        // The series-recency map is needed by every path and costs nothing next to
+        // the feed request, so it starts now regardless of which feed wins.
         async let seriesDatesTask = seriesLastPlayedDatesBestEffort(limit: limit)
-        let onDeck = try await onDeckTask
+        let (items, endpoint) = try await resumeFeed(limit: limit)
         let seriesDates = await seriesDatesTask
-        logContinueWatchingFeed(onDeck)
-        return onDeck.map(map(metadata:)).map { stampingSeriesRecency($0, using: seriesDates) }
+        logContinueWatchingFeed(items, endpoint: endpoint)
+        return items.map(map(metadata:)).map { stampingSeriesRecency($0, using: seriesDates) }
+    }
+
+    /// The best resume feed this server will give us, and which one it was.
+    ///
+    /// Only a *failure* falls through to the next candidate. An empty hub is a
+    /// real answer — a viewer genuinely part-way through nothing — and must not be
+    /// second-guessed by re-asking a feed that would happily invent a row out of
+    /// dismissed titles.
+    private func resumeFeed(limit: Int) async throws -> ([PlexMetadata], String) {
+        do {
+            return (try await client.continueWatchingHub(limit: limit, homeVariant: true), "/hubs/home/continueWatching")
+        } catch {
+            PlozzLog.networking.error("Plex home Continue Watching hub unavailable; trying the plain hub")
+        }
+        do {
+            return (try await client.continueWatchingHub(limit: limit, homeVariant: false), "/hubs/continueWatching")
+        } catch {
+            PlozzLog.networking.error("Plex Continue Watching hub unavailable; falling back to /library/onDeck")
+        }
+        return (try await client.onDeck(limit: limit), "/library/onDeck")
     }
 
     /// Records the resume feed exactly as Plex returned it, before any mapping.
@@ -141,54 +174,52 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// Continue Watching" action. So a row built from it can disagree with the
     /// Plex app while every line of client code behaves correctly — and only the
     /// raw feed can tell us that is what happened. Gated and free when off.
-    private func logContinueWatchingFeed(_ onDeck: [PlexMetadata]) {
+    private func logContinueWatchingFeed(_ items: [PlexMetadata], endpoint: String) {
         guard ContinueWatchingDiagnostics.isEnabled else { return }
-        let rows = onDeck.map(Self.diagnosticRow)
+        let rows = items.map(Self.diagnosticRow)
         ContinueWatchingDiagnostics.emit(
             ContinueWatchingDiagnostics.serverFeedLine(
                 provider: "plex",
                 accountID: accountID,
-                endpoint: "/library/onDeck",
+                endpoint: endpoint,
                 rows: rows
             )
         )
-        // Ask the real hub the same question and diff the answers. Detached and
-        // unawaited so Home's load never waits on a diagnostic, and read-only —
-        // nothing consumes the hub but this log line.
+        // Keep diffing against the legacy feed while the hub is what we serve, so
+        // the two can be compared on real servers rather than assumed equivalent.
+        // Skipped once we are already reading onDeck — there would be nothing to
+        // compare it against. Detached and read-only: nothing waits on it, and
+        // nothing but the log consumes it.
+        guard endpoint != "/library/onDeck" else { return }
         let client = self.client
-        let limit = max(onDeck.count, 20)
+        let limit = max(items.count, 20)
         Task.detached(priority: .utility) {
-            await Self.logFeedVersusHub(feed: rows, client: client, limit: limit)
+            await Self.logHubVersusOnDeck(hub: rows, client: client, limit: limit)
         }
     }
 
-    /// Diffs the onDeck feed against Plex's Continue Watching hub. Best-effort:
-    /// tries the Home variant first and falls back to the plain one, because older
-    /// servers route only the latter — and an unroutable path must be reported as
-    /// "could not ask", never as "the title was dismissed".
-    private static func logFeedVersusHub(
-        feed: [ContinueWatchingDiagnostics.ServerRow],
+    /// Diffs what we now serve (the hub) against the legacy feed. Anything the old
+    /// feed carries that the hub does not is a title the previous implementation
+    /// showed and Plex does not — which is the reported symptom, measured.
+    private static func logHubVersusOnDeck(
+        hub: [ContinueWatchingDiagnostics.ServerRow],
         client: PlexClient,
         limit: Int
     ) async {
-        var endpoint = "/hubs/home/continueWatching"
-        var hub: [PlexMetadata]?
+        var onDeck: [PlexMetadata]?
         var failure: String?
         do {
-            hub = try await client.continueWatchingHub(limit: limit, homeVariant: true)
+            onDeck = try await client.onDeck(limit: limit)
         } catch {
-            do {
-                endpoint = "/hubs/continueWatching"
-                hub = try await client.continueWatchingHub(limit: limit, homeVariant: false)
-            } catch let fallbackError {
-                failure = String(describing: fallbackError)
-            }
+            failure = String(describing: error)
         }
+        // Argument order reads "feed vs hub": the legacy feed is the thing under
+        // suspicion, the hub is the reference.
         ContinueWatchingDiagnostics.emit(
             ContinueWatchingDiagnostics.feedVersusHubLine(
-                feed: feed,
-                hub: hub.map { $0.map(diagnosticRow) },
-                hubEndpoint: endpoint,
+                feed: onDeck.map { $0.map(diagnosticRow) } ?? [],
+                hub: failure == nil ? hub : nil,
+                hubEndpoint: "/library/onDeck vs hub",
                 hubError: failure
             )
         )

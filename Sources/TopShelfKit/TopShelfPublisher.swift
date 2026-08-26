@@ -24,6 +24,15 @@ public enum TopShelfPublisher {
     ///   titles here and stores finished text; the extension only renders.
     ///   Eager resolution is correct in this one case precisely because the
     ///   value crosses a process boundary.
+    /// How many titles each Top Shelf section carries.
+    ///
+    /// Independent of the on-screen row's limit on purpose. Every item here costs
+    /// a poster fetch and, for Continue Watching, a composite with the progress bar
+    /// burned in — done one after another, while the shelf itself only ever shows a
+    /// handful. Letting this follow the row would spend minutes of background work
+    /// on artwork nobody scrolls to.
+    private static let maxItemsPerSection = 20
+
     public static func publish(
         continueWatching: [MediaItem],
         latest: [MediaItem],
@@ -31,14 +40,14 @@ public enum TopShelfPublisher {
     ) async {
         var sections: [TopShelfSnapshot.Section] = []
 
-        let resume = await items(from: continueWatching, compositeProgress: true)
+        let resume = await items(from: Array(continueWatching.prefix(maxItemsPerSection)), compositeProgress: true)
         if !resume.isEmpty {
             sections.append(.init(id: "continue",
                                   title: resolved("Continue Watching", locale),
                                   items: resume))
         }
 
-        let recent = await items(from: latest)
+        let recent = await items(from: Array(latest.prefix(maxItemsPerSection)))
         if !recent.isEmpty {
             sections.append(.init(id: "latest",
                                   title: resolved("Recently Added", locale),

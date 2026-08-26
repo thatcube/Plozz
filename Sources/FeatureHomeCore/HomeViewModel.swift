@@ -141,6 +141,10 @@ public final class HomeViewModel {
     /// client). Defaults to none so existing callers/tests are unaffected. (h2-cw-clamp)
     private let recentlyAppliedRecency: @Sendable () async -> [String: AppliedResumeRecord]
     private let contentPublisher: HomeContentPublishing
+    /// What belongs on the Continue Watching row and how long a loaded row may be
+    /// trusted. Shared with the aggregator so the limit, the staleness cutoff and
+    /// the refresh window are one set of rules rather than three.
+    private let policy: ContinueWatchingPolicy
     private let mediaItemActionHandler: (any MediaItemActionHandling)?
 
     /// In-flight content aggregation (run off the main actor) and the fire-and-
@@ -181,6 +185,16 @@ public final class HomeViewModel {
     /// disable/enable or a merged↔unmerged flip correctly forces a re-aggregation,
     /// since both change what Home fetches and renders.
     private var lastLoadedVisibility: HomeLibraryVisibility?
+    /// When the currently-loaded content was aggregated.
+    ///
+    /// Home has no way to hear that a title was watched, finished or dismissed on
+    /// another device: there is no push, and every in-app signal it does have
+    /// describes something the viewer did *here*. Left alone it will therefore
+    /// keep showing the row it built at launch for as long as the app stays open,
+    /// which is the reported "Continue Watching isn't in sync" — the row was right
+    /// when it was built and nothing ever asked again. Recording the time lets a
+    /// reappearance tell ordinary navigation apart from a genuine absence.
+    private var lastLoadedAt: Date?
     /// A load is running right now. See ``load(showLoadingState:)``.
     @ObservationIgnored private var isLoading = false
     /// A load was requested while one was already running; run once more after.
@@ -196,6 +210,7 @@ public final class HomeViewModel {
         pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] },
         recentlyAppliedRecency: @escaping @Sendable () async -> [String: AppliedResumeRecord] = { [:] },
         mediaItemActionHandler: (any MediaItemActionHandling)? = nil,
+        policy: ContinueWatchingPolicy = .default,
         contentPublisher: @escaping HomeContentPublishing = { _, _ in }
     ) {
         self.accounts = accounts
@@ -206,6 +221,7 @@ public final class HomeViewModel {
         self.currentVisibility = currentVisibility
         self.pendingWatchMutations = pendingWatchMutations
         self.recentlyAppliedRecency = recentlyAppliedRecency
+        self.policy = policy
         self.contentPublisher = contentPublisher
         self.mediaItemActionHandler = mediaItemActionHandler
         let persisted = layoutStore.load()
@@ -290,16 +306,26 @@ public final class HomeViewModel {
         switch state {
         case .loaded, .empty:
             if lastLoadedVisibility == visibility {
-                // Home came back on screen and decided nothing had changed, so it
-                // will not ask any server anything. Correct for the flashing it
-                // exists to prevent, and also the reason a row can only be as
-                // fresh as the last thing that forced a load: watching on another
-                // device is invisible until something else triggers one.
+                // Nothing the viewer chose has changed — but the world may have.
+                // A row older than the policy's window is refreshed **silently**:
+                // the current rows stay on screen until fresh content swaps in, so
+                // there is no skeleton flash and no focus reset, exactly as for the
+                // launch-snapshot and post-playback refreshes. Inside the window a
+                // reappearance stays the no-op it has always been, because stepping
+                // into a title and back out is navigation, not new information, and
+                // reloading there would reshuffle the row under the viewer for
+                // nothing.
+                let age = lastLoadedAt.map { Date().timeIntervalSince($0) }
+                let isStale = (age ?? .infinity) > policy.refreshAfter
                 ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.refreshLine(
                     trigger: "appear",
-                    willReload: false,
-                    reason: "visibility-unchanged"
+                    willReload: isStale,
+                    reason: isStale
+                        ? "stale age=\(age.map { String(format: "%.0fs", $0) } ?? "never") > \(Int(policy.refreshAfter))s"
+                        : "fresh age=\(age.map { String(format: "%.0fs", $0) } ?? "never")"
                 ))
+                guard isStale else { return }
+                await load(showLoadingState: false)
                 return
             }
         default:
@@ -348,6 +374,7 @@ public final class HomeViewModel {
         let aggregator = self.aggregator
         let accounts = self.accounts
         let identitySources = self.identitySources
+        let policy = self.policy
         let visibility = currentVisibility()
 
         // Watchlist policy: an explicit user save is dropped only when its
@@ -368,7 +395,7 @@ public final class HomeViewModel {
         let content: Content
         if visibility.mergeLibrariesOnHome {
             let aggregationTask = Task.detached(priority: .userInitiated) {
-                await aggregator.content(from: accounts, visibility: visibility, identitySources: identitySources)
+                await aggregator.content(from: accounts, policy: policy, visibility: visibility, identitySources: identitySources)
             }
             self.aggregationTask = aggregationTask
             let merged = await aggregationTask.value
@@ -397,7 +424,7 @@ public final class HomeViewModel {
             // full library inventory feeds the Libraries tiles, and each library the
             // user opted rows into contributes a block below.
             let unmergedTask = Task.detached(priority: .userInitiated) {
-                await aggregator.unmergedContent(from: accounts, visibility: visibility, identitySources: identitySources)
+                await aggregator.unmergedContent(from: accounts, policy: policy, visibility: visibility, identitySources: identitySources)
             }
             self.unmergedTask = unmergedTask
             let unmerged = await unmergedTask.value
@@ -441,6 +468,7 @@ public final class HomeViewModel {
         } else if content.isEmpty, !showLoadingState, case .loaded = state {
             PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
             lastLoadedVisibility = visibility
+            lastLoadedAt = Date()
             // The live sources were unavailable. Reveal the cached row rather than
             // leaving a permanent loading placeholder with no refresh in flight.
             isShowingCachedSnapshot = false
@@ -452,6 +480,7 @@ public final class HomeViewModel {
         // an unchanged visibility snapshot is recognised as a no-op (see
         // `loadIfNeeded(for:)`).
         lastLoadedVisibility = visibility
+        lastLoadedAt = Date()
         // Persist a bounded snapshot of the fresh content so the next launch paints
         // Home instantly (see `HomeContentStore`). Only meaningful, non-empty
         // content is cached — a transient empty aggregate (e.g. server briefly

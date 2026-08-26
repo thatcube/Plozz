@@ -166,7 +166,13 @@ public struct ShareProvider: MediaProvider {
         // file-version records collapse to one movie without pushing distinct
         // titles off the row.
         let byCanonical = await watchState.allCanonicalRecords()
-        let resumable = byCanonical.filter { !$0.value.played && $0.value.position > 1 }
+        let resumable = byCanonical.filter {
+            !$0.value.played
+                && $0.value.position > 1
+                // Taken off the row deliberately. The position is deliberately still
+                // here, so playing it again resumes rather than restarts.
+                && !$0.value.isDismissedFromContinueWatching
+        }
         let ranked = resumable
             .sorted { $0.value.updatedAt > $1.value.updatedAt }
             .prefix(limit)
@@ -538,6 +544,15 @@ extension ShareProvider: PlayedStateWriting {
     /// `capturedAt`.
     public func setPlayed(_ played: Bool, itemID: String, capturedAt: Date) async throws {
         await watchState.setPlayed(played, itemID: itemID, capturedAt: capturedAt)
+    }
+}
+
+extension ShareProvider: ContinueWatchingRemovable {
+    /// Hides the title from Continue Watching **without** discarding where the
+    /// viewer got to. A share's watch state is ours alone, so unlike a managed
+    /// server there is no need to trade one for the other.
+    public func removeFromContinueWatching(itemID: String) async throws {
+        await watchState.dismissFromContinueWatching(itemID: itemID)
     }
 }
 

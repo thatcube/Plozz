@@ -69,6 +69,18 @@ private struct CardFocusMini: View {
     /// The gap between posters, and the room the focused one needs to grow into
     /// without touching its neighbours.
     private var tileGapRatio: CGFloat { 0.20 }
+    /// How wide the outlined style's ring is drawn, as a fraction of a poster's
+    /// width.
+    ///
+    /// Roughly twice the real band. The real one is a few points of translucent
+    /// glass around a full-size card; shrunk to swatch scale and drawn honestly
+    /// it is a hairline you have to hunt for, and the entire job of this picture
+    /// is to make the two options tell themselves apart at a glance. Overstating
+    /// it says what the option *is* — a card with a ring around it — which is the
+    /// true thing here. The same reasoning as the ring's brightness; see
+    /// `poster(tileW:...)`.
+    private var outlineBandRatio: CGFloat { 0.105 }
+
     /// How much bigger the focused poster reads. Not the real scales — those are
     /// a few percent and would be invisible at swatch size — but the same
     /// *relationship*: highlight grows further, because it has no outline to
@@ -98,7 +110,7 @@ private struct CardFocusMini: View {
         let posterH = tileW * 1.5
         let corner = tileW * 0.10
         let barH = max(3, tileW * barHeightRatio)
-        let pad = tileW * 0.055
+        let pad = tileW * outlineBandRatio
         // The caption drops further in the highlight style, because the card it
         // has to stay clear of grows further. Same rule as the real cards.
         let captionPush = tileW * (style.drawsFocusOutline ? 0.06 : 0.12)
@@ -178,8 +190,15 @@ private struct CardFocusMini: View {
                     )
                 )
             }
-            .shadow(color: .black.opacity(0.5), radius: pad * 2.4, y: pad)
-            .rotation3DEffect(.degrees(9), axis: (x: 0, y: 1, z: 0), perspective: 0.55)
+            // Sized from the poster, NOT from `pad`: that is the outlined style's
+            // ring width, and this is the highlight style's lift. Tying them
+            // together meant widening the ring quietly deepened a shadow in the
+            // other option's picture.
+            .shadow(color: .black.opacity(0.5), radius: tileW * 0.13, y: tileW * 0.055)
+            // A hint of the lean, not a demonstration of it. The real card tips
+            // 5° for a moment and comes back; a still picture holding a big angle
+            // reads as the card being permanently crooked.
+            .rotation3DEffect(.degrees(4), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
         } else {
             // The neighbours sit back, so the focused card is unmistakably the
             // one being looked at.

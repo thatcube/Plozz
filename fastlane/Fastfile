@@ -130,26 +130,46 @@ end
 #
 # tools/generate-project.sh reads the DSN from the environment or .env.fastlane,
 # so this checks both. Set PLOZZ_ALLOW_NO_CRASH_REPORTING=1 to ship anyway.
-def require_crash_reporting_dsn
+# tools/generate-project.sh reads the DSN from the environment, the per-worktree
+# .env.fastlane, or the machine-wide ~/.config/plozz/env — so this checks the
+# same places, in the same order. Set PLOZZ_ALLOW_NO_CRASH_REPORTING=1 to ship
+# anyway.
+def crash_reporting_dsn
   dsn = ENV["PLOZZ_SENTRY_DSN"].to_s.strip
-  if dsn.empty?
-    env_file = File.expand_path("../.env.fastlane", __dir__)
-    if File.exist?(env_file)
-      line = File.readlines(env_file).grep(/^\s*PLOZZ_SENTRY_DSN=/).last
-      dsn = line.split("=", 2).last.to_s.strip.gsub(/\A["']|["']\z/, "") if line
-    end
+  return dsn unless dsn.empty?
+
+  candidates = [
+    ENV["PLOZZ_ENV_FILE"],
+    File.expand_path("../.env.fastlane", __dir__),
+    File.join(ENV["XDG_CONFIG_HOME"] || File.join(Dir.home, ".config"), "plozz", "env")
+  ].compact.reject(&:empty?)
+
+  candidates.each do |path|
+    next unless File.exist?(path)
+    line = File.readlines(path).grep(/^\s*PLOZZ_SENTRY_DSN=/).last
+    next unless line
+    value = line.split("=", 2).last.to_s.strip.gsub(/\A["']|["']\z/, "")
+    return value unless value.empty?
   end
-  return unless dsn.empty?
+  ""
+end
+
+def require_crash_reporting_dsn
+  return unless crash_reporting_dsn.empty?
 
   if ENV["PLOZZ_ALLOW_NO_CRASH_REPORTING"].to_s == "1"
     UI.important("No PLOZZ_SENTRY_DSN — shipping WITHOUT crash reporting (override set).")
     return
   end
 
+  config_path = File.join(
+    ENV["XDG_CONFIG_HOME"] || File.join(Dir.home, ".config"), "plozz", "env"
+  )
   UI.user_error!(
     "No crash-reporting endpoint (PLOZZ_SENTRY_DSN) for this distribution build.\n" \
     "Testers' crashes would be discarded on-device with no record.\n\n" \
-    "Fix by adding the Sentry DSN to the gitignored .env.fastlane at the repo root:\n" \
+    "Put the Sentry DSN in the machine-wide env file, which survives worktrees:\n" \
+    "  #{config_path}\n" \
     "  PLOZZ_SENTRY_DSN=https://<key>@o<org>.ingest.<region>.sentry.io/<project>\n\n" \
     "To ship blind anyway: PLOZZ_ALLOW_NO_CRASH_REPORTING=1 fastlane beta --env fastlane"
   )

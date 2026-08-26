@@ -300,7 +300,15 @@ public enum TopShelfPosterComposer {
         let textSize = text.map { ($0 as NSString).size(withAttributes: attributes) } ?? .zero
 
         let rowHeight = max(max(glyphHeight, barHeight), textSize.height)
-        let rowBottom = height - inset
+        // Measured from where the letters actually sit, not from the box they are
+        // drawn in. A text bounding box reserves room for descenders whether or not
+        // the string has any, and none of these do — so aligning the box to the
+        // inset left the row looking further from the bottom edge than from the
+        // left, despite both being the same number. Dropping the row by the
+        // descender puts the baseline where the box edge was, and the two gaps
+        // read as equal.
+        let descender = text == nil ? 0 : abs(font.descender)
+        let rowBottom = height - inset + descender
         let rowTop = rowBottom - rowHeight
         func centreY(_ elementHeight: CGFloat) -> CGFloat {
             rowTop + (rowHeight - elementHeight) / 2

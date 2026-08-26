@@ -32,7 +32,7 @@ struct WatchOutboxBridge: Sendable {
     /// no longer deferred and its resume/played write goes out. `watchedPercent`
     /// (0...100) is the fraction watched at stop, used to drive the optimistic
     /// in-UI progress update (the resume bar on the surface the user returns to).
-    let finishPlayback: @Sendable (_ accountID: String?, _ itemID: String, _ watchedPercent: Double, _ mutation: WatchMutation?) -> Void
+    let finishPlayback: @Sendable (_ accountID: String?, _ itemID: String, _ watchedPercent: Double, _ mutation: WatchMutation?, _ item: MediaItem?) -> Void
     /// Durably enqueue a mid-play convergence `mutation` without ending the live
     /// session, so progress fans out to the **other** servers (the launch server
     /// stays deferred while it plays). Pure local enqueue + drain — no network on

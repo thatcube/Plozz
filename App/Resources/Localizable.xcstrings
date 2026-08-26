@@ -382684,6 +382684,234 @@
         }
       }
     },
+    "mediaAction.removeFromContinueWatching" : {
+      "comment" : "Context-menu action taking a title off the Continue Watching row without marking it watched.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove from Continue Watching"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إزالة من متابعة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Премахни от „Продължи гледането“"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Treu de Continua veient"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odebrat z Pokračovat ve sledování"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fjern fra Fortsæt med at se"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aus Weiterschauen entfernen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αφαίρεση από τη Συνέχεια παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Quitar de Seguir viendo"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "حذف از ادامه تماشای"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poista kohdasta Jatka katselua"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retirer de Continuer à regarder"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הסר מהמשך לצפות"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "देखना जारी रखें से हटाएँ"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ukloni iz Nastavi gledati"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Eltávolítás a Megtekintés folytatása közül"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hapus dari Lanjutkan Menonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rimuovi da Continua a guardare"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "「続きを見る」から削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "계속 시청에서 제거"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alih keluar daripada Terus Menonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fjern fra Fortsett å se"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verwijderen uit Verder kijken"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usuń z Kontynuuj oglądanie"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Remover de Continuar assistindo"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Elimină din Continuă vizionarea"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Убрать из «Продолжить просмотр»"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odstrániť z Pokračovať v pozeraní"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odstrani iz Nadaljuj z ogledom"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ukloni iz Nastavi gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ta bort från Fortsätt titta"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "นำออกจากดูต่อ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzlemeye devam et’ten kaldır"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Прибрати з «Продовжити перегляд»"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Xóa khỏi Tiếp tục xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "从“继续观看”中移除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "從「繼續觀看」中移除"
+          }
+        }
+      }
+    },
     "mediaAction.removeFromWatchlist" : {
       "comment" : "Context-menu action removing an item from the user's watchlist.",
       "localizations" : {
@@ -383825,12 +384053,6 @@
       "comment" : "Label on a movie or episode's detail page beside the date it first came out. A noun-style field label ('Released: 14 Apr 2019'), not a verb or a status.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Released"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -383871,6 +384093,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Κυκλοφορία"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Released"
           }
         },
         "es" : {
@@ -384053,12 +384281,6 @@
       "comment" : "Button over the blurred Ratings section of a title's detail page; pressing it reveals scores that spoiler protection is hiding.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Show Ratings"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -384099,6 +384321,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εμφάνιση βαθμολογιών"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show Ratings"
           }
         },
         "es" : {
@@ -411085,12 +411313,6 @@
       "comment" : "Description under the Spoilers heading in tvOS Settings, explaining what the switches below it do. 'Press' is the Apple TV remote's Select button.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -411131,6 +411353,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Απόκρυψη μη παρακολουθημένων επεισοδίων και βαθμολογιών μέχρι να τα δείτε. Οι θολές βαθμολογίες εμφανίζονται όταν τις πατήσετε."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hide unwatched episodes and ratings until you've seen them. Blurred ratings reveal when you press them."
           }
         },
         "es" : {
@@ -411313,12 +411541,6 @@
       "comment" : "Footer under the Spoilers settings group on iPhone/iPad, explaining what the switches above it do.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Episode titles, summaries, and artwork can be hidden until you watch them. Hidden ratings are blurred on a title's page — tap to reveal them."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -411359,6 +411581,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Οι τίτλοι, οι περιλήψεις και τα γραφικά των επεισοδίων μπορούν να κρύβονται μέχρι να τα παρακολουθήσετε. Οι κρυμμένες βαθμολογίες εμφανίζονται θολές στη σελίδα ενός τίτλου — αγγίξτε τις για να τις αποκαλύψετε."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Episode titles, summaries, and artwork can be hidden until you watch them. Hidden ratings are blurred on a title's page — tap to reveal them."
           }
         },
         "es" : {

@@ -24,6 +24,18 @@ public enum TopShelfPublisher {
     ///   titles here and stores finished text; the extension only renders.
     ///   Eager resolution is correct in this one case precisely because the
     ///   value crosses a process boundary.
+    /// How many titles each Top Shelf section carries.
+    ///
+    /// The shelf is a place to *launch* from, not to browse in. What gets clicked
+    /// there is something newly added or something obviously in progress; anything
+    /// requiring a search through a list is a reason to open the app instead. Three
+    /// per section is what Plex settles on, and it holds up: a scrollable shelf
+    /// nobody scrolls is just work done for an audience of none.
+    ///
+    /// Deliberately independent of the on-screen row's limit, which is sixty. That
+    /// row is for browsing and should hold everything; this one should not.
+    private static let maxItemsPerSection = 3
+
     public static func publish(
         continueWatching: [MediaItem],
         latest: [MediaItem],
@@ -31,14 +43,14 @@ public enum TopShelfPublisher {
     ) async {
         var sections: [TopShelfSnapshot.Section] = []
 
-        let resume = await items(from: continueWatching, compositeProgress: true)
+        let resume = await items(from: Array(continueWatching.prefix(maxItemsPerSection)), compositeProgress: true)
         if !resume.isEmpty {
             sections.append(.init(id: "continue",
                                   title: resolved("Continue Watching", locale),
                                   items: resume))
         }
 
-        let recent = await items(from: latest)
+        let recent = await items(from: Array(latest.prefix(maxItemsPerSection)))
         if !recent.isEmpty {
             sections.append(.init(id: "latest",
                                   title: resolved("Recently Added", locale),

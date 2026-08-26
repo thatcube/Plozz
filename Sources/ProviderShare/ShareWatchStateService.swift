@@ -210,4 +210,8 @@ struct ShareWatchStateService: Sendable {
     func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async {
         await watchStore.setResume(seconds, itemID: await catalog().canonicalItemID(itemID), capturedAt: capturedAt)
     }
+
+    func dismissFromContinueWatching(itemID: String, at date: Date = Date()) async {
+        await watchStore.dismissFromContinueWatching(itemID: await catalog().canonicalItemID(itemID), at: date)
+    }
 }

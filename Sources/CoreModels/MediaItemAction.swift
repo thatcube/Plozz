@@ -75,6 +75,18 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// Delete the on-device copy. Destructive: the bytes are gone and must be
     /// re-fetched over the network.
     case removeDownload
+    /// Take this title off Continue Watching without marking it watched.
+    ///
+    /// The row's one weakness is that everything which lands on it does so by
+    /// accident as readily as by intent — a trailer left running, a wrong episode,
+    /// something abandoned ten minutes in. Until now the only way off was to open
+    /// the server's own app, which is a strange thing for a client to require of
+    /// its user.
+    ///
+    /// Deliberately **not** "mark as watched": claiming someone finished a film
+    /// they abandoned corrupts exactly the history that decides what to suggest
+    /// next. This clears the resume point and leaves the watched state alone.
+    case removeFromContinueWatching
 
     public var id: String { rawValue }
 
@@ -135,6 +147,12 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
                 defaultValue: "Refresh Metadata",
                 comment: "Context-menu action asking the server to re-scan this item's metadata."
             )
+        case .removeFromContinueWatching:
+            return LocalizedStringResource(
+                "mediaAction.removeFromContinueWatching",
+                defaultValue: "Remove from Continue Watching",
+                comment: "Context-menu action taking a title off the Continue Watching row without marking it watched."
+            )
         case .startDownload:
             return LocalizedStringResource(
                 "mediaAction.startDownload",
@@ -178,6 +196,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .pauseDownload: return "pause.circle"
         case .resumeDownload: return "arrow.clockwise.circle"
         case .removeDownload: return "trash"
+        case .removeFromContinueWatching: return "minus.circle"
         }
     }
 
@@ -209,7 +228,8 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .goToSeason, .goToMovie, .goToEpisode: return true
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
-             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload,
+             .removeFromContinueWatching:
             return false
         }
     }
@@ -222,10 +242,22 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .goToEpisode, .goToMovie: return true
         case .goToSeason, .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
-             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload,
+             .removeFromContinueWatching:
             return false
         }
     }
+
+    /// Whether the menu should set this action apart from the rest, below a
+    /// separator.
+    ///
+    /// Every other action here acts on the title in front of the viewer — its
+    /// watched state, its place in a watchlist, where it navigates. Removing
+    /// something from Continue Watching instead changes what Home shows, and is
+    /// the one item on this menu worth a beat of separation from the entry above
+    /// it: reaching for "Mark as Watched" and landing on it by accident is exactly
+    /// the mistake the row's own accidents made people want this action for.
+    public var isSetApartInMenu: Bool { self == .removeFromContinueWatching }
 
     /// Whether the platform should style the action as destructive (red). No
     /// current watched-state action loses data irreversibly; this exists so a
@@ -253,7 +285,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
             return true
         case .markWatchedUpToHere, .goToSeason, .goToMovie, .goToEpisode,
              .refreshMetadata, .startDownload, .pauseDownload,
-             .resumeDownload, .removeDownload:
+             .resumeDownload, .removeDownload, .removeFromContinueWatching:
             return false
         }
     }

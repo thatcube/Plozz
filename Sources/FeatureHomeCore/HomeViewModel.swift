@@ -141,6 +141,10 @@ public final class HomeViewModel {
     /// client). Defaults to none so existing callers/tests are unaffected. (h2-cw-clamp)
     private let recentlyAppliedRecency: @Sendable () async -> [String: AppliedResumeRecord]
     private let contentPublisher: HomeContentPublishing
+    /// What belongs on the Continue Watching row and how long a loaded row may be
+    /// trusted. Shared with the aggregator so the limit, the staleness cutoff and
+    /// the refresh window are one set of rules rather than three.
+    private let policy: ContinueWatchingPolicy
     private let mediaItemActionHandler: (any MediaItemActionHandling)?
 
     /// In-flight content aggregation (run off the main actor) and the fire-and-
@@ -181,6 +185,16 @@ public final class HomeViewModel {
     /// disable/enable or a merged↔unmerged flip correctly forces a re-aggregation,
     /// since both change what Home fetches and renders.
     private var lastLoadedVisibility: HomeLibraryVisibility?
+    /// When the currently-loaded content was aggregated.
+    ///
+    /// Home has no way to hear that a title was watched, finished or dismissed on
+    /// another device: there is no push, and every in-app signal it does have
+    /// describes something the viewer did *here*. Left alone it will therefore
+    /// keep showing the row it built at launch for as long as the app stays open,
+    /// which is the reported "Continue Watching isn't in sync" — the row was right
+    /// when it was built and nothing ever asked again. Recording the time lets a
+    /// reappearance tell ordinary navigation apart from a genuine absence.
+    private var lastLoadedAt: Date?
     /// A load is running right now. See ``load(showLoadingState:)``.
     @ObservationIgnored private var isLoading = false
     /// A load was requested while one was already running; run once more after.
@@ -196,6 +210,7 @@ public final class HomeViewModel {
         pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] },
         recentlyAppliedRecency: @escaping @Sendable () async -> [String: AppliedResumeRecord] = { [:] },
         mediaItemActionHandler: (any MediaItemActionHandling)? = nil,
+        policy: ContinueWatchingPolicy = .default,
         contentPublisher: @escaping HomeContentPublishing = { _, _ in }
     ) {
         self.accounts = accounts
@@ -206,6 +221,7 @@ public final class HomeViewModel {
         self.currentVisibility = currentVisibility
         self.pendingWatchMutations = pendingWatchMutations
         self.recentlyAppliedRecency = recentlyAppliedRecency
+        self.policy = policy
         self.contentPublisher = contentPublisher
         self.mediaItemActionHandler = mediaItemActionHandler
         let persisted = layoutStore.load()
@@ -290,11 +306,36 @@ public final class HomeViewModel {
         switch state {
         case .loaded, .empty:
             if lastLoadedVisibility == visibility {
+                // Nothing the viewer chose has changed — but the world may have.
+                // A row older than the policy's window is refreshed **silently**:
+                // the current rows stay on screen until fresh content swaps in, so
+                // there is no skeleton flash and no focus reset, exactly as for the
+                // launch-snapshot and post-playback refreshes. Inside the window a
+                // reappearance stays the no-op it has always been, because stepping
+                // into a title and back out is navigation, not new information, and
+                // reloading there would reshuffle the row under the viewer for
+                // nothing.
+                let age = lastLoadedAt.map { Date().timeIntervalSince($0) }
+                let isStale = (age ?? .infinity) > policy.refreshAfter
+                ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.refreshLine(
+                    trigger: "appear",
+                    willReload: isStale,
+                    reason: isStale
+                        ? "stale age=\(age.map { String(format: "%.0fs", $0) } ?? "never") > \(Int(policy.refreshAfter))s"
+                        : "fresh age=\(age.map { String(format: "%.0fs", $0) } ?? "never")"
+                ))
+                guard isStale else { return }
+                await load(showLoadingState: false)
                 return
             }
         default:
             break
         }
+        ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.refreshLine(
+            trigger: "appear",
+            willReload: true,
+            reason: "visibility-changed-or-not-loaded"
+        ))
         await load()
     }
 
@@ -333,6 +374,11 @@ public final class HomeViewModel {
         let aggregator = self.aggregator
         let accounts = self.accounts
         let identitySources = self.identitySources
+        let policy = self.policy
+        // What the viewer is looking at right now. A just-played card lives here and
+        // nowhere else until the servers catch up, so it has to be offered to the
+        // reconciler — which decides, on evidence, whether it has earned its place.
+        let onScreenContinueWatching = state.value?.continueWatching ?? []
         let visibility = currentVisibility()
 
         // Watchlist policy: an explicit user save is dropped only when its
@@ -353,7 +399,7 @@ public final class HomeViewModel {
         let content: Content
         if visibility.mergeLibrariesOnHome {
             let aggregationTask = Task.detached(priority: .userInitiated) {
-                await aggregator.content(from: accounts, visibility: visibility, identitySources: identitySources)
+                await aggregator.content(from: accounts, policy: policy, visibility: visibility, identitySources: identitySources)
             }
             self.aggregationTask = aggregationTask
             let merged = await aggregationTask.value
@@ -365,7 +411,16 @@ public final class HomeViewModel {
             guard !aggregationTask.isCancelled else { return }
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
-            let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            noteServerConfirmed(merged.continueWatching)
+            let reconciledCW = Self.reconcileContinueWatching(
+                merged.continueWatching,
+                pending: pending,
+                appliedRecency: appliedRecency,
+                carryForward: onScreenContinueWatching,
+                serverConfirmed: serverConfirmedTargets
+            )
+            noteUnconfirmed(reconciled: reconciledCW, fetched: merged.continueWatching)
+            Self.logOverlay(fetched: merged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
                 .durableWatchlistItems(
                     from: reconciledCW + merged.latest + merged.watchlist
@@ -381,14 +436,23 @@ public final class HomeViewModel {
             // full library inventory feeds the Libraries tiles, and each library the
             // user opted rows into contributes a block below.
             let unmergedTask = Task.detached(priority: .userInitiated) {
-                await aggregator.unmergedContent(from: accounts, visibility: visibility, identitySources: identitySources)
+                await aggregator.unmergedContent(from: accounts, policy: policy, visibility: visibility, identitySources: identitySources)
             }
             self.unmergedTask = unmergedTask
             let unmerged = await unmergedTask.value
             guard !unmergedTask.isCancelled else { return }
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
-            let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            noteServerConfirmed(unmerged.continueWatching)
+            let reconciledCW = Self.reconcileContinueWatching(
+                unmerged.continueWatching,
+                pending: pending,
+                appliedRecency: appliedRecency,
+                carryForward: onScreenContinueWatching,
+                serverConfirmed: serverConfirmedTargets
+            )
+            noteUnconfirmed(reconciled: reconciledCW, fetched: unmerged.continueWatching)
+            Self.logOverlay(fetched: unmerged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
                 .durableWatchlistItems(
                     from: reconciledCW + unmerged.latest + unmerged.watchlist
@@ -424,6 +488,7 @@ public final class HomeViewModel {
         } else if content.isEmpty, !showLoadingState, case .loaded = state {
             PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
             lastLoadedVisibility = visibility
+            lastLoadedAt = Date()
             // The live sources were unavailable. Reveal the cached row rather than
             // leaving a permanent loading placeholder with no refresh in flight.
             isShowingCachedSnapshot = false
@@ -435,11 +500,12 @@ public final class HomeViewModel {
         // an unchanged visibility snapshot is recognised as a no-op (see
         // `loadIfNeeded(for:)`).
         lastLoadedVisibility = visibility
+        lastLoadedAt = Date()
         // Persist a bounded snapshot of the fresh content so the next launch paints
         // Home instantly (see `HomeContentStore`). Only meaningful, non-empty
         // content is cached — a transient empty aggregate (e.g. server briefly
         // unreachable) must not overwrite a good snapshot with nothing.
-        if !content.isEmpty { contentStore.save(content) }
+        if !content.isEmpty { saveSnapshot(content) }
         PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) merged=\(content.mergeLibraries) cw=\(content.continueWatching.count) latest=\(content.latest.count) wl=\(content.watchlist.count) libs=\(content.libraries.count) sections=\(content.librarySections.count)")
         guard !Task.isCancelled else { return }
 
@@ -470,7 +536,20 @@ public final class HomeViewModel {
     /// flip its badge without a refetch. A watchlist add/remove also inserts/removes
     /// the title from the Watchlist row.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
-        guard case var .loaded(content) = state else { return }
+        guard case var .loaded(content) = state else {
+            // A play that arrives before Home has any content to update is
+            // discarded outright — there is no row to change and nothing here
+            // schedules a look later. Worth seeing, because from the outside it is
+            // indistinguishable from the play never happening.
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.homeMutationLine(
+                played: mutation.played,
+                resumePosition: mutation.resumePosition,
+                onRow: false,
+                reloadScheduled: false,
+                state: String(describing: state)
+            ))
+            return
+        }
         // A resume/progress change — or a *completed* play — means the user
         // actually played the title just now, so bump its recency and re-sort
         // Continue Watching to float it to the front without a full reload. A bare
@@ -495,12 +574,58 @@ public final class HomeViewModel {
         // loaded, so a normal re-watch or mark-watched never forces a reload.
         let isInProgressResume = (mutation.resumePosition ?? 0) > 0 && !(mutation.played ?? false)
         let alreadyOnHome = content.continueWatching.contains { mutation.targets($0) }
+        // A title played for the first time has never been on this row, so there is
+        // nothing to update in place. The card is right here on the mutation — the
+        // player was holding it the whole time — so put it on the row now rather
+        // than asking a server which may not have recorded the play yet. Measured on
+        // device, that question is asked before our own write arrives and comes back
+        // "no", which is why a title started from Search stayed missing until the
+        // app was relaunched.
+        var placedCard = false
+        if isInProgressResume, !alreadyOnHome, let played = mutation.item {
+            var card = played
+            card.resumePosition = mutation.resumePosition
+            card.playedPercentage = mutation.playedPercentage
+            card.lastPlayedAt = Date()
+            content.continueWatching.insert(card, at: 0)
+            unconfirmedContinueWatchingIDs.insert(card.id)
+            placedCard = true
+        }
+        if isInProgressResume {
+            // A new play is a new prediction, so it needs a new acknowledgement:
+            // whatever the servers told us about this title before this moment no
+            // longer settles anything. Without this a title played, removed, and
+            // then played again would be treated as already-confirmed and dropped
+            // on the next refresh, even though the fresh play genuinely belongs.
+            for target in Self.mutationScopeKeys(mutation, card: mutation.item) {
+                serverConfirmedTargets.remove(target)
+            }
+        }
         if isInProgressResume && !alreadyOnHome {
+            // Still refresh, so the placed card is reconciled with the server's own
+            // view — cross-server sources, episode linkage, artwork it may know
+            // better — once that view catches up.
             scheduleNewResumeReload()
         }
+        ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.homeMutationLine(
+            played: mutation.played,
+            resumePosition: mutation.resumePosition,
+            onRow: alreadyOnHome || placedCard,
+            reloadScheduled: isInProgressResume && !alreadyOnHome,
+            state: placedCard ? "loaded placed-card" : "loaded"
+        ))
 
-        if mutation.played == true {
+        // A cleared resume point means the title has nowhere left to continue from,
+        // so it leaves the row — whether that came from finishing it or from the
+        // viewer taking it off deliberately. Distinguished from "unchanged" by the
+        // value being explicitly 0 rather than absent: `nil` means this mutation
+        // says nothing about position, while 0 says there is no longer one.
+        let clearedResume = mutation.resumePosition == 0 && mutation.played != false
+        if mutation.played == true || clearedResume {
             content.continueWatching.removeAll { mutation.targets($0) }
+            unconfirmedContinueWatchingIDs.subtract(
+                content.continueWatching.map(\.id)
+            )
         } else if reflectsPlayback {
             let now = Date()
             let stamped = content.continueWatching.map { item -> MediaItem in
@@ -558,7 +683,7 @@ public final class HomeViewModel {
         // Keep the next launch snapshot in lockstep with in-session watch actions.
         // Without this, quitting after playback resurrects the pre-play Continue
         // Watching order until the next live refresh completes.
-        contentStore.save(content)
+        saveSnapshot(content)
     }
 
     /// Re-resolves the durable alias-ordered Watchlist against already-loaded
@@ -618,7 +743,7 @@ public final class HomeViewModel {
         durableWatchlistSaveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(1200))
             guard !Task.isCancelled, let self else { return }
-            self.contentStore.save(content)
+            self.saveSnapshot(content)
         }
     }
 
@@ -652,14 +777,102 @@ public final class HomeViewModel {
         contentStore.clearHero()
     }
 
+    /// Targets a server has shown us since we last wrote to them, keyed like
+    /// ``MediaSourceRef/id``.
+    ///
+    /// Turns "absent from the feed" — which on its own is ambiguous — into two
+    /// distinguishable things. Before a server has acknowledged our write, absence
+    /// means it has not caught up and the just-played card deserves to be carried.
+    /// Once it has returned that card even once, the prediction is fulfilled, and a
+    /// later absence is the server saying the title is gone: watched elsewhere, or
+    /// dismissed in its own app. Without this distinction a title removed moments
+    /// after being played stayed on the row until the carry window expired, which is
+    /// the mirror of the bug the window exists to prevent.
+    ///
+    /// A fresh play removes its targets again, because that is a new prediction
+    /// awaiting a new acknowledgement.
+    private var serverConfirmedTargets: Set<String> = []
+
+    /// Cards on the row that no server has returned yet — placed from a play we
+    /// just made, or carried while a server catches up.
+    ///
+    /// They are shown, but never **persisted**. The launch snapshot exists to
+    /// repaint what the servers last said, and writing a prediction into it makes
+    /// the prediction self-sustaining: the next launch paints it, that painted row
+    /// is what carry-forward inspects, and the durable write record it cites is
+    /// still on disk — so the card re-carries itself indefinitely and survives even
+    /// a force restart. Bounded prediction, unbounded persistence, and the
+    /// persistence wins. Keeping them out of the snapshot is what bounds it.
+    private var unconfirmedContinueWatchingIDs: Set<String> = []
+
     /// In-flight guard so a burst of resume ticks for a not-yet-loaded title
     /// coalesces into a single silent re-aggregation instead of stacking reloads.
     private var newResumeReloadInFlight = false
 
-    /// Silently re-aggregates Home to surface a brand-new resume that couldn't be
-    /// updated in place (see ``applyWatchedState(_:)``). No-op while a reload is
-    /// already running, and only ever runs against currently-loaded content so it
-    /// can't fight the initial load or a visibility-driven reload.
+    /// The scope keys a mutation addresses. `scopedItemIDs` already carries the
+    /// exact `(account, item)` pairs the fan-out targeted; the played card
+    /// contributes its own servers so a merged title is fully covered.
+    nonisolated static func mutationScopeKeys(_ mutation: MediaItemMutation, card: MediaItem?) -> Set<String> {
+        // `scopedItemIDs` joins with ":", and an item id may itself contain one, so
+        // split on the FIRST separator only — the account id never does.
+        var keys = Set(mutation.scopedItemIDs.compactMap { scoped -> String? in
+            guard let separator = scoped.firstIndex(of: ":") else { return nil }
+            return String(scoped[scoped.startIndex..<separator])
+                + "\u{1}"
+                + String(scoped[scoped.index(after: separator)...])
+        })
+        if let card { keys.formUnion(scopeKeys(of: card)) }
+        return keys
+    }
+
+    /// The scope keys a card answers to: every server that holds it, plus its own
+    /// account-and-id pair for an unmerged single-source card.
+    nonisolated static func scopeKeys(of item: MediaItem) -> Set<String> {
+        var keys = Set(item.sources.map { $0.accountID + "\u{1}" + $0.itemID })
+        if let account = item.sourceAccountID { keys.insert(account + "\u{1}" + item.id) }
+        return keys
+    }
+
+    /// Persists the launch snapshot with predictions stripped out.
+    ///
+    /// What is on screen and what is worth repainting next launch are different
+    /// questions. A card no server has confirmed is shown because we have good
+    /// reason to expect it; it is not something to repaint from disk days later,
+    /// when the reason has long since expired and no server ever agreed.
+    private func saveSnapshot(_ content: Content) {
+        guard !unconfirmedContinueWatchingIDs.isEmpty else {
+            contentStore.save(content)
+            return
+        }
+        var durable = content
+        durable.continueWatching.removeAll { unconfirmedContinueWatchingIDs.contains($0.id) }
+        contentStore.save(durable)
+    }
+
+    /// Recomputes which cards are on the row without any server having returned
+    /// them, so the launch snapshot can leave them out. Replaces the set outright:
+    /// a card the feed now carries has stopped being a prediction.
+    private func noteUnconfirmed(reconciled: [MediaItem], fetched: [MediaItem]) {
+        let confirmed = Set(fetched.map(\.id))
+        unconfirmedContinueWatchingIDs = Set(
+            reconciled.lazy.map(\.id).filter { !confirmed.contains($0) }
+        )
+    }
+
+    /// Records that the servers have acknowledged these cards, so a later absence
+    /// reads as a removal rather than as lag. See ``serverConfirmedTargets``.
+    private func noteServerConfirmed(_ fetched: [MediaItem]) {
+        for item in fetched { serverConfirmedTargets.formUnion(Self.scopeKeys(of: item)) }
+    }
+
+    /// Silently re-aggregates Home so a brand-new resume is backed by real server
+    /// data as soon as the servers have it.
+    ///
+    /// This is now a follow-up rather than the way the title appears: the played
+    /// card is placed on the row immediately by ``applyWatchedState(_:)``, because
+    /// the app already has it and does not need to ask anyone. The reload exists so
+    /// the placed card is reconciled with the server's own view (artwork, episode
+    /// linkage, cross-server sources) once that view catches up.
     private func scheduleNewResumeReload() {
         guard !newResumeReloadInFlight, case .loaded = state else { return }
         newResumeReloadInFlight = true
@@ -688,7 +901,31 @@ public final class HomeViewModel {
     ///    matching source refs) with the play's `capturedAt` recency + resume, so it
     ///    floats to the correct spot;
     ///  - anything else (e.g. a bare mark-*unwatched*) is left untouched — we never
-    ///    fabricate recency for a non-play, nor invent a card the feed didn't return.
+    ///    fabricate recency for a non-play, nor invent a card out of nothing.
+    ///
+    /// **Carrying a just-played card (`carryForward`).** The server owns watch
+    /// state and wins every disagreement — but only once it has actually heard us.
+    /// A play produces two independent pieces of work, telling the server where the
+    /// viewer stopped and asking it what is in progress, and nothing orders them;
+    /// measured on device, the ask routinely wins and the server answers about a
+    /// moment before the play. Dropping the card on that answer is how a title
+    /// started from Search vanished until the app was relaunched.
+    ///
+    /// So a card already on screen is kept when the feed omits it, and **only**
+    /// while there is concrete evidence the server has not caught up yet: a write
+    /// still queued for it, or one applied within `carryForwardWindow`. Outside
+    /// that the card goes, without exception — which is what stops this becoming
+    /// the mirror bug, a title removed on another client that Plozz keeps showing
+    /// forever. It is a short-lived prediction of what the server is about to say,
+    /// never a second opinion about what is true.
+    ///
+    /// `carryForwardWindow` is deliberately **seconds**. It covers exactly one
+    /// thing: the gap between a server accepting our write and reflecting it in
+    /// its own resume feed, which takes a moment, not minutes. Being offline is a
+    /// different condition and is already covered by the write still being queued.
+    /// Anything longer is not patience, it is a licence to keep showing a title
+    /// the viewer has removed — and someone will always reach for the server's own
+    /// app, so that removal has to land whatever Plozz happens to be doing.
     ///
     /// The row is then re-sorted with the aggregator's exact recency comparator so
     /// the overlaid stamps take effect. Pure and side-effect-free for testability.
@@ -707,8 +944,11 @@ public final class HomeViewModel {
         _ items: [MediaItem],
         pending: [WatchMutation],
         appliedRecency: [String: AppliedResumeRecord] = [:],
+        carryForward: [MediaItem] = [],
+        serverConfirmed: Set<String> = [],
         now: Date = Date(),
-        clampFreshness: TimeInterval = 30 * 60
+        clampFreshness: TimeInterval = 30 * 60,
+        carryForwardWindow: TimeInterval = 20
     ) -> [MediaItem] {
         guard !pending.isEmpty || !appliedRecency.isEmpty else { return items }
 
@@ -765,7 +1005,132 @@ public final class HomeViewModel {
             }
             overlaid.append(updated)
         }
+        overlaid.append(contentsOf: carriedForward(
+            carryForward,
+            fetched: items,
+            pending: pending,
+            appliedRecency: appliedRecency,
+            serverConfirmed: serverConfirmed,
+            now: now,
+            window: carryForwardWindow
+        ))
         return HomeAggregator.sortedByRecency(overlaid)
+    }
+
+    /// Cards on screen that the fresh feed left out, kept only while a write for
+    /// them is still queued or landed within `window`.
+    ///
+    /// The window is what keeps the server authoritative. Our write is accepted in
+    /// well under a second, so a feed that still omits the title minutes later is
+    /// not lagging — it is telling us something (watched elsewhere, dismissed on
+    /// another client) and it gets to be right.
+    private nonisolated static func carriedForward(
+        _ candidates: [MediaItem],
+        fetched: [MediaItem],
+        pending: [WatchMutation],
+        appliedRecency: [String: AppliedResumeRecord],
+        serverConfirmed: Set<String>,
+        now: Date,
+        window: TimeInterval
+    ) -> [MediaItem] {
+        guard !candidates.isEmpty else { return [] }
+        func scopeKey(_ accountID: String, _ itemID: String) -> String { accountID + "\u{1}" + itemID }
+
+        var present = Set<String>()
+        for item in fetched {
+            for source in item.sources { present.insert(scopeKey(source.accountID, source.itemID)) }
+            if let account = item.sourceAccountID { present.insert(scopeKey(account, item.id)) }
+        }
+        // Writes still queued for a title — the server demonstrably has not seen it.
+        var queued = Set<String>()
+        for mutation in pending where (mutation.resumePosition ?? 0) > 0 && mutation.played != true {
+            for target in mutation.targets { queued.insert(scopeKey(target.accountID, target.itemID)) }
+        }
+        // Writes that landed recently enough that the feed may not show them yet.
+        var recentlyWritten = Set<String>()
+        for (key, record) in appliedRecency where now.timeIntervalSince(record.appliedAt) <= window {
+            // `appliedRecency` keys on "accountID:itemID"; re-key to the scoped form.
+            guard let separator = key.firstIndex(of: ":") else { continue }
+            recentlyWritten.insert(
+                scopeKey(String(key[key.startIndex..<separator]), String(key[key.index(after: separator)...]))
+            )
+        }
+
+        var carried: [MediaItem] = []
+        for candidate in candidates {
+            // Only ever carry something genuinely in progress. A finish is supposed
+            // to leave the row, so its absence is the intended outcome.
+            guard (candidate.resumePosition ?? 0) > 0 else { continue }
+            var keys = Set(candidate.sources.map { scopeKey($0.accountID, $0.itemID) })
+            if let account = candidate.sourceAccountID { keys.insert(scopeKey(account, candidate.id)) }
+            guard !keys.isDisjoint(with: queued) || !keys.isDisjoint(with: recentlyWritten) else { continue }
+            guard keys.isDisjoint(with: present) else { continue }
+            // The server already acknowledged this write once. Its absence now is an
+            // answer, not a lag, and it outranks anything we predicted.
+            guard keys.isDisjoint(with: serverConfirmed) else { continue }
+            carried.append(candidate)
+        }
+        if !carried.isEmpty {
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.carryForwardLine(
+                titles: carried.map(\.title)
+            ))
+        }
+        return carried
+    }
+
+    /// Pending in-progress plays that matched **no card** in the freshly fetched
+    /// feed.
+    ///
+    /// ``reconcileContinueWatching`` may drop a card or restamp one, but it
+    /// deliberately never invents one — it will not fabricate a row the feed did
+    /// not return. That is the right call for correctness and it leaves a real
+    /// gap: a title the viewer just started, which the server has not yet listed,
+    /// has nowhere to be put. The row then stays silently wrong until some later
+    /// refresh happens to catch the server up, which in practice is the next
+    /// launch. Starting something from Search is the everyday way to hit this,
+    /// because a title reached from Search is precisely one that was not already
+    /// on the row.
+    ///
+    /// Naming those plays turns "nothing appeared" into an observation. Pure, so
+    /// it is testable and costs nothing when diagnostics are off.
+    public nonisolated static func unmatchedPendingTargets(
+        in items: [MediaItem],
+        pending: [WatchMutation]
+    ) -> [String] {
+        guard !pending.isEmpty else { return [] }
+        func key(_ accountID: String, _ itemID: String) -> String { accountID + "\u{1}" + itemID }
+        var present = Set<String>()
+        for item in items {
+            for source in item.sources { present.insert(key(source.accountID, source.itemID)) }
+            if let account = item.sourceAccountID { present.insert(key(account, item.id)) }
+        }
+        var unmatched: [String] = []
+        var seen = Set<String>()
+        // Only in-progress plays: a finished one is *supposed* to be absent from
+        // the row, so its absence is the correct outcome rather than a gap.
+        for mutation in pending where (mutation.resumePosition ?? 0) > 0 && mutation.played != true {
+            for target in mutation.targets {
+                let target_key = key(target.accountID, target.itemID)
+                guard !present.contains(target_key), seen.insert(target_key).inserted else { continue }
+                unmatched.append("\(target.accountID):\(target.itemID)")
+            }
+        }
+        return unmatched
+    }
+
+    /// Emits what the overlay did to one fetched feed. Gated; free when off.
+    private nonisolated static func logOverlay(
+        fetched: [MediaItem],
+        reconciled: [MediaItem],
+        pending: [WatchMutation]
+    ) {
+        guard ContinueWatchingDiagnostics.isEnabled else { return }
+        ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.overlayLine(
+            fetched: fetched.count,
+            reconciled: reconciled.count,
+            pending: pending.count,
+            unmatched: unmatchedPendingTargets(in: fetched, pending: pending)
+        ))
     }
 
     /// Clamps a card's server-reported recency **down** to the real play time for any

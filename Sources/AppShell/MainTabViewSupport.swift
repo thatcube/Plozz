@@ -960,7 +960,7 @@ func makePlaybackStoppedHandler(
         // End the live session (so the just-played server is no longer deferred)
         // and enqueue the final convergence write, in that order. `percent` rides
         // along so the surface the user returns to can flip its resume bar in place.
-        watchBridge.finishPlayback(liveAccountID, liveItemID, percent, mutation)
+        watchBridge.finishPlayback(liveAccountID, liveItemID, percent, mutation, convergingItem)
     }
 }
 

@@ -1640,6 +1640,7 @@
     "mediaAction.pauseDownload": "a4e94f47c3fe2091572ed6baa816071372bd7a1d6c80e035d5acbb260d400aeb",
     "mediaAction.refreshMetadata": "8007f1176394d83d1307a46e47ce52e00a7e59d536ad45ba3f556df9201bfccb",
     "mediaAction.removeDownload": "c23889438043e88b1c78dc478ef2da1dd3bd503afa938c300fa6717bd72df92f",
+    "mediaAction.removeFromContinueWatching": "53d313d6fffad2da1fadc9fda9eb9d40277c64f3cf7b172db6f10a345bbeb80b",
     "mediaAction.removeFromWatchlist": "76412680916431347deec837723e7a32331dcba980b311e6b8a13ed116fdcf5e",
     "mediaAction.resumeDownload": "d9e5e220f7a00a6e4ad13e2f772560851bb5e8fb8454a75b1e733fa0d9768d47",
     "mediaAction.startDownload": "829429d8888f3e209397d0ad7c04cb603fb812bf96941e68aae08c76fd93b186",

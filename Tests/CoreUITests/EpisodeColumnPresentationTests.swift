@@ -33,9 +33,28 @@ final class EpisodeColumnPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.accessibilityLabel.contains("25 percent watched"))
     }
 
-    func testWatchedEpisodeUsesWatchedStateWithoutProgress() {
+    /// A rewatch shows where the viewer is, not where they once finished.
+    ///
+    /// "Already watched" was being read as "no progress" in every presentation
+    /// path, which is why restarting something previously seen drew no bar and no
+    /// remaining time while a title never opened before behaved correctly. A saved
+    /// resume point is the stronger fact: it describes this viewing, whereas the
+    /// watched flag describes a previous one.
+    func testWatchedEpisodeWithAResumePointStillShowsItsProgress() {
         let presentation = EpisodeColumnPresentation(
             item: episode(runtime: 2_700, resumePosition: 1_000, playedPercentage: 0.4, isPlayed: true),
+            spoilerSettings: .default
+        )
+
+        XCTAssertEqual(presentation.metadataText, "29m left")
+        XCTAssertEqual(presentation.progress, 1_000.0 / 2_700.0)
+        XCTAssertFalse(presentation.isWatched, "Progress outranks the watched mark while there is something to resume")
+    }
+
+    /// Watched with no resume point left is genuinely finished, and keeps the mark.
+    func testWatchedEpisodeWithNoResumePointKeepsTheWatchedMark() {
+        let presentation = EpisodeColumnPresentation(
+            item: episode(runtime: 2_700, playedPercentage: 1, isPlayed: true),
             spoilerSettings: .default
         )
 

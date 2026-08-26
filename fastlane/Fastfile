@@ -120,6 +120,41 @@ def next_build_number
   latest + 1
 end
 
+# Refuse to archive a distribution build with no crash-reporting endpoint.
+#
+# The DSN is read at runtime from Info.plist; when it is empty the app installs a
+# NoopCrashReporter and every crash a tester hits is lost with no trace. That is
+# invisible from the outside — the Settings toggle simply shows as unavailable —
+# so a whole beta cycle can be shipped blind without anyone noticing. Consent
+# already defaults ON for TestFlight, so the DSN is the only remaining gate.
+#
+# tools/generate-project.sh reads the DSN from the environment or .env.fastlane,
+# so this checks both. Set PLOZZ_ALLOW_NO_CRASH_REPORTING=1 to ship anyway.
+def require_crash_reporting_dsn
+  dsn = ENV["PLOZZ_SENTRY_DSN"].to_s.strip
+  if dsn.empty?
+    env_file = File.expand_path("../.env.fastlane", __dir__)
+    if File.exist?(env_file)
+      line = File.readlines(env_file).grep(/^\s*PLOZZ_SENTRY_DSN=/).last
+      dsn = line.split("=", 2).last.to_s.strip.gsub(/\A["']|["']\z/, "") if line
+    end
+  end
+  return unless dsn.empty?
+
+  if ENV["PLOZZ_ALLOW_NO_CRASH_REPORTING"].to_s == "1"
+    UI.important("No PLOZZ_SENTRY_DSN — shipping WITHOUT crash reporting (override set).")
+    return
+  end
+
+  UI.user_error!(
+    "No crash-reporting endpoint (PLOZZ_SENTRY_DSN) for this distribution build.\n" \
+    "Testers' crashes would be discarded on-device with no record.\n\n" \
+    "Fix by adding the Sentry DSN to the gitignored .env.fastlane at the repo root:\n" \
+    "  PLOZZ_SENTRY_DSN=https://<key>@o<org>.ingest.<region>.sentry.io/<project>\n\n" \
+    "To ship blind anyway: PLOZZ_ALLOW_NO_CRASH_REPORTING=1 fastlane beta --env fastlane"
+  )
+end
+
 # The marketing version (CFBundleShortVersionString) this ship will carry.
 #
 # Mirrors tools/generate-project.sh's precedence — an explicit
@@ -370,6 +405,12 @@ lane :build do |options|
   # is the Xcode beta — force a release Xcode before anything compiles.
   select_release_xcode
 
+  # Crash reporting is only *possible* when a DSN is baked in — without one the
+  # app installs a NoopCrashReporter and every tester crash is lost silently.
+  # Distribution builds are exactly the ones we can't debug over a cable, so
+  # refuse to ship one blind.
+  require_crash_reporting_dsn
+
   # Build number must strictly increase per upload for a given marketing version.
   # TestFlight is the source of truth, so derive the next build from (latest
   # TestFlight build + 1). Set it BEFORE generating the project so generate-project.sh
@@ -415,6 +456,10 @@ end
 desc "Build and upload tvOS plus iOS/iPadOS to TestFlight"
 lane :beta do
   api_key = asc_api_key
+  # Bake the channel into the binary rather than leaving the app to infer it from
+  # an App Store receipt — on tvOS that receipt can be absent, which would make a
+  # TestFlight build read as production and default crash reporting OFF.
+  ENV["PLOZZ_RELEASE_CHANNEL"] = "testflight"
   # An external beta must ship with "What to Test" notes and passes Apple's beta
   # review, so require the notes up front before spending minutes on the build.
   notes = whats_new
@@ -451,6 +496,7 @@ end
 desc "Build and upload tvOS plus iOS/iPadOS to the App Store"
 lane :release do
   api_key = asc_api_key
+  ENV["PLOZZ_RELEASE_CHANNEL"] = "production"
   build
   # Keep every platform's App Store version record in step with the binaries
   # being uploaded. Review rejects a mismatch, and CalVer moves on its own.

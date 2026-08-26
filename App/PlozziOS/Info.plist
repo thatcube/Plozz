@@ -62,6 +62,8 @@
 	<string>Plozz uses your local network to discover media servers and network shares.</string>
 	<key>OMDBAPIKey</key>
 	<string>$(OMDB_API_KEY)</string>
+	<key>PlozzReleaseChannel</key>
+	<string>$(PLOZZ_RELEASE_CHANNEL)</string>
 	<key>PlozzSentryDSN</key>
 	<string>$(PLOZZ_SENTRY_DSN)</string>
 	<key>SimklClientID</key>

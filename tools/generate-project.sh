@@ -90,6 +90,28 @@ if [ -n "${PLOZZ_SENTRY_DSN:-}" ]; then
   fi
 fi
 
+# --- Release channel bake ----------------------------------------------------
+# The runtime fallback for "is this a TestFlight build?" sniffs
+# `Bundle.main.appStoreReceiptURL`, which on tvOS can be nil (a receipt is only
+# written after a purchase) — so a TestFlight install could read as production
+# and silently default crash reporting OFF. The fastlane `beta`/`release` lanes
+# set PLOZZ_RELEASE_CHANNEL so the answer is decided at build time instead.
+if [ -n "${PLOZZ_RELEASE_CHANNEL:-}" ]; then
+  case "${PLOZZ_RELEASE_CHANNEL}" in
+    testflight|production) ;;
+    *)
+      echo "error: PLOZZ_RELEASE_CHANNEL must be 'testflight' or 'production' (got '${PLOZZ_RELEASE_CHANNEL}')" >&2
+      exit 1
+      ;;
+  esac
+  if [ -f "$proj" ]; then
+    /usr/bin/sed -i '' -E "s|PLOZZ_RELEASE_CHANNEL = [^;]*;|PLOZZ_RELEASE_CHANNEL = \"${PLOZZ_RELEASE_CHANNEL}\";|g" "$proj"
+    echo "Baked PLOZZ_RELEASE_CHANNEL = ${PLOZZ_RELEASE_CHANNEL} into ${proj}"
+  else
+    echo "warning: $proj not found; skipping release-channel bake"
+  fi
+fi
+
 if [ -n "${PLOZZ_BUILD_NUMBER:-}" ]; then
   build="${PLOZZ_BUILD_NUMBER}"
   src="PLOZZ_BUILD_NUMBER override"

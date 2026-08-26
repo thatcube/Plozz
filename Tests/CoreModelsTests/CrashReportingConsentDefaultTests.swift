@@ -65,4 +65,31 @@ final class CrashReportingConsentDefaultTests: XCTestCase {
         XCTAssertTrue(AppReleaseChannel.testflight.isBeta)
         XCTAssertFalse(AppReleaseChannel.production.isBeta)
     }
+
+    func testBakedChannelIsParsedCaseInsensitively() {
+        XCTAssertEqual(AppReleaseChannel.baked("testflight"), .testflight)
+        XCTAssertEqual(AppReleaseChannel.baked("TestFlight"), .testflight)
+        XCTAssertEqual(AppReleaseChannel.baked("  production \n"), .production)
+        XCTAssertEqual(AppReleaseChannel.baked("debug"), .debug)
+    }
+
+    /// A local build leaves the setting empty, and a project generated without
+    /// the bake leaves the literal `$(PLOZZ_RELEASE_CHANNEL)` behind. Neither is
+    /// an answer, so both must fall through to runtime detection rather than
+    /// being mistaken for a channel name.
+    func testAbsentOrUnresolvedBakeYieldsNoAnswer() {
+        XCTAssertNil(AppReleaseChannel.baked(nil))
+        XCTAssertNil(AppReleaseChannel.baked(""))
+        XCTAssertNil(AppReleaseChannel.baked("   "))
+        XCTAssertNil(AppReleaseChannel.baked("$(PLOZZ_RELEASE_CHANNEL)"))
+        XCTAssertNil(AppReleaseChannel.baked("nonsense"))
+    }
+
+    /// The whole point of the bake: a TestFlight build must default consent ON
+    /// even when the App Store receipt runtime detection relies on is missing,
+    /// which on tvOS is the normal state until a purchase happens.
+    func testBakedTestFlightChannelDefaultsConsentOn() {
+        XCTAssertEqual(AppReleaseChannel.baked("testflight")?.isBeta, true)
+        XCTAssertEqual(AppReleaseChannel.baked("production")?.isBeta, false)
+    }
 }

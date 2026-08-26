@@ -602,12 +602,19 @@ public extension MediaItem {
     /// permanently full progress bar with no remaining time. When the resume
     /// position is degenerate we fall through to `playedPercentage`, which also
     /// recovers the case where the provider's runtime is simply wrong.
+    ///
+    /// A **saved resume point outranks having seen the title before.** Someone
+    /// starting a film again has somewhere to come back to, and that is what the
+    /// card is for; treating "watched" as proof of no progress left a rewatch
+    /// showing its full runtime as though it had never been opened. Only the
+    /// percentage fallback still defers to it, because a watched title reports a
+    /// percentage of 1 that describes the *previous* viewing, not this one.
     private var cardProgressFraction: Double? {
-        guard !isPlayed else { return nil }
         if let runtime, runtime > 0, let resume = resumePosition, resume > 0 {
             let fraction = resume / runtime
             if fraction < 1 { return fraction }
         }
+        guard !isPlayed else { return nil }
         if let percentage = playedPercentage, percentage > 0, percentage < 1 {
             return percentage
         }

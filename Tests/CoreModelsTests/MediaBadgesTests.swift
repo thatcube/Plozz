@@ -338,13 +338,39 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertTrue(item.cardRuntimeIsRemaining)
     }
 
-    func testCardRuntimeTextUsesOverallWhenMarkedPlayed() {
+    /// A saved resume point outranks having seen the title before, matching how
+    /// the progress bar already behaves (`testProgressTakesPriorityOverWatchedBadge`).
+    /// The two disagreed: the bar treated progress as the stronger fact, the label
+    /// treated "watched" as the stronger one, so a rewatch drew a part-filled bar
+    /// beside its full runtime.
+    ///
+    /// The risk this accepts: a server can leave a stale position behind on a title
+    /// marked watched, and that now reads as remaining time. Nothing on the item
+    /// distinguishes a stale position from a genuine restart — but a viewer who has
+    /// actually started again is the far commoner case, and the row exists to tell
+    /// them where they are.
+    func testCardRuntimeTextPrefersRemainingOverWatchedWhenAResumePointExists() {
         let item = MediaItem(
             id: "1",
             title: "Movie",
             kind: .movie,
             runtime: 7200,
             resumePosition: 1800,
+            isPlayed: true
+        )
+        XCTAssertEqual(item.cardRuntimeText, "1h 30m")
+        XCTAssertTrue(item.cardRuntimeIsRemaining)
+    }
+
+    /// Without a resume point, "watched" stands: the percentage of 1 such a title
+    /// reports describes the previous viewing, not a current one.
+    func testCardRuntimeTextUsesOverallWhenWatchedWithNoResumePoint() {
+        let item = MediaItem(
+            id: "1",
+            title: "Movie",
+            kind: .movie,
+            runtime: 7200,
+            playedPercentage: 1,
             isPlayed: true
         )
         XCTAssertEqual(item.cardRuntimeText, "2h")
@@ -399,13 +425,28 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertNil(item.resumeProgressFraction)
     }
 
-    func testResumeProgressFractionNilWhenMarkedPlayed() {
+    /// The detail page's Play button reads this, which is why restarting a film
+    /// already seen left that button showing nothing while the same title's card in
+    /// a library row showed its progress correctly. Same gate, fourth place.
+    func testResumeProgressFractionSurvivesTheWatchedMarkWhenThereIsAResumePoint() {
         let item = MediaItem(
             id: "1",
             title: "Movie",
             kind: .movie,
             runtime: 7200,
             resumePosition: 1800,
+            isPlayed: true
+        )
+        XCTAssertEqual(item.resumeProgressFraction, 0.25)
+    }
+
+    func testResumeProgressFractionNilWhenWatchedWithNoResumePoint() {
+        let item = MediaItem(
+            id: "1",
+            title: "Movie",
+            kind: .movie,
+            runtime: 7200,
+            playedPercentage: 1,
             isPlayed: true
         )
         XCTAssertNil(item.resumeProgressFraction)

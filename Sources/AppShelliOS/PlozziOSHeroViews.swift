@@ -726,6 +726,9 @@ private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
         _ geometry: ExtendedArtworkGeometry,
         width: CGFloat
     ) -> some View {
+        // No clip of its own. The mask below already bounds the band, and the
+        // stage's single outer clip cuts the overrun — a third boundary here sat
+        // exactly on the seam, which is the one line that must not have one.
         Color.clear
             .frame(
                 width: width,
@@ -735,7 +738,6 @@ private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
                 sizedPicture(geometry, isMirror: true)
                     .scaleEffect(x: 1, y: -1)
             }
-            .clipped()
             .mask {
                 // Full strength at the seam — a reflection is brightest where it
                 // meets what it reflects, and any step there is a hard line
@@ -839,7 +841,12 @@ private struct PlozziOSHeroBackdrop: View {
         ZStack {
             FallbackAsyncImage(
                 references: presentation.artworkReferences,
-                variant: .heroBackdrop
+                variant: .heroBackdrop,
+                // Put a real picture up while the 2000px pass decodes, rather
+                // than a flat colour. The 768px frame is what warming caches for
+                // the whole carousel, so a swipe lands on an image immediately
+                // and sharpens, instead of waiting out a full-size download.
+                previewVariant: .heroPreview
             ) {
                 palette.backgroundBase
             }
@@ -1219,7 +1226,8 @@ private struct PlozziOSSlidingHeroArtwork: View {
     private var artwork: some View {
         FallbackAsyncImage(
             references: presentation.artworkReferences,
-            variant: .heroBackdrop
+            variant: .heroBackdrop,
+            previewVariant: .heroPreview
         ) {
             palette.backgroundBase
         }
@@ -1230,15 +1238,14 @@ private struct PlozziOSSlidingHeroArtwork: View {
     private func mirroredEdge(alignment: Alignment) -> some View {
         FallbackAsyncImage(
             references: presentation.artworkReferences,
-            variant: .heroBackdrop
+            variant: .heroBackdrop,
+            previewVariant: .heroPreview
         ) {
             palette.backgroundBase
         }
         .frame(width: width, height: height)
         .scaleEffect(x: -1)
         .frame(width: edgeWidth, height: height, alignment: alignment)
-        .clipped()
-        .frame(width: edgeWidth, height: height)
         .clipped()
     }
 }
@@ -1257,7 +1264,8 @@ private struct PlozziOSHeroReflection: View {
         ZStack {
             FallbackAsyncImage(
                 references: presentation.artworkReferences,
-                variant: .heroBackdrop
+                variant: .heroBackdrop,
+                previewVariant: .heroPreview
             ) {
                 Color.clear
             }

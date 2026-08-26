@@ -1284,11 +1284,6 @@ public extension View {
     /// card pattern, we instead drive focus with `.focusable` + `.onTapGesture`
     /// (the select-press fires the tap) and disable the system focus effect, so
     /// the only focus visuals are the ones we draw via `plozzGlassCard`.
-    ///
-    /// The exception is the "Highlight" focus style, where the system effect is
-    /// precisely what we want — it carries tvOS's finger-tracking tilt and
-    /// specular — so `plozzSystemFocusEffect` lets it through there. See
-    /// `plozzCardFocusParallax`.
     func focusableCard(
         isFocused: FocusState<Bool>.Binding,
         cornerRadius: CGFloat,
@@ -1298,7 +1293,7 @@ public extension View {
         contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .focusable(true)
             .focused(isFocused)
-            .plozzSystemFocusEffect()
+            .focusEffectDisabled()
             .onTapGesture(perform: action)
             .accessibilityAddTraits(.isButton)
         #else

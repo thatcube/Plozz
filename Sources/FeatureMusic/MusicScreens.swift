@@ -160,7 +160,6 @@ private struct BrowseButton: View {
             .padding(.horizontal, PlozzTheme.Spacing.xLarge)
             .frame(height: NowPlayingCard.nominalHeight)
             .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: surfaceFocused)
-            .plozzCardFocusParallax(cornerRadius: metrics.landscapeCardCornerRadius)
             .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
             .plozzCardRasterize(reduceTransparency: reduceTransparency)
             .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
@@ -372,7 +371,6 @@ private struct GenreCard: View {
         // visual → focusableCard → rasterize → shadow → scale. `plozzCardRasterize`
         // flattens the layer tree into one GPU pass; omitting it on a `.focusable`
         // card in this grid is what froze the render server.
-        .plozzCardFocusParallax(cornerRadius: PlozzTheme.Metrics.Radius.card)
         .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.Radius.card, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.4 : 0.15), radius: isFocused ? 22 : 8, y: isFocused ? 12 : 4)

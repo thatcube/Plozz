@@ -173,7 +173,6 @@ struct MusicCard: View {
         }
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: surfaceFocused)
-        .plozzCardFocusParallax(cornerRadius: metrics.landscapeCardCornerRadius)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)

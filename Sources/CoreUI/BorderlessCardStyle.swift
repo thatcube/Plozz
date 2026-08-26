@@ -67,10 +67,6 @@ private struct FocusHaloModifier: ViewModifier {
                     radius: isFocused ? 20 : 0,
                     y: isFocused ? 10 : 0
                 )
-                // On the artwork itself, which is both what should tilt and — as
-                // a descendant of the focusable card — where a hover effect is
-                // actually allowed to run.
-                .plozzCardFocusParallax(cornerRadius: cornerRadius)
                 .plozzCardFocusLift(
                     isFocused: isFocused,
                     cornerRadius: cornerRadius,

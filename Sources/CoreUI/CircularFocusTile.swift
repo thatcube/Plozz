@@ -124,8 +124,6 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
             avatar()
                 .frame(width: diameter, height: diameter)
                 .clipShape(Circle())
-                // The halo carries the focus treatment for every artwork tile,
-                // including the native tilt when the outline is off.
                 .plozzFocusHalo(
                     cornerRadius: diameter / 2,
                     focusScale: focusScale,
@@ -138,7 +136,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
         .focusable(true)
         .focused($isFocused)
         .onChange(of: isFocused) { _, focused in onFocusChange?(focused) }
-        .plozzSystemFocusEffect()
+        .focusEffectDisabled()
         .onTapGesture(perform: action)
         .accessibilityAddTraits(.isButton)
         .plozzCardFocusTransition(isFocused: isFocused)

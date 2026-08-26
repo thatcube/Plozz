@@ -6,9 +6,9 @@ import CoreModels
 /// outline is switched off in Settings ▸ Appearance ▸ Cards.
 ///
 /// tvOS's own idiom for focus is movement and light, not a border: the focused
-/// thing grows, catches a specular sweep as it arrives, and eases back down when
-/// it leaves. This file is that treatment, expressed as two modifiers every card
-/// can adopt without knowing which style is active:
+/// thing grows, catches the light as it arrives, tilts under your finger, and
+/// eases back down when it leaves. This file is that treatment, expressed as
+/// modifiers every card can adopt without knowing which style is active:
 ///
 /// - ``SwiftUI/View/plozzCardFocusLift(isFocused:cornerRadius:outlineScale:outlineReach:)``
 ///   replaces a card's `.scaleEffect(isFocused ? scale : 1)`. In the outlined
@@ -18,9 +18,14 @@ import CoreModels
 /// - ``SwiftUI/View/plozzCardFocusTransition(isFocused:focusedZIndex:animates:)``
 ///   replaces the `.zIndex` + `.animation` pair that follows it, so the settle
 ///   curve and the raised z-position are decided in one place.
+/// - ``SwiftUI/View/plozzCardFocusParallax(cornerRadius:)`` puts tvOS's real
+///   finger-tracking tilt on the card's artwork or surface, and
+///   ``SwiftUI/View/plozzSystemFocusEffect()`` is what stops
+///   `.focusEffectDisabled()` from suppressing it.
 ///
 /// Cards that draw an outline *around* their artwork rather than lighting their
-/// own surface go through `plozzFocusHalo`, which routes to the same lift.
+/// own surface go through `plozzFocusHalo`, which routes to the same lift and
+/// parallax.
 public extension View {
     /// The focus lift for a card, in whichever style the profile has chosen.
     ///
@@ -68,6 +73,92 @@ public extension View {
             animates: animates
         ))
     }
+
+    /// tvOS's own focus parallax: while the card is focused, sliding a finger
+    /// across the remote's touch surface tilts it in 3D and slides a specular
+    /// highlight over it, tracking the finger.
+    ///
+    /// This is the system effect, not an imitation — `HoverEffect.highlight` is
+    /// documented on tvOS as "a projection effect accompanied with a specular
+    /// highlight… motion effects to produce a parallax effect by adjusting the
+    /// projection matrix and specular offset". There is no public API to drive
+    /// that projection ourselves (`UIMotionEffect` is unavailable on tvOS, and
+    /// reading the touch surface directly means taking the remote away from the
+    /// focus engine through GameController), so the system effect is both the
+    /// best-looking and the only supported route.
+    ///
+    /// The shape matters: without a matching `hoverEffect` content shape the
+    /// specular is clipped to the view's square bounds and lights up the corners
+    /// a rounded card doesn't have.
+    ///
+    /// ⚠️ Anything applying `.focusEffectDisabled()` up the tree **suppresses
+    /// this** — that modifier disables hover effects too. Cards gate it through
+    /// `plozzSystemFocusEffect`, which keeps it off in the outlined style (where
+    /// it exists to kill tvOS's white focus platter) and lets it through here.
+    ///
+    /// ⚠️ Apply it **inside** the focusable view, not around it: a hover effect
+    /// runs when the view carrying it is in the focused hierarchy, so wrapping
+    /// the focusable card in it puts the effect on an ancestor that is never
+    /// itself focused. In practice that means putting it on the card's artwork or
+    /// surface, before `focusableCard`.
+    func plozzCardFocusParallax(cornerRadius: CGFloat) -> some View {
+        modifier(CardFocusParallaxModifier(cornerRadius: cornerRadius))
+    }
+
+    /// Whether tvOS may draw its own focus effect on this card.
+    ///
+    /// Cards have always switched it off: on a `Button` it paints a stark white
+    /// platter behind the card that buries our glass treatment. But
+    /// `.focusEffectDisabled()` is a blunt instrument — it disables *hover*
+    /// effects as well, which is where the native tilt-and-specular lives. So it
+    /// stays on for the outlined style, and steps aside for the highlight style,
+    /// whose whole point is to let tvOS do what tvOS does.
+    func plozzSystemFocusEffect() -> some View {
+        modifier(SystemFocusEffectGate())
+    }
+}
+
+/// See ``SwiftUI/View/plozzSystemFocusEffect()``.
+private struct SystemFocusEffectGate: ViewModifier {
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.focusEffectDisabled(focusStyle.drawsFocusOutline || reduceMotion)
+    }
+}
+
+/// See ``SwiftUI/View/plozzCardFocusParallax(cornerRadius:)``.
+private struct CardFocusParallaxModifier: ViewModifier {
+    let cornerRadius: CGFloat
+
+    @Environment(\.plozzCardFocusStyle) private var focusStyle
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Reduce Motion takes the tilt out — it is motion, and the point of the
+    /// setting is less of it. `SystemFocusEffectGate` agrees, so the effect is
+    /// suppressed at both ends rather than left half-on.
+    private var isEnabled: Bool { !focusStyle.drawsFocusOutline && !reduceMotion }
+
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        if isEnabled {
+            content
+                // Without a matching hover content shape the specular is clipped
+                // to the view's square bounds and lights up corners a rounded
+                // card doesn't have.
+                .contentShape(
+                    .hoverEffect,
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                )
+                .hoverEffect(.highlight)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
 }
 
 // MARK: - Lift
@@ -107,8 +198,16 @@ private struct CardFocusLiftModifier: ViewModifier {
                 // One card holds focus at a time, so one card should be the only
                 // one drawing a sheen.
                 if isHighlight && isFocused {
-                    CardFocusSheen(cornerRadius: cornerRadius, animates: !reduceMotion)
-                        .transition(.opacity)
+                    CardFocusSheen(
+                        cornerRadius: cornerRadius,
+                        sweeps: !reduceMotion,
+                        // tvOS's own parallax brings a specular that tracks the
+                        // remote; a second static one on top of it just dulls the
+                        // artwork. Ours is the fallback for when the system
+                        // effect isn't running (Reduce Motion).
+                        showsSteadySpecular: reduceMotion
+                    )
+                    .transition(.opacity)
                 }
             }
             .scaleEffect(isFocused ? scale : 1)
@@ -137,8 +236,15 @@ private struct CardSizeReader: ViewModifier {
 
 // MARK: - Sheen
 
-/// The "glisten": a soft specular that sits on the focused card, plus a band of
-/// light that sweeps diagonally across it once as focus arrives.
+/// The arrival "glisten": a band of light that sweeps diagonally across a card
+/// once as focus lands on it, and — where tvOS's own parallax isn't running — a
+/// steady specular that keeps the focused card looking lit afterwards.
+///
+/// The sweep earns its place even alongside the system effect. tvOS's specular
+/// tracks the remote's touch surface, so it only moves if a finger is on the
+/// pad; someone navigating by clicking the ring gets a card that grows but never
+/// catches the light. The sweep is what makes focus *arriving* visible either
+/// way.
 ///
 /// Deliberately plain alpha rather than a blend mode. An additive/screen blend
 /// looks marginally brighter over dark artwork but forces the card into its own
@@ -147,7 +253,10 @@ private struct CardSizeReader: ViewModifier {
 /// opacity reads as light on artwork and costs nothing.
 private struct CardFocusSheen: View {
     let cornerRadius: CGFloat
-    let animates: Bool
+    /// Whether the arrival sweep runs (off under Reduce Motion).
+    let sweeps: Bool
+    /// Whether to draw our own steady specular, or leave that to tvOS.
+    let showsSteadySpecular: Bool
 
     /// Where the sweeping band sits, in gradient space: below 0 it is off the
     /// leading corner, above 1 it has left the trailing one.
@@ -161,19 +270,21 @@ private struct CardFocusSheen: View {
         ZStack {
             // The steady specular: a card under focus is lit from above, which is
             // what keeps it looking raised once the sweep has passed.
-            shape.fill(
-                LinearGradient(
-                    colors: [
-                        .white.opacity(0.16),
-                        .white.opacity(0.04),
-                        .clear
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+            if showsSteadySpecular {
+                shape.fill(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.16),
+                            .white.opacity(0.04),
+                            .clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
-            )
+            }
 
-            if animates {
+            if sweeps {
                 shape.fill(sweepGradient)
             }
         }
@@ -181,7 +292,7 @@ private struct CardFocusSheen: View {
         .task {
             // The overlay only exists while the card holds focus, so appearing
             // *is* the card taking focus — no state to compare against.
-            guard animates else { return }
+            guard sweeps else { return }
             sweep = -0.4
             withAnimation(.easeOut(duration: PlozzTheme.Metrics.highlightSheenDuration)) {
                 sweep = 1.4

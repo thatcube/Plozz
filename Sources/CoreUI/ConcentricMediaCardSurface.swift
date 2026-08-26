@@ -33,6 +33,9 @@ private struct ConcentricMediaCardSurface: ViewModifier {
                 isFocused: isFocused,
                 glassAtRest: glassAtRest
             )
+            // On the card surface, which is inside the focusable card — where a
+            // hover effect is allowed to run. See `plozzCardFocusParallax`.
+            .plozzCardFocusParallax(cornerRadius: innerCornerRadius + metrics.cardInset)
     }
 }
 #endif

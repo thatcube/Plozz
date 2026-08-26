@@ -18,8 +18,8 @@ public enum CardFocusStyle: String, CaseIterable, Identifiable, Codable, Sendabl
     /// tvOS's native treatment instead: no outline or halo at all. The card
     /// simply grows — far enough that it still covers the ground the outline
     /// used to (see `PlozzTheme.Metrics.highlightFocusScale`) — catches a
-    /// specular sheen as it takes focus, and settles gently back when it loses
-    /// it.
+    /// specular sweep as it takes focus, tilts under a finger moving on the
+    /// remote's touch surface, and settles gently back when it loses focus.
     case highlight
 
     public var id: String { rawValue }
@@ -58,8 +58,8 @@ public enum CardFocusStyle: String, CaseIterable, Identifiable, Codable, Sendabl
         case .highlight:
             return LocalizedStringResource(
                 "cardFocusStyle.detail.highlight",
-                defaultValue: "No outline — the card grows and catches the light.",
-                comment: "One-line explanation shown under the card focus-style picker."
+                defaultValue: "No outline — the card grows, tilts under your finger and catches the light.",
+                comment: "One-line explanation shown under the card focus-style picker. 'Tilts under your finger' refers to sliding a finger on the Apple TV remote's touch surface."
             )
         }
     }

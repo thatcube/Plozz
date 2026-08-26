@@ -60,6 +60,33 @@ public enum MediaItemIdentity {
     /// The canonical strong-external tokens (back-compat / diagnostics).
     public static let strongExternalSources = strongExternalNamespaces.map(\.canonical)
 
+    /// Whether `item` carries an id strong enough to **retarget** it onto a library
+    /// copy the identity index vouched for — i.e. an id this type actually keys the
+    /// index by, as opposed to a title/year guess.
+    ///
+    /// Deliberately a superset of ``strongExternalNamespaces``: it also accepts a
+    /// bare `PlexGuid`, matching what ``identities(for:)`` emits at the PlexGuid
+    /// branch below and for the same reasons — `plex://<type>/<globalid>` is
+    /// globally unique per work and self-scopes by kind, so it is no weaker than
+    /// TMDb (which, unlike the guid, *reuses* one integer space across movies and
+    /// series).
+    ///
+    /// The two must agree. While they didn't, the index would happily key a
+    /// Watchlist row by its guid — the Discover fetch omits the external `Guid`
+    /// array, so for anime, foreign and locally-matched titles the guid is the ONLY
+    /// id present — but the retarget refused to consult it, and a film sitting in
+    /// the viewer's library opened as a request page with no Play button
+    /// (issue #33). Keep this predicate and `identities(for:)` in step.
+    public static func hasStrongRetargetIdentity(_ item: MediaItem) -> Bool {
+        let hasStrongExternal = strongExternalNamespaces.contains {
+            item.providerIDs.providerID($0.namespace) != nil
+        }
+        if hasStrongExternal { return true }
+        guard let plexGuid = item.providerIDs["PlexGuid"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return !plexGuid.isEmpty
+    }
+
     /// The candidate identities for an item, strongest first. Two items are the
     /// same title when *any* of their identities match.
     ///

@@ -910,6 +910,14 @@ public final class HomeViewModel {
     /// forever. It is a short-lived prediction of what the server is about to say,
     /// never a second opinion about what is true.
     ///
+    /// `carryForwardWindow` is deliberately **seconds**. It covers exactly one
+    /// thing: the gap between a server accepting our write and reflecting it in
+    /// its own resume feed, which takes a moment, not minutes. Being offline is a
+    /// different condition and is already covered by the write still being queued.
+    /// Anything longer is not patience, it is a licence to keep showing a title
+    /// the viewer has removed — and someone will always reach for the server's own
+    /// app, so that removal has to land whatever Plozz happens to be doing.
+    ///
     /// The row is then re-sorted with the aggregator's exact recency comparator so
     /// the overlaid stamps take effect. Pure and side-effect-free for testability.
     ///
@@ -931,7 +939,7 @@ public final class HomeViewModel {
         serverConfirmed: Set<String> = [],
         now: Date = Date(),
         clampFreshness: TimeInterval = 30 * 60,
-        carryForwardWindow: TimeInterval = 5 * 60
+        carryForwardWindow: TimeInterval = 20
     ) -> [MediaItem] {
         guard !pending.isEmpty || !appliedRecency.isEmpty else { return items }
 

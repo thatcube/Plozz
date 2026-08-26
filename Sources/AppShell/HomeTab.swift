@@ -471,7 +471,23 @@ struct HomeTab: View {
             DeepLinkPlayRouter(
                 pendingPlay: runtime.pendingPlay,
                 accounts: accounts,
-                onResolved: { requestPlay($0) }
+                // Open the title's page, then start it. Playing straight from the
+                // shelf left the viewer on Home the moment they backed out — the
+                // title they had just been watching nowhere in sight, and no way
+                // to reach its episodes or its description without finding it
+                // again. Pushing first means Back lands somewhere that makes
+                // sense, and costs nothing on the way in: the player is presented
+                // over the stack, so the page is simply already there underneath.
+                onResolved: { item in
+                    navigate(item)
+                    // Next runloop turn, so the push is committed before the
+                    // player is presented over it. Presenting into a navigation
+                    // change that is still settling drops the cover on tvOS.
+                    Task { @MainActor in
+                        await Task.yield()
+                        requestPlay(item)
+                    }
+                }
             )
             ScreenshotRouter(
                 director: runtime.screenshotDirector,

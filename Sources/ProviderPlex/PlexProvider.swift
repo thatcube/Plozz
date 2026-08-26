@@ -192,7 +192,10 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         // nothing but the log consumes it.
         guard endpoint != "/library/onDeck" else { return }
         let client = self.client
-        let limit = max(items.count, 20)
+        // Ask the legacy feed for materially more than the hub returned. Capping it
+        // at the hub's size makes anything past that cut look like a disagreement,
+        // which reads as a finding and is only an artefact of the request.
+        let limit = max(items.count * 2, 100)
         Task.detached(priority: .utility) {
             await Self.logHubVersusOnDeck(hub: rows, client: client, limit: limit)
         }

@@ -35,7 +35,7 @@ public enum TopShelfPosterComposer {
     /// those renders; `TopShelfStore.pruneArtwork` then deletes them.
     ///
     /// 1: brand-blue fill. 2: white chrome matching `PlozzMediaChrome`.
-    static let barStyleGeneration = 2
+    static let barStyleGeneration = 3
 
     /// Internal rather than private so `PlozzMediaChromeParityTests` can pin the
     /// two greys to CoreUI's live values.
@@ -70,7 +70,8 @@ public enum TopShelfPosterComposer {
     public static func compositedPosterURL(
         id: String,
         posterURL: URL,
-        progress: Double
+        progress: Double,
+        chip: String? = nil  // l10n:content — pre-formatted episode/remaining label
     ) async -> URL? {
         #if canImport(UIKit)
         guard progress > 0.01, progress < 0.99 else { return nil }
@@ -82,7 +83,11 @@ public enum TopShelfPosterComposer {
         // stretched backdrop) the composite is regenerated rather than served
         // stale. Stale files are then pruned by `TopShelfStore.pruneArtwork`.
         let artKey = String(fnv1a(posterURL.absoluteString), radix: 16)
-        let fileName = "\(sanitize(id))_\(bucket)_\(artKey)_v\(barStyleGeneration).png"
+        // The chip is part of what is drawn, so it is part of what identifies the
+        // render. Without it a title whose label changed — an episode gaining its
+        // numbering, a remaining time crossing a minute — would serve the old file.
+        let chipKey = chip.map { String(fnv1a($0), radix: 16) } ?? "n"
+        let fileName = "\(sanitize(id))_\(bucket)_\(artKey)_\(chipKey)_v\(barStyleGeneration).png"
         let destination = directory.appendingPathComponent(fileName)
 
         // Reuse an identical prior render (same item + same rounded percentage).
@@ -91,7 +96,7 @@ public enum TopShelfPosterComposer {
         }
 
         guard let base = await loadImage(from: posterURL) else { return nil }
-        guard let data = render(base: base, progress: CGFloat(progress)) else { return nil }
+        guard let data = render(base: base, progress: CGFloat(progress), chip: chip) else { return nil }
 
         do {
             try FileManager.default.createDirectory(
@@ -162,7 +167,7 @@ public enum TopShelfPosterComposer {
     /// Draws `base` with the progress bar overlaid, returning PNG data. The bar's
     /// scrim → track → fill layering and every colour/scale factor mirror
     /// `PosterCardView.progressBar` so the shelf and Home rows read identically.
-    private static func render(base: UIImage, progress: CGFloat) -> Data? {
+    private static func render(base: UIImage, progress: CGFloat, chip: String? = nil) -> Data? {  // l10n:content — pre-formatted label drawn via Core Graphics
         let size = base.size
         guard size.width > 0, size.height > 0 else { return nil }
 
@@ -174,6 +179,7 @@ public enum TopShelfPosterComposer {
         return renderer.pngData { context in
             base.draw(in: CGRect(origin: .zero, size: size))
             drawProgressBar(in: context.cgContext, size: size, progress: progress)
+            drawResumeChip(in: context.cgContext, size: size, chip: chip)
         }
     }
 
@@ -239,6 +245,86 @@ public enum TopShelfPosterComposer {
     /// Draws the resume bar (scrim → track → fill) into `cg` for a card of `size`.
     /// Shared by the real-poster and placeholder renderers so the bar is identical
     /// everywhere and matches the in-app `PosterCardView.progressBar`.
+    /// Draws the resume chip — a play glyph and a line reading like `S1 · E1 ·
+    /// 21m left` — just above the progress bar, mirroring the card the same title
+    /// wears inside the app.
+    ///
+    /// The shelf card carries a title and a picture and nothing else, so a row of
+    /// half-watched things says what they are but not where you are in any of
+    /// them. tvOS draws its own progress only on `.hdtv` cards, and these are
+    /// posters, so everything the card says has to be painted into the artwork —
+    /// which is already true of the bar this sits above.
+    ///
+    /// Deliberately drawn INSIDE the same scrim the bar already lays down: it
+    /// costs no extra darkening of the artwork, and text and bar read as one
+    /// element rather than two things that happened to land near each other.
+    private static func drawResumeChip(in cg: CGContext, size: CGSize, chip: String?) {  // l10n:content — pre-formatted label, drawn via Core Graphics
+        guard let chip, !chip.isEmpty else { return }
+        let width = size.width
+        let height = size.height
+        let inset = width * Bar.insetFraction
+        let barHeight = width * Bar.heightFraction
+
+        let fontSize = width * 0.052
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
+        let textColor = UIColor.white.withAlphaComponent(0.92)
+
+        // Play glyph, sized to the text so the pair scales together.
+        let glyphSize = fontSize * 0.95
+        let symbolConfig = UIImage.SymbolConfiguration(pointSize: glyphSize, weight: .bold)
+        let glyph = UIImage(systemName: "play.fill", withConfiguration: symbolConfig)?
+            .withTintColor(textColor, renderingMode: .alwaysOriginal)
+
+        let gap = fontSize * 0.34
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor
+        ]
+        let textSize = (chip as NSString).size(withAttributes: attributes)
+        let glyphWidth = glyph?.size.width ?? 0
+        let glyphHeight = glyph?.size.height ?? 0
+        let lineHeight = max(textSize.height, glyphHeight)
+
+        // Sits directly above the bar, with the same breathing room the bar keeps
+        // from the bottom edge.
+        let lineBottom = height - inset - barHeight - fontSize * 0.42
+        let lineTop = lineBottom - lineHeight
+
+        // A long label on a narrow poster must not run under the edge; drop the
+        // glyph before letting the text collide with the inset.
+        let available = width - inset * 2
+        let full = glyphWidth + gap + textSize.width
+        let showsGlyph = glyph != nil && full <= available
+
+        var x = inset
+        if showsGlyph, let glyph {
+            glyph.draw(in: CGRect(
+                x: x,
+                y: lineTop + (lineHeight - glyphHeight) / 2,
+                width: glyphWidth,
+                height: glyphHeight
+            ))
+            x += glyphWidth + gap
+        }
+
+        let textRect = CGRect(
+            x: x,
+            y: lineTop + (lineHeight - textSize.height) / 2,
+            width: max(0, width - inset - x),
+            height: textSize.height
+        )
+        // A shadow rather than a second scrim: the bar's gradient already darkens
+        // this band, and stacking another would grey out the artwork it sits on.
+        cg.saveGState()
+        cg.setShadow(
+            offset: .zero,
+            blur: width * Bar.shadowBlurFraction,
+            color: UIColor.black.withAlphaComponent(0.7).cgColor
+        )
+        (chip as NSString).draw(in: textRect, withAttributes: attributes)
+        cg.restoreGState()
+    }
+
     private static func drawProgressBar(in cg: CGContext, size: CGSize, progress: CGFloat) {
         let width = size.width
         let height = size.height

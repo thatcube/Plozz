@@ -3,6 +3,7 @@ import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureHomeCore
+import HeroUI
 import MediaDownloads
 import Observation
 import SwiftUI
@@ -1116,6 +1117,11 @@ private struct PlozziOSHomeHeroCarousel: View {
         .task(id: items.map(\.id).joined(separator: "|")) {
             await schedules.loadCached(items)
         }
+        // Keyed on the curated set rather than the slide: this warms the whole
+        // carousel once, and must not restart on every swipe.
+        .task(id: items.map(\.id).joined(separator: "|")) {
+            await warmHeroPreviews()
+        }
         // Only the slide on screen is fetched; the rest fill in as they front
         // rather than firing a burst of requests at first paint.
         .task(id: schedules.fetchKey(for: currentItem)) {
@@ -1386,29 +1392,105 @@ private struct PlozziOSHomeHeroCarousel: View {
         }
     }
 
+    /// Current slide index, clamped. The warm helpers below both key off this.
+    private var currentIndex: Int {
+        items.firstIndex { $0.id == selectedItemID } ?? 0
+    }
+
+    private func heroReferences(for item: MediaItem) -> [ArtworkReference] {
+        let style: HeroArtworkStyle = horizontalSizeClass == .compact
+            ? .compactPortrait
+            : .landscape
+        return HeroPresentation(
+            item: item,
+            artworkStyle: style,
+            surface: .home
+        ).artworkReferences
+    }
+
+    /// Decodes the full-size artwork for the slides either side of this one.
+    ///
+    /// Deliberately skips the slide on screen: the view is already downloading
+    /// that one, and this used to warm it *first*, serially, so on a cold start
+    /// the neighbours did not begin until the current slide's own 2000px pass
+    /// had finished — which is exactly when they were needed. The neighbours are
+    /// warmed concurrently for the same reason, through the shared artwork
+    /// limiter so they queue behind visible work rather than competing with it.
     private func warmAdjacentArtwork() async {
-        let targets = [currentItem, adjacentItem(forward: true),
-                       adjacentItem(forward: false)]
-            .compactMap { $0 }
-        for target in targets {
-            let style: HeroArtworkStyle = horizontalSizeClass == .compact
-                ? .compactPortrait
-                : .landscape
-            let references = HeroPresentation(
-                item: target,
-                artworkStyle: style,
-                surface: .home
-            ).artworkReferences
-            for reference in references {
-                guard !Task.isCancelled else { return }
-                if await ArtworkImageCache.shared.image(
-                    for: reference,
-                    variant: .heroBackdrop,
-                    background: true
-                ) != nil {
-                    break
+        guard !items.isEmpty else { return }
+        let neighbours = HeroArtworkWindow
+            .indices(count: items.count, centeredAt: currentIndex)
+            .dropFirst()
+            .map { items[$0] }
+        guard !neighbours.isEmpty else { return }
+
+        await withTaskGroup(of: Void.self) { group in
+            for target in neighbours {
+                let references = heroReferences(for: target)
+                guard !references.isEmpty else { continue }
+                group.addTask(priority: .utility) {
+                    for reference in references {
+                        guard !Task.isCancelled else { return }
+                        await ArtworkSession.warmLimiter.run {
+                            guard !Task.isCancelled else { return }
+                            _ = await ArtworkImageCache.shared.image(
+                                for: reference,
+                                variant: .heroBackdrop,
+                                background: true
+                            )
+                        }
+                        // One usable decode per slide is the whole job; the rest
+                        // of the list is fallbacks for when that one is missing.
+                        if HeroBackdropArtworkPolicy
+                            .hasUsableCachedArtwork(for: [reference]) {
+                            return
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    /// Warms one lightweight 768px frame for every slide in the carousel.
+    ///
+    /// The reason a cold start used to make every early swipe wait: nothing
+    /// touched a slide's artwork until that slide was selected, so the first few
+    /// pages were always a network round trip. tvOS has warmed its whole set on
+    /// load for a long time; this is the iPhone catching up. Small batches at
+    /// utility priority, in likely paging order, so it never competes with the
+    /// picture actually on screen — and `previewVariant` on the hero's image is
+    /// what turns these into an instant frame rather than dead cache.
+    private func warmHeroPreviews() async {
+        guard items.count > 1 else { return }
+        let ordered = HeroPreviewWarmOrder
+            .indices(count: items.count, centeredAt: currentIndex)
+            .map { items[$0] }
+        let pending = ordered
+            .map { (item: $0, references: heroReferences(for: $0)) }
+            .filter { candidate in
+                !candidate.references.isEmpty
+                    && !HeroBackdropArtworkPolicy
+                        .hasUsableCachedArtwork(for: candidate.references)
+            }
+
+        let batchSize = 4
+        var start = 0
+        while start < pending.count {
+            guard !Task.isCancelled else { return }
+            let end = min(start + batchSize, pending.count)
+            await withTaskGroup(of: Void.self) { group in
+                for candidate in pending[start..<end] {
+                    group.addTask(priority: .utility) {
+                        guard !Task.isCancelled else { return }
+                        await ArtworkSession.warmLimiter.run {
+                            guard !Task.isCancelled else { return }
+                            _ = await HeroBackdropArtworkPolicy
+                                .warmFirstUsablePreview(for: candidate.references)
+                        }
+                    }
+                }
+            }
+            start = end
         }
     }
 }

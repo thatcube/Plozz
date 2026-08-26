@@ -3,10 +3,15 @@ import Foundation
 /// A fixed-size, wraparound neighborhood used for hero artwork warming. Its size
 /// is independent of the user's hero item count, preventing a 20-item carousel
 /// from turning into a 20-image speculative decode.
-enum HeroArtworkWindow {
+///
+/// Shared rather than kept beside either hero because both page through one
+/// curated set the same way, so "which slides are worth decoding ahead" is one
+/// answer, not two. It was tvOS-only for as long as the iPhone hero had no
+/// warming worth the name.
+public enum HeroArtworkWindow {
     private static let offsets = [0, 1, -1, 2, -2]
 
-    static func indices(count: Int, centeredAt index: Int) -> [Int] {
+    public static func indices(count: Int, centeredAt index: Int) -> [Int] {
         guard count > 0 else { return [] }
         let center = min(max(index, 0), count - 1)
         var seen = Set<Int>()
@@ -20,8 +25,8 @@ enum HeroArtworkWindow {
 /// Full-carousel order for lightweight preview warming. Alternating forward and
 /// backward distance makes either first paging direction cache-hot, while keeping
 /// the current/adjacent slides ahead of distant work.
-enum HeroPreviewWarmOrder {
-    static func indices(count: Int, centeredAt index: Int) -> [Int] {
+public enum HeroPreviewWarmOrder {
+    public static func indices(count: Int, centeredAt index: Int) -> [Int] {
         guard count > 0 else { return [] }
         let center = min(max(index, 0), count - 1)
         var result = [center]

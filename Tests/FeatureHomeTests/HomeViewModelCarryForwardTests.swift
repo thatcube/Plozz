@@ -220,6 +220,65 @@ final class HomeViewModelCarryForwardTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    // MARK: One server's removal is not another's
+
+    /// Removing a title from Continue Watching on Plex says nothing about
+    /// Jellyfin. If it is still in progress there, the merged card stays — the
+    /// viewer has a real, unfinished copy, and the row would be lying to drop it.
+    ///
+    /// This holds because every rule here is keyed to a specific
+    /// `(account, item)` target rather than to the title: Plex's removal retires
+    /// Plex's target and leaves Jellyfin's untouched.
+    func testARemovalOnOneServerDoesNotDropACardStillInProgressOnAnother() {
+        var merged = MediaItem(id: "jf-1", title: "Watched on both", kind: .movie)
+        merged.sourceAccountID = "jellyfin"
+        merged.resumePosition = 600
+        merged.sources = [
+            MediaSourceRef(accountID: "jellyfin", itemID: "jf-1"),
+            MediaSourceRef(accountID: "plex", itemID: "px-1")
+        ]
+
+        // Jellyfin still reports it, so the merged card is in the fetched row.
+        // Plex has acknowledged our write and since dropped the title.
+        let result = HomeViewModel.reconcileContinueWatching(
+            [merged],
+            pending: [],
+            appliedRecency: applied("px-1", secondsAgo: 30),
+            carryForward: [merged],
+            serverConfirmed: ["plex\u{1}px-1"],
+            now: now
+        )
+
+        XCTAssertEqual(
+            result.map(\.id),
+            ["jf-1"],
+            "A copy still in progress on another server keeps the card on the row"
+        )
+    }
+
+    /// The other half: once *no* server reports it, it goes. Removing it
+    /// everywhere must actually clear the row.
+    func testACardGoesWhenNoServerReportsItAnyMore() {
+        var merged = MediaItem(id: "jf-1", title: "Removed on both", kind: .movie)
+        merged.sourceAccountID = "jellyfin"
+        merged.resumePosition = 600
+        merged.sources = [
+            MediaSourceRef(accountID: "jellyfin", itemID: "jf-1"),
+            MediaSourceRef(accountID: "plex", itemID: "px-1")
+        ]
+
+        let result = HomeViewModel.reconcileContinueWatching(
+            [],
+            pending: [],
+            appliedRecency: applied("px-1", secondsAgo: 30),
+            carryForward: [merged],
+            serverConfirmed: ["plex\u{1}px-1", "jellyfin\u{1}jf-1"],
+            now: now
+        )
+
+        XCTAssertTrue(result.isEmpty)
+    }
+
     // MARK: Inertness
 
     func testNothingHappensWithoutPendingOrAppliedWrites() {

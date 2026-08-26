@@ -119,8 +119,25 @@ final class ContinueWatchingPolicyTests: XCTestCase {
     /// The window has to leave ordinary navigation alone: stepping into a title
     /// and straight back out must not refetch, or the row reshuffles under the
     /// viewer for no new information.
-    func testRefreshWindowOutlastsABackNavigation() {
-        XCTAssertGreaterThanOrEqual(ContinueWatchingPolicy.default.refreshAfter, 30)
+    /// The window is bounded at both ends, and the upper bound is the one that
+    /// caused trouble: at ninety seconds, removing a title in the Plex app and
+    /// coming back to the TV took several attempts before Home noticed, which
+    /// looked exactly like the staleness bug the window exists to fix.
+    ///
+    /// The lower bound stops a flick between tabs re-running a fan-out across every
+    /// signed-in account. Note what is *not* being protected against: a skeleton
+    /// flash or a focus reset, because the refresh this gates is silent.
+    func testRefreshWindowIsShortEnoughToNoticeAChangeMadeElsewhere() {
+        XCTAssertLessThanOrEqual(
+            ContinueWatchingPolicy.default.refreshAfter,
+            30,
+            "Someone who changes something on another device and walks to the TV should not have to try repeatedly"
+        )
+        XCTAssertGreaterThanOrEqual(
+            ContinueWatchingPolicy.default.refreshAfter,
+            5,
+            "Flicking between tabs must not re-run a multi-account fan-out each time"
+        )
     }
 
     func testUnboundedKeepsEverything() {

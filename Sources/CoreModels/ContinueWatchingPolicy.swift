@@ -41,16 +41,26 @@ public struct ContinueWatchingPolicy: Sendable, Equatable, Codable {
     ///
     /// Home cannot see a title watched, finished or dismissed on another device,
     /// because nothing tells it to look. Without a bound it will keep showing the
-    /// row it built at launch for as long as the app stays open. The window has
-    /// to be long enough that stepping into a title and straight back out is not
-    /// a refetch — that is ordinary navigation, and reloading there costs a
-    /// visible reshuffle for no new information.
+    /// row it built at launch for as long as the app stays open.
+    ///
+    /// Short, because the refresh it gates is **silent**: the loaded rows stay on
+    /// screen and swap in place. The instinct to make this long comes from when a
+    /// reappearance triggered a *loud* reload that flashed the skeleton and threw
+    /// focus back to the top — that was worth suppressing for a minute or more,
+    /// and it is not what happens now. What is left to weigh is a fan-out across
+    /// every signed-in account, so this only needs to be long enough that flicking
+    /// between tabs does not re-run one repeatedly.
+    ///
+    /// It also has to be shorter than the thing it is racing: someone removing a
+    /// title in the Plex app and coming back to see it gone. At ninety seconds
+    /// that took several attempts and looked exactly like the bug it was meant to
+    /// fix.
     public var refreshAfter: TimeInterval
 
     public init(
         rowLimit: Int = 60,
         nextUpCutoff: TimeInterval? = 90 * 24 * 60 * 60,
-        refreshAfter: TimeInterval = 90
+        refreshAfter: TimeInterval = 15
     ) {
         self.rowLimit = max(1, rowLimit)
         self.nextUpCutoff = nextUpCutoff

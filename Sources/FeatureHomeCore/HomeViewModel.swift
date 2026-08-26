@@ -419,6 +419,7 @@ public final class HomeViewModel {
                 carryForward: onScreenContinueWatching,
                 serverConfirmed: serverConfirmedTargets
             )
+            noteUnconfirmed(reconciled: reconciledCW, fetched: merged.continueWatching)
             Self.logOverlay(fetched: merged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
                 .durableWatchlistItems(
@@ -450,6 +451,7 @@ public final class HomeViewModel {
                 carryForward: onScreenContinueWatching,
                 serverConfirmed: serverConfirmedTargets
             )
+            noteUnconfirmed(reconciled: reconciledCW, fetched: unmerged.continueWatching)
             Self.logOverlay(fetched: unmerged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
                 .durableWatchlistItems(
@@ -503,7 +505,7 @@ public final class HomeViewModel {
         // Home instantly (see `HomeContentStore`). Only meaningful, non-empty
         // content is cached — a transient empty aggregate (e.g. server briefly
         // unreachable) must not overwrite a good snapshot with nothing.
-        if !content.isEmpty { contentStore.save(content) }
+        if !content.isEmpty { saveSnapshot(content) }
         PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) merged=\(content.mergeLibraries) cw=\(content.continueWatching.count) latest=\(content.latest.count) wl=\(content.watchlist.count) libs=\(content.libraries.count) sections=\(content.librarySections.count)")
         guard !Task.isCancelled else { return }
 
@@ -586,6 +588,7 @@ public final class HomeViewModel {
             card.playedPercentage = mutation.playedPercentage
             card.lastPlayedAt = Date()
             content.continueWatching.insert(card, at: 0)
+            unconfirmedContinueWatchingIDs.insert(card.id)
             placedCard = true
         }
         if isInProgressResume {
@@ -671,7 +674,7 @@ public final class HomeViewModel {
         // Keep the next launch snapshot in lockstep with in-session watch actions.
         // Without this, quitting after playback resurrects the pre-play Continue
         // Watching order until the next live refresh completes.
-        contentStore.save(content)
+        saveSnapshot(content)
     }
 
     /// Re-resolves the durable alias-ordered Watchlist against already-loaded
@@ -731,7 +734,7 @@ public final class HomeViewModel {
         durableWatchlistSaveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(1200))
             guard !Task.isCancelled, let self else { return }
-            self.contentStore.save(content)
+            self.saveSnapshot(content)
         }
     }
 
@@ -781,6 +784,18 @@ public final class HomeViewModel {
     /// awaiting a new acknowledgement.
     private var serverConfirmedTargets: Set<String> = []
 
+    /// Cards on the row that no server has returned yet — placed from a play we
+    /// just made, or carried while a server catches up.
+    ///
+    /// They are shown, but never **persisted**. The launch snapshot exists to
+    /// repaint what the servers last said, and writing a prediction into it makes
+    /// the prediction self-sustaining: the next launch paints it, that painted row
+    /// is what carry-forward inspects, and the durable write record it cites is
+    /// still on disk — so the card re-carries itself indefinitely and survives even
+    /// a force restart. Bounded prediction, unbounded persistence, and the
+    /// persistence wins. Keeping them out of the snapshot is what bounds it.
+    private var unconfirmedContinueWatchingIDs: Set<String> = []
+
     /// In-flight guard so a burst of resume ticks for a not-yet-loaded title
     /// coalesces into a single silent re-aggregation instead of stacking reloads.
     private var newResumeReloadInFlight = false
@@ -807,6 +822,32 @@ public final class HomeViewModel {
         var keys = Set(item.sources.map { $0.accountID + "\u{1}" + $0.itemID })
         if let account = item.sourceAccountID { keys.insert(account + "\u{1}" + item.id) }
         return keys
+    }
+
+    /// Persists the launch snapshot with predictions stripped out.
+    ///
+    /// What is on screen and what is worth repainting next launch are different
+    /// questions. A card no server has confirmed is shown because we have good
+    /// reason to expect it; it is not something to repaint from disk days later,
+    /// when the reason has long since expired and no server ever agreed.
+    private func saveSnapshot(_ content: Content) {
+        guard !unconfirmedContinueWatchingIDs.isEmpty else {
+            contentStore.save(content)
+            return
+        }
+        var durable = content
+        durable.continueWatching.removeAll { unconfirmedContinueWatchingIDs.contains($0.id) }
+        contentStore.save(durable)
+    }
+
+    /// Recomputes which cards are on the row without any server having returned
+    /// them, so the launch snapshot can leave them out. Replaces the set outright:
+    /// a card the feed now carries has stopped being a prediction.
+    private func noteUnconfirmed(reconciled: [MediaItem], fetched: [MediaItem]) {
+        let confirmed = Set(fetched.map(\.id))
+        unconfirmedContinueWatchingIDs = Set(
+            reconciled.lazy.map(\.id).filter { !confirmed.contains($0) }
+        )
     }
 
     /// Records that the servers have acknowledged these cards, so a later absence

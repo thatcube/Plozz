@@ -313,6 +313,23 @@ struct PlozziOSHomeView: View {
                         onPinnedItemsChanged: { heroPinnedItemIDs = $0 },
                         pullModel: heroPullModel
                     )
+                    // Warm every slide's logo as soon as the carousel exists.
+                    //
+                    // `HeroLogoArtwork` shows the styled title while the logo
+                    // resolves, so a cold logo reads as the show's name flashing
+                    // and then being replaced — the artwork arriving looks like a
+                    // glitch rather than like loading. tvOS has warmed logos on its
+                    // hero for a while (`HeroLogoPreloader` on the carousel's
+                    // lookahead); iOS never did, so it paid the swap on every
+                    // slide.
+                    //
+                    // Deliberately NOT paired with `.onArrival`, which is how tvOS
+                    // suppresses a late swap: that keeps the *text* when a logo
+                    // misses the window, and the ask here is to see the logo. This
+                    // wins the race instead of hiding the loser.
+                    .task(id: heroItems.map(\.id).joined(separator: "|")) {
+                        await warmHeroLogos(for: heroItems)
+                    }
                 }
 
                 // Trending row intentionally NOT shown on iOS/iPadOS (2026-07-25).
@@ -544,6 +561,24 @@ struct PlozziOSHomeView: View {
             return true
         case .unknown, .deleted, nil:
             return false
+        }
+    }
+
+    /// Decodes each hero slide's logo into the shared cache before the slide is
+    /// looked at, so `HeroLogoArtwork` resolves from memory and the styled title
+    /// it falls back to is never seen.
+    ///
+    /// Ordered rather than concurrent, and at background priority: this is work
+    /// for slides the viewer has not reached yet, so it must not compete with the
+    /// artwork and metadata the first slide is waiting on. `HeroLogoPipeline`
+    /// de-duplicates by URL, so a slide that resolves on its own first costs
+    /// nothing here.
+    private func warmHeroLogos(for items: [MediaItem]) async {
+        for item in items {
+            guard !Task.isCancelled else { return }
+            let references = item.artworkReferences(for: .logo)
+            guard !references.isEmpty else { continue }
+            await HeroLogoPreloader.warm(references: references)
         }
     }
 
@@ -906,6 +941,19 @@ private struct PlozziOSHomeHeroCarousel: View {
                     ) { pullScale in
                         ZStack {
                             if let dragTargetItem {
+                                let _ = HeroArtDiagnostics.emitOnce(
+                                    stage: "slide-layers",
+                                    key: "\(currentItem.id)|\(dragTargetItem.id)"
+                                ) {
+                                    // The incoming layer sits BENEATH at full
+                                    // opacity while the outgoing fades over it, so
+                                    // an outgoing layer that is still loading shows
+                                    // the incoming picture through.
+                                    "slide LAYERS under=\(dragTargetItem.title) "
+                                    + "over=\(currentItem.title) "
+                                    + "underResident=\(backdropIsResident(dragTargetItem)) "
+                                    + "overResident=\(backdropIsResident(currentItem))"
+                                }
                                 PlozziOSHomeStaticBackdrop(
                                     item: dragTargetItem,
                                     style: style,
@@ -1165,6 +1213,26 @@ private struct PlozziOSHomeHeroCarousel: View {
         return adjacentItem(forward: dragOffset < 0)
     }
 
+    /// Whether this item's hero backdrop is already decoded and resident.
+    ///
+    /// The decisive fact for the transition flash. Every transition swaps the
+    /// backdrop between two different view TYPES (`PlozziOSHeroBackdrop` when
+    /// idle, `PlozziOSSlidingHeroArtwork` while sliding), which SwiftUI cannot
+    /// reuse across — so each one is rebuilt and reloads through
+    /// `FallbackAsyncImage`. A rebuild whose image is already in this cache is
+    /// invisible; a rebuild that misses leaves the layer blank for a moment, and
+    /// the incoming slide is drawn directly beneath it at full opacity.
+    private func backdropIsResident(_ item: MediaItem) -> Bool {
+        let references = HeroPresentation(
+            item: item,
+            artworkStyle: horizontalSizeClass == .compact ? .compactPortrait : .landscape,
+            surface: .home
+        ).artworkReferences
+        return references.contains {
+            ArtworkImageCache.shared.cachedImage(for: $0, variant: .heroBackdrop) != nil
+        }
+    }
+
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
         if let accountID = item.sourceAccountID {
             return appModel.accountsProviders.provider(forAccountID: accountID)
@@ -1354,6 +1422,15 @@ private struct PlozziOSHomeHeroCarousel: View {
         transitionInProgress = true
         transitionDirection = forward ? -1 : 1
         transitionTargetID = target.id
+        HeroArtDiagnostics.emit(
+            "slide BEGIN from=\(currentItem?.title ?? "?") to=\(target.title) "
+            + "forward=\(forward) "
+            + "fromResident=\(currentItem.map(backdropIsResident) ?? false) "
+            + "toResident=\(backdropIsResident(target)) "
+            + "trailerShowing=\(currentItem.map { trailerController.isShowing($0.id) } ?? false) "
+            + "trailerPlaying=\(trailerController.isPlaying) "
+            + "dragOffset=\(Int(dragOffset))"
+        )
         let distance = max(stageWidth, 1)
         let currentProgress = min(abs(dragOffset) / distance, 1)
         let remainingProgress = max(1 - currentProgress, 0)
@@ -1385,6 +1462,13 @@ private struct PlozziOSHomeHeroCarousel: View {
                 dragOffset = 0
                 foregroundVisible = false
             }
+            HeroArtDiagnostics.emit(
+                "slide COMMIT now=\(target.title) "
+                // The idle backdrop is a different view TYPE from the sliding one,
+                // so it is built fresh here. A miss means it paints blank for a
+                // moment at the very end of the transition.
+                + "nowResident=\(backdropIsResident(target))"
+            )
             withAnimation(.easeInOut(duration: 0.24)) {
                 foregroundVisible = true
             }
@@ -1611,7 +1695,20 @@ private struct PlozziOSHorizontalHeroDragGesture:
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer:
                 UIGestureRecognizer
         ) -> Bool {
-            true
+            // A scrolling ancestor is the one recognizer this must NOT share with.
+            //
+            // `gestureRecognizerShouldBegin` already refuses anything that is not
+            // decisively horizontal, but recognizing simultaneously meant the
+            // scroll view kept its own pan as well — so a swipe that had passed
+            // that test still scrolled the page under it by whatever vertical
+            // component the finger carried. Almost no real swipe is perfectly
+            // level, so this happened constantly.
+            //
+            // Excluding it makes the two mutually exclusive: a gesture this one
+            // has claimed is a page turn and nothing else. Every other recognizer
+            // still runs alongside, so taps and the system's edge gestures are
+            // unaffected.
+            !(otherGestureRecognizer.view is UIScrollView)
         }
     }
 }

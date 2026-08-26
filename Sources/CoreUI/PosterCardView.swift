@@ -1014,7 +1014,7 @@ public struct PosterCardView: View {
                     // every mid-to-dark logo. Down, always: it reads as depth
                     // rather than as an effect, and the scrim above already
                     // darkens the artwork under the logo.
-                    haloStyle: .alwaysDark,
+                    haloStyle: .gentle,
                     // Lets a logo that is losing against its own picture lift
                     // itself, which is what dimming the backdrop cannot do once
                     // the backdrop is already dark — see ``LogoToneLift``.

@@ -863,7 +863,8 @@ private struct PlozziOSHeroBackdrop: View {
             // than a flat colour. The 768px frame is what warming caches for
             // the whole carousel, so a swipe lands on an image immediately
             // and sharpens, instead of waiting out a full-size download.
-            previewVariant: .heroPreview
+            previewVariant: .heroPreview,
+            pinIdentity: presentation.itemID
         ) {
             palette.backgroundBase
         }
@@ -1242,7 +1243,8 @@ private struct PlozziOSSlidingHeroArtwork: View {
         FallbackAsyncImage(
             references: presentation.artworkReferences,
             variant: .heroBackdrop,
-            previewVariant: .heroPreview
+            previewVariant: .heroPreview,
+            pinIdentity: presentation.itemID
         ) {
             palette.backgroundBase
         }
@@ -1254,7 +1256,8 @@ private struct PlozziOSSlidingHeroArtwork: View {
         FallbackAsyncImage(
             references: presentation.artworkReferences,
             variant: .heroBackdrop,
-            previewVariant: .heroPreview
+            previewVariant: .heroPreview,
+            pinIdentity: presentation.itemID
         ) {
             palette.backgroundBase
         }
@@ -1280,7 +1283,8 @@ private struct PlozziOSHeroReflection: View {
             FallbackAsyncImage(
                 references: presentation.artworkReferences,
                 variant: .heroBackdrop,
-                previewVariant: .heroPreview
+                previewVariant: .heroPreview,
+                pinIdentity: presentation.itemID
             ) {
                 Color.clear
             }
@@ -1362,7 +1366,8 @@ struct PlozziOSHomeHeroForeground: View {
                 mode: .home,
                 hidesRatings: appModel.settings.spoilers.settings
                     .shouldHideRatings(for: item),
-                scheduleLine: scheduleLine
+                scheduleLine: scheduleLine,
+                logoFallback: PlozziOSHeroMetadata.tmdbLogoFallback(for: item)
             )
 
             // Keep the actions on a single row: try the full Play pill first, then
@@ -1659,7 +1664,8 @@ private struct PlozziOSDetailHeroForeground: View {
                     { perform(entry) }
                 },
                 subjectTitle: presentsEpisodeStill ? item.title : nil,
-                scheduleLine: scheduleLine
+                scheduleLine: scheduleLine,
+                logoFallback: PlozziOSHeroMetadata.tmdbLogoFallback(for: item)
             )
 
             // Progressive overflow: try every inline layout from "all buttons
@@ -2337,6 +2343,34 @@ private struct PlozziOSHeroMetadata: View {
     /// The air-schedule badge above the title ("New episode every Wednesday"), or
     /// `nil` when there is nothing truthful to say. Matches tvOS.
     var scheduleLine: LocalizedStringResource? = nil
+    /// Looks the title up for a logo when the provider has none of its own.
+    ///
+    /// tvOS has always had this on both its heroes; iOS never did, so a title
+    /// whose server carries no logo fell straight to the styled text — most
+    /// visibly on a discovery item, which comes from Seerr/TMDb and so has no
+    /// provider logo at all, while TMDb itself usually has one.
+    var logoFallback: (@Sendable () async -> URL?)? = nil
+
+    /// The same lookup tvOS's heroes use. Kinds that have no title art of their
+    /// own are excluded rather than searched for one that cannot exist.
+    static func tmdbLogoFallback(for item: MediaItem) -> (@Sendable () async -> URL?)? {
+        switch item.kind {
+        case .folder, .collection, .unknown:
+            return nil
+        default:
+            return { await ArtworkRouter.shared.artworkURL(.logo, for: item) }
+        }
+    }
+
+    /// The artwork this hero is drawing, sampled so the logo's halo is decided by
+    /// measured contrast rather than assumed. `nil` when there is no backdrop to
+    /// read, which correctly leaves the halo on — an unmeasured logo cannot be
+    /// proven safe.
+    private var heroBackgroundSample: (@Sendable () async -> HeroBackgroundSample?)? {
+        let references = presentation.artworkReferences
+        guard !references.isEmpty else { return nil }
+        return { await HeroBackgroundSampler.sample(references: references) }
+    }
 
     var body: some View {
         VStack(
@@ -2379,6 +2413,14 @@ private struct PlozziOSHeroMetadata: View {
                 let logoBox = PlozziOSPageLayout.heroLogoBox(for: style)
                 HeroLogoArtwork(
                     references: presentation.logoReferences,
+                    asyncFallbackURL: logoFallback,
+                    // Without this the analysis cannot prove a logo is safe and so
+                    // keeps its halo on for EVERY title — which is why iOS drew a
+                    // shadow behind logos that plainly did not need one while tvOS,
+                    // which has always sampled, did not. Memoised per reference by
+                    // `HeroBackgroundSampler`, so a carousel pays for each slide
+                    // once.
+                    backgroundSample: heroBackgroundSample,
                     maxWidth: logoBox.width,
                     maxHeight: logoBox.height,
                     alignment: style == .compactPortrait ? .center : .leading

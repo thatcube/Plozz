@@ -34,10 +34,14 @@ public extension MediaItem {
         // A strong external id is required. A title/year-only match is not enough to
         // retarget on, because being wrong here doesn't just mislabel a card — it
         // routes playback to a different work.
-        let hasStrongIdentity = MediaItemIdentity.strongExternalNamespaces.contains {
-            providerIDs.providerID($0.namespace) != nil
-        }
-        guard hasStrongIdentity else { return nil }
+        //
+        // "Strong" means *an id the identity index actually keys by* — which
+        // includes a bare `PlexGuid`. It did not, once, and the mismatch was the
+        // whole of issue #33: a Plex Watchlist row carries only `plex://<type>/<id>`
+        // for any title Discover couldn't match to IMDb/TMDb/TVDb (anime, foreign,
+        // locally-matched), so this gate rejected it before `indexedSources` was
+        // ever consulted — and a film the viewer owns opened as a request page.
+        guard MediaItemIdentity.hasStrongRetargetIdentity(self) else { return nil }
 
         // Kind-scoped: TMDb/TVDb reuse one integer id space across movies and series.
         let owned = indexedSources(self).filter { $0.kind == nil || $0.kind == kind }

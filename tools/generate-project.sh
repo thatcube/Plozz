@@ -62,16 +62,30 @@ fi
 
 proj="Plozz.xcodeproj/project.pbxproj"
 
-# If PLOZZ_SENTRY_DSN wasn't provided in the environment, read it from the local,
-# gitignored .env.fastlane so one file feeds both local device builds and
-# `fastlane` (which also exports it). An explicit env override always wins.
-if [ -z "${PLOZZ_SENTRY_DSN:-}" ] && [ -f ".env.fastlane" ]; then
-  dsn_line=$(grep -E '^[[:space:]]*PLOZZ_SENTRY_DSN=' ".env.fastlane" | tail -n1 || true)
-  if [ -n "$dsn_line" ]; then
-    PLOZZ_SENTRY_DSN=$(printf '%s' "$dsn_line" \
+# If PLOZZ_SENTRY_DSN wasn't provided in the environment, read it from a
+# gitignored env file so one file feeds both local device builds and `fastlane`
+# (which also exports it). An explicit env override always wins.
+#
+# The per-worktree .env.fastlane is checked first, then a machine-wide file that
+# lives OUTSIDE any checkout. That second location matters: .env.fastlane is
+# gitignored, so it does not exist in a freshly created worktree — which is how
+# every build since the DSN was first configured silently shipped with crash
+# reporting disabled. The machine-wide copy survives worktrees and branches.
+PLOZZ_ENV_FILES="${PLOZZ_ENV_FILE:-} .env.fastlane ${XDG_CONFIG_HOME:-$HOME/.config}/plozz/env"
+if [ -z "${PLOZZ_SENTRY_DSN:-}" ]; then
+  for env_file in $PLOZZ_ENV_FILES; do
+    [ -n "$env_file" ] && [ -f "$env_file" ] || continue
+    dsn_line=$(grep -E '^[[:space:]]*PLOZZ_SENTRY_DSN=' "$env_file" | tail -n1 || true)
+    [ -n "$dsn_line" ] || continue
+    candidate=$(printf '%s' "$dsn_line" \
       | sed -E "s/^[[:space:]]*PLOZZ_SENTRY_DSN=//; s/^\"//; s/\"$//; s/^'//; s/'$//")
-    export PLOZZ_SENTRY_DSN
-  fi
+    if [ -n "$candidate" ]; then
+      PLOZZ_SENTRY_DSN="$candidate"
+      export PLOZZ_SENTRY_DSN
+      echo "Read PLOZZ_SENTRY_DSN from ${env_file}"
+      break
+    fi
+  done
 fi
 
 # --- Opt-in crash-reporting DSN bake -----------------------------------------
@@ -87,6 +101,28 @@ if [ -n "${PLOZZ_SENTRY_DSN:-}" ]; then
     echo "Baked PLOZZ_SENTRY_DSN into ${proj} (crash reporting endpoint configured)"
   else
     echo "warning: $proj not found; skipping DSN bake"
+  fi
+fi
+
+# --- Release channel bake ----------------------------------------------------
+# The runtime fallback for "is this a TestFlight build?" sniffs
+# `Bundle.main.appStoreReceiptURL`, which on tvOS can be nil (a receipt is only
+# written after a purchase) — so a TestFlight install could read as production
+# and silently default crash reporting OFF. The fastlane `beta`/`release` lanes
+# set PLOZZ_RELEASE_CHANNEL so the answer is decided at build time instead.
+if [ -n "${PLOZZ_RELEASE_CHANNEL:-}" ]; then
+  case "${PLOZZ_RELEASE_CHANNEL}" in
+    testflight|production) ;;
+    *)
+      echo "error: PLOZZ_RELEASE_CHANNEL must be 'testflight' or 'production' (got '${PLOZZ_RELEASE_CHANNEL}')" >&2
+      exit 1
+      ;;
+  esac
+  if [ -f "$proj" ]; then
+    /usr/bin/sed -i '' -E "s|PLOZZ_RELEASE_CHANNEL = [^;]*;|PLOZZ_RELEASE_CHANNEL = \"${PLOZZ_RELEASE_CHANNEL}\";|g" "$proj"
+    echo "Baked PLOZZ_RELEASE_CHANNEL = ${PLOZZ_RELEASE_CHANNEL} into ${proj}"
+  else
+    echo "warning: $proj not found; skipping release-channel bake"
   fi
 fi
 

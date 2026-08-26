@@ -62,6 +62,16 @@ public struct CrashReportContext: Sendable {
         #if DEBUG
         return "debug"
         #else
+        // Keep in sync with `AppReleaseChannel.current` in CoreModels (this module
+        // sits below it and can't import it). A channel baked in at build time by
+        // tools/generate-project.sh is authoritative; the receipt is only a hint,
+        // and on tvOS `appStoreReceiptURL` can be nil entirely.
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "PlozzReleaseChannel") as? String {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if trimmed == "testflight" || trimmed == "production" || trimmed == "debug" {
+                return trimmed
+            }
+        }
         if let receiptURL = Bundle.main.appStoreReceiptURL,
            receiptURL.lastPathComponent == "sandboxReceipt" {
             return "testflight"

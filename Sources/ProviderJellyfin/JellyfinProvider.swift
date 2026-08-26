@@ -105,7 +105,47 @@ public struct JellyfinProvider: MediaProvider {
         // being dropped merely because in-progress Resume items filled the limit
         // first (r6-jf-precap).
         let stamped = merged.map(map(item:)).map { stampingSeriesRecency($0, using: seriesDates) }
+        logContinueWatchingFeed(merged, endpoint: "Items/Resume + Shows/NextUp")
         return Array(orderedByEffectiveRecency(stamped).prefix(limit))
+    }
+
+    /// Records the resume feed exactly as Jellyfin returned it, before mapping.
+    ///
+    /// Continue Watching here is `Items/Resume` *plus* `Shows/NextUp`, so the row
+    /// deliberately contains titles that are not in progress at all — next-episode
+    /// suggestions with no playback position. That is by design, and it is also a
+    /// reason the row can look out of step with what another client shows. Only
+    /// the raw feed distinguishes "the server said so" from "we got it wrong".
+    /// Gated and free when off.
+    private func logContinueWatchingFeed(_ items: [BaseItemDto], endpoint: String) {
+        guard ContinueWatchingDiagnostics.isEnabled else { return }
+        let rows = items.map { item in
+            ContinueWatchingDiagnostics.ServerRow(
+                id: item.Id,
+                kind: item.Type ?? "nil",
+                title: [item.SeriesName, item.Name].compactMap { $0 }.joined(separator: " – "),
+                viewOffsetMS: item.UserData?.PlaybackPositionTicks.map { Int($0 / 10_000) },
+                durationMS: item.RunTimeTicks.map { Int($0 / 10_000) },
+                viewCount: item.UserData?.Played == true ? 1 : 0,
+                lastViewedAt: item.UserData?.LastPlayedDate.flatMap(Self.parseJellyfinDate)
+            )
+        }
+        ContinueWatchingDiagnostics.emit(
+            ContinueWatchingDiagnostics.serverFeedLine(
+                provider: "jellyfin",
+                accountID: accountID,
+                endpoint: endpoint,
+                rows: rows
+            )
+        )
+    }
+
+    private static func parseJellyfinDate(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     /// Orders Continue Watching items by **effective recency** before any cap is
@@ -273,6 +313,10 @@ public struct JellyfinProvider: MediaProvider {
                 result.append(stampingSeriesRecency(map(item: dto).taggingLibrary(libraryID), using: seriesDates))
             }
         }
+        logContinueWatchingFeed(
+            perLibrary.flatMap { $0 },
+            endpoint: "Items/Resume + Shows/NextUp (scoped to \(libraryIDs.count) libraries)"
+        )
         // Order by effective recency, then cap once — same rationale as the unscoped
         // path: a just-finished show's stamped next episode must survive the cut.
         return Array(orderedByEffectiveRecency(result).prefix(limit))

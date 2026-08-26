@@ -129,7 +129,39 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         async let seriesDatesTask = seriesLastPlayedDatesBestEffort(limit: limit)
         let onDeck = try await onDeckTask
         let seriesDates = await seriesDatesTask
+        logContinueWatchingFeed(onDeck)
         return onDeck.map(map(metadata:)).map { stampingSeriesRecency($0, using: seriesDates) }
+    }
+
+    /// Records the resume feed exactly as Plex returned it, before any mapping.
+    ///
+    /// `/library/onDeck` is **not** the Continue Watching hub the Plex apps show.
+    /// It is the older "on deck" feed, it offers *next up* episodes alongside
+    /// genuinely in-progress ones, and it does not honour Plex's "Remove from
+    /// Continue Watching" action. So a row built from it can disagree with the
+    /// Plex app while every line of client code behaves correctly — and only the
+    /// raw feed can tell us that is what happened. Gated and free when off.
+    private func logContinueWatchingFeed(_ onDeck: [PlexMetadata]) {
+        guard ContinueWatchingDiagnostics.isEnabled else { return }
+        let rows = onDeck.map { meta in
+            ContinueWatchingDiagnostics.ServerRow(
+                id: meta.ratingKey ?? "nil",
+                kind: meta.type ?? "nil",
+                title: [meta.grandparentTitle, meta.title].compactMap { $0 }.joined(separator: " – "),
+                viewOffsetMS: meta.viewOffset,
+                durationMS: meta.duration,
+                viewCount: meta.viewCount,
+                lastViewedAt: meta.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+            )
+        }
+        ContinueWatchingDiagnostics.emit(
+            ContinueWatchingDiagnostics.serverFeedLine(
+                provider: "plex",
+                accountID: accountID,
+                endpoint: "/library/onDeck",
+                rows: rows
+            )
+        )
     }
 
     /// Best-effort map of `series ratingKey → last-viewed date`, used to stamp
@@ -1058,12 +1090,38 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         case .stop: state = "stopped"
         default: state = "playing"
         }
-        try await client.reportTimeline(
-            ratingKey: progress.itemID,
-            state: state,
-            timeMs: PlexTime.milliseconds(fromSeconds: progress.positionSeconds),
-            durationMs: nil
-        )
+        let timeMS = PlexTime.milliseconds(fromSeconds: progress.positionSeconds)
+        do {
+            try await client.reportTimeline(
+                ratingKey: progress.itemID,
+                state: state,
+                timeMs: timeMS,
+                // NOTE (diagnostics): Plex is told the position but never the
+                // runtime, so it cannot compute a completion percentage from this
+                // call alone and will not promote the title to "watched" on its
+                // own. Plozz relies on its own 90% threshold + `/:/scrobble`
+                // instead — which means a finish that never produces a scrobble
+                // leaves the title sitting in the resume feed forever.
+                durationMs: nil
+            )
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: "/:/timeline",
+                itemID: progress.itemID,
+                detail: "state=\(state) time=\(timeMS)ms duration=nil",
+                ok: true
+            ))
+        } catch {
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: "/:/timeline",
+                itemID: progress.itemID,
+                detail: "state=\(state) time=\(timeMS)ms duration=nil",
+                ok: false,
+                error: String(describing: error)
+            ))
+            throw error
+        }
     }
 
     public func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {
@@ -1825,7 +1883,26 @@ extension PlexProvider: WatchStateProviding {
     /// Toggles an item's watched state via Plex scrobble/unscrobble. Scrobbling a
     /// season or series ratingKey marks the contained episodes too.
     public func setPlayed(_ played: Bool, itemID: String) async throws {
-        try await client.setWatched(played, ratingKey: itemID)
+        do {
+            try await client.setWatched(played, ratingKey: itemID)
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: played ? "/:/scrobble" : "/:/unscrobble",
+                itemID: itemID,
+                detail: "played=\(played)",
+                ok: true
+            ))
+        } catch {
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: played ? "/:/scrobble" : "/:/unscrobble",
+                itemID: itemID,
+                detail: "played=\(played)",
+                ok: false,
+                error: String(describing: error)
+            ))
+            throw error
+        }
     }
 }
 
@@ -1842,10 +1919,27 @@ extension PlexProvider: ResumeStateWriting {
     /// converges at the server's clock. (Jellyfin, which *does* accept a
     /// `LastPlayedDate`, honours `capturedAt` — see its `ResumeStateWriting`.)
     public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date = Date()) async throws {
-        try await client.reportProgress(
-            ratingKey: itemID,
-            timeMs: PlexTime.milliseconds(fromSeconds: max(seconds, 0))
-        )
+        let timeMS = PlexTime.milliseconds(fromSeconds: max(seconds, 0))
+        do {
+            try await client.reportProgress(ratingKey: itemID, timeMs: timeMS)
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: "/:/progress",
+                itemID: itemID,
+                detail: "time=\(timeMS)ms",
+                ok: true
+            ))
+        } catch {
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: "/:/progress",
+                itemID: itemID,
+                detail: "time=\(timeMS)ms",
+                ok: false,
+                error: String(describing: error)
+            ))
+            throw error
+        }
     }
 }
 

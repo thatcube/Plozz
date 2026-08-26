@@ -290,11 +290,26 @@ public final class HomeViewModel {
         switch state {
         case .loaded, .empty:
             if lastLoadedVisibility == visibility {
+                // Home came back on screen and decided nothing had changed, so it
+                // will not ask any server anything. Correct for the flashing it
+                // exists to prevent, and also the reason a row can only be as
+                // fresh as the last thing that forced a load: watching on another
+                // device is invisible until something else triggers one.
+                ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.refreshLine(
+                    trigger: "appear",
+                    willReload: false,
+                    reason: "visibility-unchanged"
+                ))
                 return
             }
         default:
             break
         }
+        ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.refreshLine(
+            trigger: "appear",
+            willReload: true,
+            reason: "visibility-changed-or-not-loaded"
+        ))
         await load()
     }
 
@@ -366,6 +381,7 @@ public final class HomeViewModel {
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            Self.logOverlay(fetched: merged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
                 .durableWatchlistItems(
                     from: reconciledCW + merged.latest + merged.watchlist
@@ -389,6 +405,7 @@ public final class HomeViewModel {
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            Self.logOverlay(fetched: unmerged.continueWatching, reconciled: reconciledCW, pending: pending)
             let durableWatchlist = mediaItemActionHandler?
                 .durableWatchlistItems(
                     from: reconciledCW + unmerged.latest + unmerged.watchlist
@@ -470,7 +487,20 @@ public final class HomeViewModel {
     /// flip its badge without a refetch. A watchlist add/remove also inserts/removes
     /// the title from the Watchlist row.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
-        guard case var .loaded(content) = state else { return }
+        guard case var .loaded(content) = state else {
+            // A play that arrives before Home has any content to update is
+            // discarded outright — there is no row to change and nothing here
+            // schedules a look later. Worth seeing, because from the outside it is
+            // indistinguishable from the play never happening.
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.homeMutationLine(
+                played: mutation.played,
+                resumePosition: mutation.resumePosition,
+                onRow: false,
+                reloadScheduled: false,
+                state: String(describing: state)
+            ))
+            return
+        }
         // A resume/progress change — or a *completed* play — means the user
         // actually played the title just now, so bump its recency and re-sort
         // Continue Watching to float it to the front without a full reload. A bare
@@ -498,6 +528,13 @@ public final class HomeViewModel {
         if isInProgressResume && !alreadyOnHome {
             scheduleNewResumeReload()
         }
+        ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.homeMutationLine(
+            played: mutation.played,
+            resumePosition: mutation.resumePosition,
+            onRow: alreadyOnHome,
+            reloadScheduled: isInProgressResume && !alreadyOnHome,
+            state: "loaded"
+        ))
 
         if mutation.played == true {
             content.continueWatching.removeAll { mutation.targets($0) }
@@ -766,6 +803,61 @@ public final class HomeViewModel {
             overlaid.append(updated)
         }
         return HomeAggregator.sortedByRecency(overlaid)
+    }
+
+    /// Pending in-progress plays that matched **no card** in the freshly fetched
+    /// feed.
+    ///
+    /// ``reconcileContinueWatching`` may drop a card or restamp one, but it
+    /// deliberately never invents one — it will not fabricate a row the feed did
+    /// not return. That is the right call for correctness and it leaves a real
+    /// gap: a title the viewer just started, which the server has not yet listed,
+    /// has nowhere to be put. The row then stays silently wrong until some later
+    /// refresh happens to catch the server up, which in practice is the next
+    /// launch. Starting something from Search is the everyday way to hit this,
+    /// because a title reached from Search is precisely one that was not already
+    /// on the row.
+    ///
+    /// Naming those plays turns "nothing appeared" into an observation. Pure, so
+    /// it is testable and costs nothing when diagnostics are off.
+    public nonisolated static func unmatchedPendingTargets(
+        in items: [MediaItem],
+        pending: [WatchMutation]
+    ) -> [String] {
+        guard !pending.isEmpty else { return [] }
+        func key(_ accountID: String, _ itemID: String) -> String { accountID + "\u{1}" + itemID }
+        var present = Set<String>()
+        for item in items {
+            for source in item.sources { present.insert(key(source.accountID, source.itemID)) }
+            if let account = item.sourceAccountID { present.insert(key(account, item.id)) }
+        }
+        var unmatched: [String] = []
+        var seen = Set<String>()
+        // Only in-progress plays: a finished one is *supposed* to be absent from
+        // the row, so its absence is the correct outcome rather than a gap.
+        for mutation in pending where (mutation.resumePosition ?? 0) > 0 && mutation.played != true {
+            for target in mutation.targets {
+                let target_key = key(target.accountID, target.itemID)
+                guard !present.contains(target_key), seen.insert(target_key).inserted else { continue }
+                unmatched.append("\(target.accountID):\(target.itemID)")
+            }
+        }
+        return unmatched
+    }
+
+    /// Emits what the overlay did to one fetched feed. Gated; free when off.
+    private nonisolated static func logOverlay(
+        fetched: [MediaItem],
+        reconciled: [MediaItem],
+        pending: [WatchMutation]
+    ) {
+        guard ContinueWatchingDiagnostics.isEnabled else { return }
+        ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.overlayLine(
+            fetched: fetched.count,
+            reconciled: reconciled.count,
+            pending: pending.count,
+            unmatched: unmatchedPendingTargets(in: fetched, pending: pending)
+        ))
     }
 
     /// Clamps a card's server-reported recency **down** to the real play time for any

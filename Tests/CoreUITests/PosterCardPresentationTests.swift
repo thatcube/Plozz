@@ -25,6 +25,60 @@ final class PosterCardPresentationTests: XCTestCase {
         }
     }
 
+    /// A rewatch a couple of minutes into a feature film sits below one percent,
+    /// and used to render as an untouched card while the server's own app showed a
+    /// bar. Where the viewer left off is the most useful thing a card can say, and
+    /// it is no less true for being early.
+    func testAJustStartedTitleStillShowsItsProgress() {
+        let item = MediaItem(
+            id: "rewatch",
+            title: "How To Train Your Dragon",
+            kind: .movie,
+            resumePosition: 45,
+            playedPercentage: 0.0076,
+            isPlayed: true
+        )
+
+        XCTAssertTrue(
+            MediaPlaybackIndicatorPresentation.showsProgress(for: MediaPlaybackIndicatorState(item)),
+            "A saved resume point is progress however small the fraction looks"
+        )
+    }
+
+    /// The upper bound stays: something watched through keeps its resume point
+    /// cleared and reports a full percentage, and should wear the watched mark
+    /// rather than a bar pinned at the end.
+    func testAFullyWatchedTitleKeepsItsWatchedMarkInsteadOfAFullBar() {
+        let item = MediaItem(
+            id: "seen",
+            title: "Finished",
+            kind: .movie,
+            playedPercentage: 1,
+            isPlayed: true
+        )
+
+        XCTAssertFalse(MediaPlaybackIndicatorPresentation.showsProgress(for: MediaPlaybackIndicatorState(item)))
+        XCTAssertTrue(
+            MediaPlaybackIndicatorPresentation.showsWatchedBadge(
+                for: MediaPlaybackIndicatorState(item),
+                hidesStatus: false
+            )
+        )
+    }
+
+    /// A container has no resume point of its own — it reports the fraction of its
+    /// episodes watched — so an untouched one must not gain a bar at zero.
+    func testAnUntouchedContainerShowsNoProgress() {
+        let item = MediaItem(
+            id: "series",
+            title: "Untouched",
+            kind: .series,
+            playedPercentage: 0
+        )
+
+        XCTAssertFalse(MediaPlaybackIndicatorPresentation.showsProgress(for: MediaPlaybackIndicatorState(item)))
+    }
+
     func testProgressTakesPriorityOverWatchedBadge() {
         let item = MediaItem(
             id: "movie",

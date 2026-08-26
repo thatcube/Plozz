@@ -35,7 +35,7 @@ public enum TopShelfPosterComposer {
     /// those renders; `TopShelfStore.pruneArtwork` then deletes them.
     ///
     /// 1: brand-blue fill. 2: white chrome matching `PlozzMediaChrome`.
-    static let barStyleGeneration = 3
+    static let barStyleGeneration = 4
 
     /// Internal rather than private so `PlozzMediaChromeParityTests` can pin the
     /// two greys to CoreUI's live values.
@@ -49,6 +49,19 @@ public enum TopShelfPosterComposer {
         static let chipBarHeightFraction: CGFloat = 8.0 / 280.0
         static let chipFontFraction: CGFloat = 24.0 / 280.0
         static let chipInsetFraction: CGFloat = 18.0 / 280.0
+        /// Horizontal inset for the shelf, deliberately wider than the in-app one.
+        ///
+        /// The app draws this chip onto a card it lays out itself, so its own inset
+        /// is the whole story. tvOS instead takes the finished poster and fits it
+        /// into a card of its own — rounded, and not necessarily the same aspect —
+        /// so some of each edge is spent before the artwork is seen. A fraction
+        /// measured on the full image therefore lands nearer the visible edge than
+        /// the same fraction does in the app, which is exactly how it looked:
+        /// correct in the row, too close to the edge on the shelf.
+        ///
+        /// The vertical inset is left alone. Whatever the shelf trims, it did not
+        /// show at the bottom.
+        static let chipHorizontalInsetFraction: CGFloat = 34.0 / 280.0
 
         static let heightFraction: CGFloat = 12.0 / 280.0
         static let insetFraction: CGFloat = 22.0 / 280.0
@@ -277,6 +290,7 @@ public enum TopShelfPosterComposer {
         let width = size.width
         let height = size.height
         let inset = width * Bar.chipInsetFraction
+        let horizontalInset = width * Bar.chipHorizontalInsetFraction
         let barWidth = width * Bar.chipBarWidthFraction
         let barHeight = width * Bar.chipBarHeightFraction
         let fontSize = width * Bar.chipFontFraction
@@ -323,7 +337,7 @@ public enum TopShelfPosterComposer {
             color: UIColor.black.withAlphaComponent(0.85).cgColor
         )
 
-        var x = inset
+        var x = horizontalInset
         if let glyph {
             glyph.draw(in: CGRect(x: x, y: centreY(glyphHeight), width: glyphWidth, height: glyphHeight))
             x += glyphWidth + spacing
@@ -342,7 +356,7 @@ public enum TopShelfPosterComposer {
         x += barWidth + spacing
 
         if let text {
-            let available = max(0, width - inset - x)
+            let available = max(0, width - horizontalInset - x)
             (text as NSString).draw(
                 in: CGRect(x: x, y: centreY(textSize.height), width: available, height: textSize.height),
                 withAttributes: attributes

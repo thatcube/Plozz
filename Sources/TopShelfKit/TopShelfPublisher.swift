@@ -26,12 +26,15 @@ public enum TopShelfPublisher {
     ///   value crosses a process boundary.
     /// How many titles each Top Shelf section carries.
     ///
-    /// Independent of the on-screen row's limit on purpose. Every item here costs
-    /// a poster fetch and, for Continue Watching, a composite with the progress bar
-    /// burned in — done one after another, while the shelf itself only ever shows a
-    /// handful. Letting this follow the row would spend minutes of background work
-    /// on artwork nobody scrolls to.
-    private static let maxItemsPerSection = 20
+    /// The shelf is a place to *launch* from, not to browse in. What gets clicked
+    /// there is something newly added or something obviously in progress; anything
+    /// requiring a search through a list is a reason to open the app instead. Three
+    /// per section is what Plex settles on, and it holds up: a scrollable shelf
+    /// nobody scrolls is just work done for an audience of none.
+    ///
+    /// Deliberately independent of the on-screen row's limit, which is sixty. That
+    /// row is for browsing and should hold everything; this one should not.
+    private static let maxItemsPerSection = 3
 
     public static func publish(
         continueWatching: [MediaItem],

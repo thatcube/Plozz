@@ -139,17 +139,18 @@ public struct MediaItemContextMenu: ViewModifier {
     public func body(content: Content) -> some View {
         let actions = availableActions()
         if !actions.isEmpty {
+            let setApart = actions.filter(\.isSetApartInMenu)
+            let main = actions.filter { !$0.isSetApartInMenu }
             content.contextMenu {
-                ForEach(actions) { action in
-                    Button(role: action.isDestructive ? .destructive : nil) {
-                        perform(action)
-                    } label: {
-                        Label(action.title, systemImage: action.systemImage)
-                    }
-                    .accessibilityLabel(Text(action.title))
-                    .accessibilityValue(
-                        action.accessibilityState.map(Text.init) ?? Text(verbatim: "")
-                    )
+                menuButtons(for: main)
+                // A `Section` is how a menu is told two groups are not the same
+                // kind of thing; platforms that draw a separator draw one, and
+                // those that don't simply keep the grouping. Either way the set-
+                // apart actions stay at the bottom, which is the part that matters
+                // — they are easy to hit by accident while reaching for the action
+                // above them.
+                if !setApart.isEmpty {
+                    Section { menuButtons(for: setApart) }
                 }
             }
             .task(id: pendingNavigationTarget) {
@@ -165,6 +166,21 @@ public struct MediaItemContextMenu: ViewModifier {
             }
         } else {
             content
+        }
+    }
+
+    @ViewBuilder
+    private func menuButtons(for actions: [MediaItemAction]) -> some View {
+        ForEach(actions) { action in
+            Button(role: action.isDestructive ? .destructive : nil) {
+                perform(action)
+            } label: {
+                Label(action.title, systemImage: action.systemImage)
+            }
+            .accessibilityLabel(Text(action.title))
+            .accessibilityValue(
+                action.accessibilityState.map(Text.init) ?? Text(verbatim: "")
+            )
         }
     }
 

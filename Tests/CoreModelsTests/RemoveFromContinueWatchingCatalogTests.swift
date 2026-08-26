@@ -77,3 +77,38 @@ final class RemoveFromContinueWatchingCatalogTests: XCTestCase {
         XCTAssertFalse(MediaItemAction.removeFromContinueWatching.isDownload)
     }
 }
+
+/// Covers where the action sits in the menu.
+///
+/// Position is not decoration here. Every other action on this menu acts on the
+/// title in front of the viewer; this one changes what Home shows. Landing on it
+/// while reaching for "Mark as Watched" is precisely the kind of accident that
+/// makes people want the action in the first place.
+final class RemoveFromContinueWatchingMenuOrderTests: XCTestCase {
+
+    func testItComesLastSoItIsNotHitOnTheWayToSomethingElse() {
+        var item = MediaItem(id: "1", title: "Title", kind: .episode, resumePosition: 600)
+        item.sourceAccountID = "plex"
+
+        let actions = MediaItemActionCatalog.actions(
+            for: item,
+            supportsWatchState: true,
+            supportsWatchlist: true,
+            supportsMetadataRefresh: true,
+            downloadState: .some(nil)
+        )
+
+        XCTAssertGreaterThan(actions.count, 1, "Precondition: other actions are present to sit above it")
+        XCTAssertEqual(actions.last, .removeFromContinueWatching)
+    }
+
+    func testTheMenuIsToldToSetItApart() {
+        XCTAssertTrue(MediaItemAction.removeFromContinueWatching.isSetApartInMenu)
+    }
+
+    /// Nothing else is separated, or the separation stops meaning anything.
+    func testNoOtherActionIsSetApart() {
+        let others = MediaItemAction.allCases.filter { $0 != .removeFromContinueWatching }
+        XCTAssertTrue(others.allSatisfy { !$0.isSetApartInMenu })
+    }
+}

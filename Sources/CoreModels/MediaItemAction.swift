@@ -248,6 +248,17 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// Whether the menu should set this action apart from the rest, below a
+    /// separator.
+    ///
+    /// Every other action here acts on the title in front of the viewer — its
+    /// watched state, its place in a watchlist, where it navigates. Removing
+    /// something from Continue Watching instead changes what Home shows, and is
+    /// the one item on this menu worth a beat of separation from the entry above
+    /// it: reaching for "Mark as Watched" and landing on it by accident is exactly
+    /// the mistake the row's own accidents made people want this action for.
+    public var isSetApartInMenu: Bool { self == .removeFromContinueWatching }
+
     /// Whether the platform should style the action as destructive (red). No
     /// current watched-state action loses data irreversibly; this exists so a
     /// future `delete` action can opt in without reworking the menu.

@@ -135,6 +135,22 @@ public struct AppShellWatchMutationApplier: WatchMutationApplying {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT ResumeStateWriting (no write, treated success)")
             return
         }
+        // Clearing a position and dismissing a title are different acts, and the
+        // difference is visible: a server that merely loses the position is free to
+        // keep offering the title for its own reasons, so it returns looking
+        // untouched. Where a server can express the dismissal, say that instead.
+        //
+        // Best-effort, and deliberately not fatal: this endpoint is undocumented on
+        // Plex, so a server that rejects it must still get the position cleared
+        // rather than have the whole write fail and retry forever.
+        if seconds == 0, let dismisser = provider as? ContinueWatchingRemovable {
+            do {
+                try await dismisser.removeFromContinueWatching(itemID: target.itemID)
+                FanoutDiagnostics.emit("write.removeFromCW acct=\(target.accountID) item=\(target.itemID) -> OK")
+            } catch {
+                FanoutDiagnostics.emit("write.removeFromCW acct=\(target.accountID) item=\(target.itemID) -> FAILED, clearing position instead")
+            }
+        }
         try await resumeWriter.setResumePosition(seconds, itemID: target.itemID, capturedAt: capturedAt)
     }
 

@@ -615,8 +615,17 @@ public final class HomeViewModel {
             state: placedCard ? "loaded placed-card" : "loaded"
         ))
 
-        if mutation.played == true {
+        // A cleared resume point means the title has nowhere left to continue from,
+        // so it leaves the row — whether that came from finishing it or from the
+        // viewer taking it off deliberately. Distinguished from "unchanged" by the
+        // value being explicitly 0 rather than absent: `nil` means this mutation
+        // says nothing about position, while 0 says there is no longer one.
+        let clearedResume = mutation.resumePosition == 0 && mutation.played != false
+        if mutation.played == true || clearedResume {
             content.continueWatching.removeAll { mutation.targets($0) }
+            unconfirmedContinueWatchingIDs.subtract(
+                content.continueWatching.map(\.id)
+            )
         } else if reflectsPlayback {
             let now = Date()
             let stamped = content.continueWatching.map { item -> MediaItem in

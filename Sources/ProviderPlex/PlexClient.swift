@@ -659,6 +659,30 @@ public struct PlexClient: Sendable {
         _ = try await send(endpoint)
     }
 
+    /// `PUT /actions/removeFromContinueWatching` — dismisses a title from the
+    /// Continue Watching hub without touching its watched state.
+    ///
+    /// This is the same action the Plex apps offer, and it records an exclusion
+    /// the hub honours. Clearing the saved position via `/:/progress` does not do
+    /// the same job: the title stops being *in progress* but the server may still
+    /// surface it — an unwatched next episode being the usual reason — so it comes
+    /// back looking untouched.
+    ///
+    /// Undocumented but long-standing, and used by Plex's own clients. Treated as
+    /// best-effort by the caller for exactly that reason.
+    func removeFromContinueWatching(ratingKey: String) async throws {
+        let endpoint = Endpoint(
+            method: .put,
+            path: "/actions/removeFromContinueWatching",
+            queryItems: [
+                URLQueryItem(name: "ratingKey", value: ratingKey),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
+        _ = try await send(endpoint)
+    }
+
     /// `GET /:/scrobble` (watched) or `GET /:/unscrobble` (unwatched) — toggles
     /// an item's watched state. Scrobbling a season/series ratingKey marks the
     /// contained episodes too.

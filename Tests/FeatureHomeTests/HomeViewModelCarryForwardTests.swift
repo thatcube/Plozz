@@ -291,3 +291,42 @@ final class HomeViewModelCarryForwardTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["a"], "With no evidence of a write, the feed stands alone")
     }
 }
+
+/// Covers the row's response to a title being taken off it deliberately.
+///
+/// Distinct from finishing something: no watched state changes, so the only
+/// signal the row gets is that the saved position is gone. It has to be enough,
+/// or the card sits there with its progress bar removed and nothing else — which
+/// reads as the action having half worked.
+final class HomeRowClearedResumeTests: XCTestCase {
+
+    private func card(_ id: String) -> MediaItem {
+        var item = MediaItem(id: id, title: "Title-\(id)", kind: .movie)
+        item.sourceAccountID = "plex"
+        item.resumePosition = 600
+        item.sources = [MediaSourceRef(accountID: "plex", itemID: id, resumePosition: 600)]
+        return item
+    }
+
+    /// A cleared position means there is nowhere left to continue from, so the
+    /// title leaves — the same outcome as finishing it, reached differently.
+    func testAClearedResumePointTakesTheCardOffTheRow() {
+        let mutation = MediaItemMutation(
+            itemIDs: ["removed"],
+            scopedItemIDs: ["plex:removed"],
+            resumePosition: 0,
+            playedPercentage: 0
+        )
+
+        XCTAssertTrue(mutation.targets(card("removed")))
+        XCTAssertEqual(mutation.resumePosition, 0, "0 says there is no position; nil would say nothing at all")
+        XCTAssertNil(mutation.played, "Taking it off the row makes no claim about having watched it")
+    }
+
+    /// The distinction the row depends on: absent means "unchanged", zero means
+    /// "gone". Collapsing them would make every unrelated mutation empty the row.
+    func testAnAbsentResumePositionIsNotAClearedOne() {
+        let unrelated = MediaItemMutation(itemIDs: ["x"], favorite: true)
+        XCTAssertNil(unrelated.resumePosition)
+    }
+}

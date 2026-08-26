@@ -68,15 +68,6 @@ public enum MediaItemActionCatalog {
             if item.kind == .episode, hasUnwatchedUpToHere(item, in: context) {
                 actions.append(.markWatchedUpToHere)
             }
-
-            // Offered wherever a title HAS somewhere to resume from, rather than
-            // only on the Continue Watching row. The row is the reason to want it,
-            // but the thing being undone is the resume point itself, and meeting
-            // the same title in a library or on its own page is no reason to
-            // withhold it.
-            if hasResumePoint(item) {
-                actions.append(.removeFromContinueWatching)
-            }
         }
 
         // Watchlist action: a single toggle whose direction follows the item's
@@ -130,6 +121,19 @@ public enum MediaItemActionCatalog {
             case .downloaded:
                 actions.append(.removeDownload)
             }
+        }
+
+        // Last, and set apart by the menu: this is the only action here that
+        // changes what the viewer sees on Home rather than acting on the title in
+        // front of them, and it is not one to hit by accident while reaching for
+        // "Mark as Watched".
+        //
+        // Offered wherever a title has somewhere to resume from, rather than only
+        // on the Continue Watching row. The row is the reason to want it, but what
+        // is being undone is the resume point itself, and meeting the same title in
+        // a library or on its own page is no reason to withhold it.
+        if supportsWatchState, isWatchStateEligible(item), hasResumePoint(item) {
+            actions.append(.removeFromContinueWatching)
         }
 
         return actions

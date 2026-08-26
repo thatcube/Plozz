@@ -1983,6 +1983,34 @@ extension PlexProvider: WatchStateProviding {
     }
 }
 
+extension PlexProvider: ContinueWatchingRemovable {
+    /// Dismisses the title from Plex's Continue Watching hub, the same act its own
+    /// apps perform. Distinct from clearing the saved position: the hub honours the
+    /// exclusion, so the title does not come back as an untouched suggestion.
+    public func removeFromContinueWatching(itemID: String) async throws {
+        do {
+            try await client.removeFromContinueWatching(ratingKey: itemID)
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: "/actions/removeFromContinueWatching",
+                itemID: itemID,
+                detail: "dismiss",
+                ok: true
+            ))
+        } catch {
+            ContinueWatchingDiagnostics.emit(ContinueWatchingDiagnostics.writeLine(
+                provider: "plex",
+                endpoint: "/actions/removeFromContinueWatching",
+                itemID: itemID,
+                detail: "dismiss",
+                ok: false,
+                error: String(describing: error)
+            ))
+            throw error
+        }
+    }
+}
+
 extension PlexProvider: ResumeStateWriting {
     /// Writes a resume position **out-of-band** (convergence/durability path) via
     /// `/:/progress`, which updates the saved `viewOffset` without opening or

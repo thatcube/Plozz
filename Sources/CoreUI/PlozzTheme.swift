@@ -336,7 +336,17 @@ public enum PlozzTheme {
             // A caller asking for no lift at all (Reduce Motion) must not be
             // handed one by the multiplier.
             guard outlineScale > 1 else { return outlineScale }
-            guard contentSize.width > 0, contentSize.height > 0, outlineReach > 0 else {
+            // No reach means no ground to grow back. A framed card's glass frame
+            // lives inside its own bounds, so when it stops lighting up the card
+            // has lost nothing and must keep exactly the scale it always had.
+            //
+            // This is a `return`, not a fall-through to the fallback below: zero
+            // reach is a complete answer, and treating it as "unmeasured" grew
+            // every framed card by the fallback ratio — which is precisely the
+            // "framed cards are too big" this was meant to fix.
+            guard outlineReach > 0 else { return outlineScale }
+            // Reach, but no size yet: the frame or two before a card is measured.
+            guard contentSize.width > 0, contentSize.height > 0 else {
                 return outlineScale * highlightFocusFallbackRatio
             }
             let ratio = max(

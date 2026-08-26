@@ -9,8 +9,11 @@ import CoreModels
 private enum CardFocusPreviewColors {
     static let bgTop = Color(red: 0.17, green: 0.17, blue: 0.19)
     static let bgBottom = Color(red: 0.10, green: 0.10, blue: 0.12)
-    /// The glass halo a focused card blooms in the outlined style.
-    static let halo = Color.white.opacity(0.34)
+    /// The ring a focused card wears in the outlined style. Brighter and
+    /// harder-edged than the real translucent glass band, so the option is
+    /// legible at swatch size — see `poster(tileW:...)`.
+    static let haloFill = Color.white.opacity(0.30)
+    static let haloEdge = Color.white.opacity(0.95)
     static let tileBorder = Color.white.opacity(0.12)
     static let titlePrimary = Color.white.opacity(0.72)
     static let titleSecondary = Color.white.opacity(0.30)
@@ -21,15 +24,16 @@ private enum CardFocusPreviewColors {
     ]
 }
 
-/// A pair of mock posters — one resting, one focused — illustrating what focus
-/// does to a card:
-/// - `.outlined`: the focused poster wears a glass halo around its edge.
-/// - `.highlight`: no halo at all. The focused poster is simply **bigger**, lit
+/// A row of three mock posters with the **middle one focused**, illustrating what
+/// focus does to a card:
+/// - `.outlined`: the focused poster wears a bright outline around its edge.
+/// - `.highlight`: no outline at all. The focused poster is simply **bigger**, lit
 ///   from above, and tipped slightly, with its caption pushed down out of the way.
 ///
-/// Two posters rather than one, because this setting is about the *difference*
-/// between a focused card and its neighbour — a single card can't show that.
-/// Fills whatever frame the caller gives it and stays proportionate at the
+/// Three posters with the focused one in the middle, because this setting is
+/// about the *difference* between a focused card and the cards either side of it
+/// — and only a card with neighbours on both sides shows how far it grows into
+/// them. Fills whatever frame the caller gives it and stays proportionate at the
 /// compact and full sizes.
 private struct CardFocusMini: View {
     let style: CardFocusStyle
@@ -38,7 +42,7 @@ private struct CardFocusMini: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let margin = min(w, h) * 0.09
+            let margin = min(w, h) * 0.07
             let availW = max(0, w - margin * 2)
             let availH = max(0, h - margin * 2)
 
@@ -62,25 +66,31 @@ private struct CardFocusMini: View {
     private var barGapRatio: CGFloat { 0.11 }
     private var barHeightRatio: CGFloat { 0.085 }
     private var unitHeightRatio: CGFloat { 1.5 + captionGapRatio + barHeightRatio * 2 + barGapRatio }
-    /// The gap between the two posters, and the room the focused one needs to
-    /// grow into without touching its neighbour.
-    private var tileGapRatio: CGFloat { 0.22 }
+    /// The gap between posters, and the room the focused one needs to grow into
+    /// without touching its neighbours.
+    private var tileGapRatio: CGFloat { 0.20 }
     /// How much bigger the focused poster reads. Not the real scales — those are
     /// a few percent and would be invisible at swatch size — but the same
     /// *relationship*: highlight grows further, because it has no outline to
     /// cover the ground for it.
-    private var focusedScale: CGFloat { style.drawsFocusOutline ? 1.10 : 1.22 }
+    private var focusedScale: CGFloat { style.drawsFocusOutline ? 1.08 : 1.20 }
 
     @ViewBuilder
     private func content(availW: CGFloat, availH: CGFloat) -> some View {
-        // Two tiles side by side, sized so the focused one's growth still fits.
-        let widthBound = availW / (2 + tileGapRatio) / focusedScale
+        // Three tiles across, sized so the middle one's growth still fits both
+        // the width (against its neighbours) and the height.
+        let widthBound = availW / (3 + tileGapRatio * 2)
         let heightBound = availH / unitHeightRatio / focusedScale
         let tileW = min(widthBound, heightBound)
 
         HStack(alignment: .top, spacing: tileW * tileGapRatio) {
             mediaUnit(tileW: tileW, isFocused: false)
             mediaUnit(tileW: tileW, isFocused: true)
+                // Above its neighbours, exactly as a real focused card is, so the
+                // growth reads as the card coming forward rather than being
+                // squeezed between them.
+                .zIndex(1)
+            mediaUnit(tileW: tileW, isFocused: false)
         }
     }
 
@@ -103,6 +113,9 @@ private struct CardFocusMini: View {
                     .frame(width: tileW * 0.44, height: barH)
             }
             .offset(y: isFocused ? captionPush : 0)
+            // The neighbours' captions dim, so the focused card's own caption is
+            // the one being read.
+            .opacity(isFocused ? 1 : 0.55)
         }
         .frame(width: tileW)
         // Only the focused tile grows, and it grows about its own centre, exactly
@@ -132,15 +145,26 @@ private struct CardFocusMini: View {
             .frame(width: tileW, height: posterH)
 
         if isFocused && style.drawsFocusOutline {
-            // Outlined: the halo blooms *around* the artwork as a concentric band.
+            // Outlined: a bright ring hugging the artwork.
+            //
+            // Deliberately brighter and harder-edged than the real thing, which is
+            // translucent Liquid Glass and picks up whatever is behind it. At
+            // swatch size a faithful glass band is a smudge you can barely see —
+            // and the whole job of this picture is to make the difference between
+            // the two options obvious at a glance. It reads as what the option
+            // *is* (a card with a ring around it) rather than as a colour match.
             art.background {
                 RoundedRectangle(cornerRadius: corner + pad, style: .continuous)
-                    .fill(CardFocusPreviewColors.halo)
+                    .fill(CardFocusPreviewColors.haloFill)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: corner + pad, style: .continuous)
+                            .strokeBorder(CardFocusPreviewColors.haloEdge, lineWidth: max(1, pad * 0.34))
+                    }
                     .padding(-pad)
             }
         } else if isFocused {
-            // Highlight: no halo. Lit from above across the whole card, and tipped
-            // the way it would lean arriving from its neighbour on the left.
+            // Highlight: no outline. Lit from above across the whole card, and
+            // tipped the way it would lean arriving from its neighbour on the left.
             art.overlay {
                 shape.fill(
                     LinearGradient(
@@ -154,16 +178,18 @@ private struct CardFocusMini: View {
                     )
                 )
             }
-            .shadow(color: .black.opacity(0.45), radius: pad * 2.2, y: pad)
+            .shadow(color: .black.opacity(0.5), radius: pad * 2.4, y: pad)
             .rotation3DEffect(.degrees(9), axis: (x: 0, y: 1, z: 0), perspective: 0.55)
         } else {
-            art
+            // The neighbours sit back, so the focused card is unmistakably the
+            // one being looked at.
+            art.opacity(0.62)
         }
     }
 }
 
-/// The per-option preview graphic for the card focus-style picker: two mock
-/// posters, the right-hand one focused, showing either the glass halo or the
+/// The per-option preview graphic for the card focus-style picker: three mock
+/// posters with the middle one focused, showing either the ring around it or the
 /// bigger, lit, tipped card that replaces it. Fills the caller's frame, so it
 /// scales for both the full and compact card sizes, mirroring `CardStyleSwatch` /
 /// `WatchStatusIndicatorSwatch`.

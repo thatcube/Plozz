@@ -96,17 +96,26 @@ public struct PlozzMarqueeText: View {
             } action: { width in
                 containerWidth = width
             }
-            .modifier(EdgeFade(inset: inset, width: containerWidth, isEnabled: fades))
+            // A mask is an offscreen alpha pass, so only the ONE line that is
+            // actually moving gets one. Every other overflowing caption in the
+            // grid fades through its own text fill instead — see `line`.
+            .modifier(EdgeFade(inset: inset, width: containerWidth, isEnabled: fades && isScrolling))
             .clipped()
             .task(id: cycle) { await runMarquee() }
     }
+
+    /// Whether this line is the one being walked along right now.
+    ///
+    /// Focus is not enough on its own: a focused card whose title fits has
+    /// nothing to scroll, and shouldn't be handed a mask for it.
+    private var isScrolling: Bool { isFocused && !reduceMotion }
 
     /// The line you actually see: laid out at its full width, offset to its
     /// resting position, and free to run past the card because it is an overlay.
     private var line: some View {
         text
             .font(font)
-            .foregroundStyle(color)
+            .foregroundStyle(fill)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
             .onGeometryChange(for: CGFloat.self) { proxy in
@@ -115,6 +124,40 @@ public struct PlozzMarqueeText: View {
                 textWidth = width
             }
             .offset(x: inset - scroll)
+    }
+
+    /// How the glyphs are coloured — and, at rest, how a long line dissolves.
+    ///
+    /// A gradient `foregroundStyle` is painted by the text renderer as it draws
+    /// the glyphs. It needs no separate layer and no compositing pass, unlike a
+    /// `mask`, which is why it is the right tool for the dozens of resting
+    /// captions that merely need a soft end rather than a moving one.
+    ///
+    /// It can't do the job while the line is moving, though: this gradient is
+    /// measured in the *text's* own width, so keeping the fade over the card's
+    /// edge as the text slid underneath would mean recomputing it every frame.
+    /// That is exactly what the constant container-space mask is for, and only
+    /// one line at a time ever needs it.
+    private var fill: AnyShapeStyle {
+        guard fades, !isScrolling, textWidth > 0 else { return AnyShapeStyle(color) }
+        // Where the card's trailing fade sits, expressed as a fraction of the
+        // text's own width. The line starts at `inset`, so the card's far edge is
+        // `containerWidth - inset` along it, and the fade occupies the last
+        // `inset` of that.
+        let visible = containerWidth - inset
+        let solid = min(max((visible - inset) / textWidth, 0), 1)
+        let gone = min(max(visible / textWidth, solid + 0.0001), 1)
+        return AnyShapeStyle(
+            LinearGradient(
+                stops: [
+                    .init(color: color, location: 0),
+                    .init(color: color, location: solid),
+                    .init(color: color.opacity(0), location: gone)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
     }
 
     /// Walks the line out until its end clears the fade, holds it there long
@@ -130,7 +173,7 @@ public struct PlozzMarqueeText: View {
             withAnimation(.easeOut(duration: 0.3)) { scroll = 0 }
         }
         let distance = overflow
-        guard isFocused, distance > 0.5, !reduceMotion else { return }
+        guard isScrolling, distance > 0.5 else { return }
 
         let out = Double(distance) / PlozzTheme.Metrics.marqueePointsPerSecond
         let back = Double(distance) / PlozzTheme.Metrics.marqueeReturnPointsPerSecond
@@ -152,8 +195,15 @@ public struct PlozzMarqueeText: View {
 /// Dissolves the caption into the gap either side of it: transparent at the
 /// card's edge, solid `inset` points in.
 ///
-/// Applied **only** to a line long enough to reach the fade, so a caption that
-/// fits — the common case — pays nothing for the mask at all.
+/// A mask is an offscreen alpha pass, so this is applied **only** to the one
+/// line that is actually moving. A caption that fits needs no fade at all, and a
+/// long caption sitting still fades through its own text fill instead (see
+/// `PlozzMarqueeText.fill`) — which the text renderer paints as it draws the
+/// glyphs, with no extra layer.
+///
+/// The mask earns its cost only while the line moves: it is defined in the
+/// *container's* coordinates and never changes, so the text can slide underneath
+/// it as a pure transform, without this view re-evaluating on every frame.
 private struct EdgeFade: ViewModifier {
     let inset: CGFloat
     let width: CGFloat

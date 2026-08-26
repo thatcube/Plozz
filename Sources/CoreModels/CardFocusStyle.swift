@@ -12,15 +12,16 @@ import Foundation
 /// Only the tvOS shell reads it — iOS has no focus engine — but it lives here
 /// with every other card preference so the two shells share one settings model.
 public enum CardFocusStyle: String, CaseIterable, Identifiable, Codable, Sendable {
+    /// The default, and so the first option offered. tvOS's native treatment: no
+    /// outline or halo at all. The card simply grows — far enough that it still
+    /// covers the ground an outline would have (see
+    /// `PlozzTheme.Metrics.highlightFocusScale`) — catches the light as focus
+    /// lands, leans in the direction focus travelled, and settles gently back
+    /// when it loses focus.
+    case highlight
     /// A focused card lights its glass surface, and an artwork-only card blooms a
     /// glass halo around its edge.
     case outlined
-    /// The default. tvOS's native treatment: no outline or halo at all. The card
-    /// simply grows — far enough that it still covers the ground an outline would
-    /// have (see `PlozzTheme.Metrics.highlightFocusScale`) — catches the light as
-    /// focus lands, leans in the direction focus travelled, and settles gently
-    /// back when it loses focus.
-    case highlight
 
     public var id: String { rawValue }
 

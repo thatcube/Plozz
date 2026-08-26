@@ -75,8 +75,39 @@ final class CardFocusHighlightScaleTests: XCTestCase {
         )
     }
 
-    /// Before a card has been measured the fallback still has to satisfy the rule
-    /// for the smallest card in the app, whose outline is proportionally largest.
+    /// A card whose outline lives INSIDE its own bounds — every framed card —
+    /// loses no ground when that outline stops lighting up, so it must keep
+    /// exactly the scale it always had.
+    ///
+    /// The regression: zero reach fell through to the unmeasured fallback and
+    /// grew every framed card by 11% on top of its focus scale, which is the
+    /// "framed cards are too big" this was supposed to fix.
+    func testNoOutlineReachMeansNoExtraGrowth() {
+        for outlineScale in [Metrics.focusedCardScale, Metrics.mediumFocusedCardScale, Metrics.readOnlyFocusedCardScale] {
+            XCTAssertEqual(
+                Metrics.highlightFocusScale(
+                    outlineScale: outlineScale,
+                    contentSize: CGSize(width: 304, height: 500),
+                    outlineReach: 0
+                ),
+                outlineScale,
+                "a card with nothing outside its bounds must not grow further"
+            )
+            // Also true before it has been measured.
+            XCTAssertEqual(
+                Metrics.highlightFocusScale(
+                    outlineScale: outlineScale,
+                    contentSize: .zero,
+                    outlineReach: 0
+                ),
+                outlineScale
+            )
+        }
+    }
+
+    /// Before a card *with* reach has been measured, the fallback still has to
+    /// satisfy the rule for the smallest card in the app, whose outline is
+    /// proportionally largest.
     func testUnmeasuredCardFallsBackToASafeGrowth() {
         let scale = Metrics.highlightFocusScale(
             outlineScale: Metrics.mediumFocusedCardScale,

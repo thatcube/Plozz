@@ -21,7 +21,17 @@ public final class CardFocusMomentum: @unchecked Sendable {
     /// one "previous card" to measure from.
     public static let shared = CardFocusMomentum()
 
-    /// Centre of the card that most recently took focus, in global coordinates.
+    /// Where the card that last **held** focus was when it gave focus up, in
+    /// global coordinates.
+    ///
+    /// Recorded on departure, not on arrival, and that distinction is the whole
+    /// thing. A rail scrolls to bring the focused card toward the middle, so a
+    /// card's position when it *takes* focus (out at the edge) is not where it
+    /// sits a moment later (settled in the middle). Measuring arrivals against a
+    /// stale arrival position meant the second step in any direction compared two
+    /// edge positions and found no movement at all — focus visibly travelling,
+    /// and a card that didn't lean. Comparing where the last card actually *was*
+    /// against where the new one *is* gives the real direction every time.
     private var lastCenter: CGPoint?
 
     /// Far enough apart that the two cards can't plausibly be neighbours — a
@@ -34,14 +44,23 @@ public final class CardFocusMomentum: @unchecked Sendable {
 
     public init() {}
 
-    /// Records `frame` as the newest focused card and returns the direction focus
-    /// travelled to reach it, with the dominant axis normalised to ±1 — or `nil`
-    /// when there's no meaningful direction to report.
+    /// Records where a card was as it gives up focus, so the card that takes
+    /// focus next can tell which way focus travelled to reach it.
+    @MainActor
+    public func depart(from frame: CGRect) {
+        guard frame != .zero else { return }
+        lastCenter = CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    /// The direction focus travelled to reach `frame`, with the dominant axis
+    /// normalised to ±1 — or `nil` when there's no meaningful direction to report.
+    ///
+    /// Purely a question; it records nothing. The answer for the *next* card comes
+    /// from ``depart(from:)``, which fires when this one lets focus go.
     @MainActor
     public func arrive(at frame: CGRect) -> CGVector? {
         guard frame != .zero else { return nil }
         let centre = CGPoint(x: frame.midX, y: frame.midY)
-        defer { lastCenter = centre }
 
         guard let previous = lastCenter else { return nil }
         let delta = CGVector(dx: centre.x - previous.x, dy: centre.y - previous.y)

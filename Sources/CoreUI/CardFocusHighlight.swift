@@ -62,20 +62,26 @@ import CoreModels
 ///
 /// A poster wall is dozens of cards and one of them has focus, so the rule for
 /// everything here is: **at rest it must cost nothing.** As it stands, a resting
-/// card pays for two geometry observations and an identity transform, and a
-/// focused card pays for two gradient fills and a shadow:
+/// card pays for an identity transform and nothing else; a focused card pays for
+/// two gradient fills, a shadow, and one position observation:
 ///
-/// - **Nothing is built for an unfocused card.** The sheen and the focus shadow
-///   both live inside `if isFocused`, following the rule the halo learned the
-///   hard way — a focus surface hidden with `.opacity(0)` still renders, and a
-///   row of them measured ~100 offscreen passes a frame on an A12.
+/// - **Nothing is built for an unfocused card.** The sheen, the focus shadow and
+///   the position tracking all live inside `if isFocused`, following the rule the
+///   halo learned the hard way — a focus surface hidden with `.opacity(0)` still
+///   renders, and a row of them measured ~100 offscreen passes a frame on an A12.
+/// - **Global position is tracked only while focused.** A global frame is
+///   recomputed every time the rail moves, so tracking it on every card meant
+///   dozens of cards doing that on every frame of a scroll for the benefit of the
+///   one with focus.
+/// - **Size is measured only where it changes the answer** — a framed card's
+///   growth doesn't depend on it (`measuresSize`), so it isn't measured.
 /// - **The lean's transform is fully identity at rest** — real axis, zero angle,
-///   zero perspective — so a resting card isn't handed a projection to composite.
+///   zero perspective — and is applied *unconditionally*, because a modifier that
+///   comes and goes changes the card's identity and throws away its subtree.
 /// - **Geometry is observed, not published.** Size goes to `@State` but only
 ///   changes on layout; position goes to a reference box, because it changes on
-///   every frame of a scrolling rail and putting that in `@State` would
-///   re-render every visible card sixty times a second for a value none of them
-///   draw.
+///   every frame of a scroll and putting that in `@State` would re-render the
+///   card sixty times a second for a value nothing draws.
 /// - **No blend modes, no `drawingGroup`, no live glass.** The sheen is plain
 ///   alpha. And the highlight style is in fact *lighter* than the outlined one:
 ///   the focused card gets no `.glassEffect` lift and no glass halo, which is
@@ -143,19 +149,20 @@ private struct CardFocusLiftModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The card's own layout size, needed to work out how much growth replaces
-    /// the outline. Measured only in the highlight style — the outlined style
-    /// never reads it, so it never pays for the measurement.
+    /// the outline. Measured only when it is actually used — see `measuresSize`.
     @State private var measuredSize: CGSize = .zero
-    /// The card's position on screen, kept in a reference box rather than
-    /// `@State` **on purpose**: a card's global frame changes on every frame of a
-    /// scrolling rail, and storing that in `@State` would invalidate every
-    /// visible card sixty times a second for a value none of them draw. Only the
-    /// arrival lean reads it, once, at the instant focus lands.
+    /// Where this card is on screen. A reference box rather than `@State`
+    /// **on purpose**: it is written on every frame of a scrolling rail, and
+    /// putting that in `@State` would invalidate the view sixty times a second
+    /// for a value nothing draws.
     @State private var framing = CardFraming()
     /// Which way focus was travelling when it arrived here. Set the moment the
     /// card takes focus and then animated back to zero, so the card rocks once
     /// and settles flat.
     @State private var lean: CGVector = .zero
+    /// Whether this focus session has already taken its lean, so the continuous
+    /// position reports that follow don't re-trigger it.
+    @State private var hasLeaned = false
     /// Bumped each time a lean is set, to drive the unwind. The unwind can't
     /// happen in the same breath as the tilt: two writes to `lean` in one turn
     /// coalesce into a single update, the card renders only the final value, and
@@ -165,6 +172,15 @@ private struct CardFocusLiftModifier: ViewModifier {
 
     private var isHighlight: Bool { !focusStyle.drawsFocusOutline }
     private var leansOnArrival: Bool { isHighlight && !reduceMotion }
+
+    /// Whether this card's size is worth measuring.
+    ///
+    /// Only a card whose outline blooms **outside** it has ground to grow back,
+    /// and only that calculation needs the size. A framed card's glass frame is
+    /// inside its own bounds, so its reach is zero, its growth is just
+    /// `outlineScale`, and measuring it would be work whose answer is discarded —
+    /// on every card in the grid.
+    private var measuresSize: Bool { isHighlight && outlineReach > 0 }
 
     private var scale: CGFloat {
         guard isHighlight else { return outlineScale }
@@ -177,11 +193,31 @@ private struct CardFocusLiftModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .modifier(CardSizeReader(
-                isEnabled: isHighlight,
-                size: $measuredSize,
-                framing: leansOnArrival ? framing : nil
-            ))
+            .modifier(CardSizeReader(isEnabled: measuresSize, size: $measuredSize))
+            .background {
+                // Position is tracked ONLY while this card holds focus, which is
+                // both cheaper and more correct.
+                //
+                // Cheaper: a global frame has to be recomputed every time the rail
+                // moves, so tracking it on every card meant dozens of cards doing
+                // that work on every frame of a scroll for the benefit of the one
+                // that has focus. One card at a time is nothing.
+                //
+                // More correct: see `CardFocusMomentum.lastCenter`. The direction
+                // is measured from where the previous card *actually was* when it
+                // let focus go, which is what these live reports keep current.
+                if leansOnArrival && isFocused {
+                    Color.clear
+                        .onGeometryChange(for: CGRect.self) { proxy in
+                            proxy.frame(in: .global)
+                        } action: { frame in
+                            framing.frame = frame
+                            guard !hasLeaned, frame != .zero else { return }
+                            hasLeaned = true
+                            applyArrivalLean(from: frame)
+                        }
+                }
+            }
             .overlay {
                 // Built only while focused, and only in the style that uses it —
                 // the same rule the focus halo follows (see `FocusHaloModifier`).
@@ -193,22 +229,28 @@ private struct CardFocusLiftModifier: ViewModifier {
                 }
             }
             .scaleEffect(isFocused ? scale : 1)
-            .modifier(CardArrivalLean(
-                lean: lean,
-                isEnabled: leansOnArrival
-            ))
-            .onChange(of: isFocused) { _, focused in applyArrivalLean(focused) }
+            .modifier(CardArrivalLean(lean: lean, isEnabled: leansOnArrival))
+            .onChange(of: isFocused) { _, focused in
+                guard leansOnArrival else { return }
+                if focused {
+                    hasLeaned = false
+                } else {
+                    // Hand our final position to whichever card takes focus next,
+                    // then land flat: holding a stale direction would make the
+                    // next arrival start from the wrong tilt.
+                    CardFocusMomentum.shared.depart(from: framing.frame)
+                    hasLeaned = false
+                    lean = .zero
+                }
+            }
             .task(id: arrival) { await unwindLean() }
     }
 
     /// Tips the card as focus lands, in whichever direction focus travelled to
     /// reach it. Nothing is animated here — the lean is the card's *starting*
     /// position, not something to ease into.
-    private func applyArrivalLean(_ focused: Bool) {
-        guard leansOnArrival, focused,
-              let travel = CardFocusMomentum.shared.arrive(at: framing.frame) else {
-            // Always land flat. Holding a stale direction would make the next
-            // arrival start from the wrong tilt.
+    private func applyArrivalLean(from frame: CGRect) {
+        guard let travel = CardFocusMomentum.shared.arrive(at: frame) else {
             lean = .zero
             return
         }
@@ -263,55 +305,36 @@ private struct CardArrivalLean: ViewModifier {
     /// axis is normalised to ±1 by `CardFocusMomentum`.
     private var magnitude: CGFloat { max(abs(lean.dx), abs(lean.dy)) }
 
+    /// Applied unconditionally, never behind an `if`.
+    ///
+    /// A modifier that appears and disappears gives the card two different view
+    /// identities, and SwiftUI throws away the subtree — artwork included — when
+    /// it swaps between them. So a card that isn't leaning gets a real axis, a
+    /// zero angle and zero perspective, which is an identity transform: nothing
+    /// to project, nothing to composite, and the same view tree either way.
     func body(content: Content) -> some View {
-        if isEnabled {
-            let leaning = magnitude > 0
-            content.rotation3DEffect(
-                .degrees(PlozzTheme.Metrics.highlightLeanDegrees * Double(magnitude)),
-                axis: leaning ? (x: lean.dy, y: lean.dx, z: 0) : (x: 0, y: 1, z: 0),
-                perspective: leaning ? PlozzTheme.Metrics.highlightLeanPerspective : 0
-            )
-        } else {
-            content
-        }
+        let leaning = isEnabled && magnitude > 0
+        return content.rotation3DEffect(
+            .degrees(leaning ? PlozzTheme.Metrics.highlightLeanDegrees * Double(magnitude) : 0),
+            axis: leaning ? (x: lean.dy, y: lean.dx, z: 0) : (x: 0, y: 1, z: 0),
+            perspective: leaning ? PlozzTheme.Metrics.highlightLeanPerspective : 0
+        )
     }
 }
 
-/// Reports the view's layout size, and — when the arrival lean needs it — its
-/// position, but only when the active focus style uses them. A `ViewModifier`
-/// rather than an inline `if` so the geometry observation is attached or absent,
-/// never toggled per frame.
+/// Reports the view's layout size, but only when something reads it. A
+/// `ViewModifier` rather than an inline `if` so the geometry observation is
+/// attached or absent for the life of the card, never toggled per frame.
 private struct CardSizeReader: ViewModifier {
     let isEnabled: Bool
     @Binding var size: CGSize
-    /// Non-nil only when the arrival lean is active. Written straight through to
-    /// a reference box, so a scrolling rail doesn't invalidate every card in it.
-    let framing: CardFraming?
 
     func body(content: Content) -> some View {
         if isEnabled {
-            content
-                .onGeometryChange(for: CGSize.self) { proxy in
-                    proxy.size
-                } action: { newSize in
-                    size = newSize
-                }
-                .modifier(CardFrameReader(framing: framing))
-        } else {
-            content
-        }
-    }
-}
-
-private struct CardFrameReader: ViewModifier {
-    let framing: CardFraming?
-
-    func body(content: Content) -> some View {
-        if let framing {
-            content.onGeometryChange(for: CGRect.self) { proxy in
-                proxy.frame(in: .global)
-            } action: { newFrame in
-                framing.frame = newFrame
+            content.onGeometryChange(for: CGSize.self) { proxy in
+                proxy.size
+            } action: { newSize in
+                size = newSize
             }
         } else {
             content

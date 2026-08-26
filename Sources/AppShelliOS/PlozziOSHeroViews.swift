@@ -693,6 +693,18 @@ private struct PlozziOSExtendedHeroArtwork<Picture: View>: View {
                         .offset(y: geometry.pictureHeight - Self.seamOverlap)
                 }
             }
+            // Flatten the picture and its mirror into one layer before anyone
+            // above can fade them.
+            //
+            // `.opacity()` applies to each overlapping child separately, so a
+            // half-faded hero drew the picture at alpha a AND the mirror at
+            // alpha a on top of it. Everywhere they overlap — the seam band,
+            // deliberately 2pt of it — that composites to 2a - a² instead of a,
+            // which is brighter than either neighbour. At rest a is 1 and the
+            // sum is also 1, so the seam is perfect; it only lit up mid-swipe,
+            // where the outgoing slide is drawn at partial opacity. Grouping
+            // makes the fade apply once, to the finished picture.
+            .compositingGroup()
             // ONE clip, on the outside. The picture is rendered wider than the
             // stage whenever a side trim is in play, and the mirror overruns the
             // foot; both are cut here rather than each carrying its own

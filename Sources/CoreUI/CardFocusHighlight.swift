@@ -69,6 +69,14 @@ import CoreModels
 ///   the position tracking all live inside `if isFocused`, following the rule the
 ///   halo learned the hard way — a focus surface hidden with `.opacity(0)` still
 ///   renders, and a row of them measured ~100 offscreen passes a frame on an A12.
+///
+///   ⚠️ That rule has a hard limit, and `PlozzMarqueeText.EdgeFade` documents
+///   where it is: anything **inside a subtree the focus animation animates** must
+///   differ between focused and unfocused by its *values*, not by its existence.
+///   A modifier that appears on focus is a structural change, and SwiftUI
+///   rebuilds the subtree instead of animating it — which turned the caption's
+///   slide into a snap. Build-only-when-focused belongs on things drawn *over* or
+///   *behind* the card, not on modifiers wrapping content that moves.
 /// - **Global position is tracked only while focused.** A global frame is
 ///   recomputed every time the rail moves, so tracking it on every card meant
 ///   dozens of cards doing that on every frame of a scroll for the benefit of the

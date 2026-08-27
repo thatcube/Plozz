@@ -942,9 +942,18 @@ public struct PlexClient: Sendable {
                 container = try await watchlistPage(start: start, size: pageSize, sort: sort)
             } catch {
                 guard sort != nil else { throw error }
-                PlozzLog.networking.error("Plex rejected the watchlist sort; falling back to the service's own order")
+                // Start the whole read again rather than resuming.
+                //
+                // An offset only means anything within one ordering. Pages already
+                // banked were fetched sorted; continuing unsorted from the same
+                // offset would splice two different orderings together, so the
+                // result would repeat some titles and silently lose others —
+                // materially worse than the unordered list this is falling back to.
+                PlozzLog.networking.error("Plex refused the watchlist sort; re-reading in the service's own order")
                 sort = nil
-                container = try await watchlistPage(start: start, size: pageSize, sort: nil)
+                collected.removeAll(keepingCapacity: true)
+                start = 0
+                container = try await watchlistPage(start: 0, size: pageSize, sort: nil)
             }
             let page = container.Metadata ?? []
             collected.append(contentsOf: page)

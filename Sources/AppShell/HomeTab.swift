@@ -808,12 +808,23 @@ struct HomeTab: View {
 
             for resolved in ordered {
                 if let item = try? await resolved.provider.item(id: id) {
+                    // Another run may have resolved it while this one was waiting:
+                    // the task restarts whenever the accounts change, and a request
+                    // already in flight is not stopped by that. Acting twice pushes
+                    // the page twice and presents the player over itself.
+                    guard pendingPlay.itemID == id else { return }
                     pendingPlay.itemID = nil
                     pendingPlay.accountID = nil
                     onResolved(item.taggingSource(resolved.account.id))
                     return
                 }
             }
+            // Only an uninterrupted sweep may declare the title gone. A cancelled
+            // one asked nobody: the fetch above cannot tell being cancelled apart
+            // from a server saying no, so a task restarted mid-flight would fall
+            // through here and discard a request that no server ever answered —
+            // landing the viewer on Home, which is the whole thing this fixes.
+            guard !Task.isCancelled else { return }
             // Asked every signed-in server and none of them knows it. Clearing stops
             // a title that has genuinely gone from re-asking on every account change
             // for the rest of the session.

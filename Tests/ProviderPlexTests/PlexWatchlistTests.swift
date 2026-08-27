@@ -536,3 +536,41 @@ final class PlexWatchlistOrderTests: XCTestCase {
         XCTAssertNil(sortValue(stub), "The retry drops the sort rather than sending an empty one")
     }
 }
+
+/// A paged watchlist read must not splice two orderings together.
+///
+/// An offset only means anything within one ordering, so continuing unsorted from
+/// where a sorted read left off repeats some titles and silently loses others.
+final class PlexWatchlistSortFallbackPagingTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "srv", name: "Home", baseURL: URL(string: "https://plex.host:32400")!, provider: .plex),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testARefusedSortRestartsTheReadRatherThanResumingIt() async throws {
+        let stub = StubHTTPClient()
+        let firstPage = (0..<100).map {
+            #"{"ratingKey":"k\#($0)","type":"movie","title":"Film \#($0)","year":2020}"#
+        }.joined(separator: ",")
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            // Page 1 sorted, then the service refuses page 2's sort.
+            "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}",
+            "{}",
+            // The restart: both pages again, unsorted.
+            "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}",
+            #"""
+            {"MediaContainer":{"size":2,"totalSize":102,"Metadata":[
+              {"ratingKey":"k100","type":"movie","title":"Film 100","year":2020},
+              {"ratingKey":"k101","type":"movie","title":"Film 101","year":2020}
+            ]}}
+            """#
+        ])
+
+        let items = try await PlexProvider(session: makeSession(), http: stub).watchlist()
+
+        XCTAssertEqual(items.count, 102, "Every title exactly once — no page banked under the old ordering")
+        XCTAssertEqual(Set(items.map(\.id)).count, 102, "and none of them duplicated")
+    }
+}

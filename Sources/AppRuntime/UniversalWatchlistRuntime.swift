@@ -651,8 +651,36 @@ public extension UniversalWatchlistHost {
                 return signed
             }
 
+            func missingArtworkFallback(
+                kind: ImageKind,
+                maxWidth: Int
+            ) -> URL? {
+                guard let playbackProvider,
+                      playbackProvider.kind == .plex,
+                      item.kind == .movie || item.kind == .series,
+                      let signed = playbackProvider.imageURL(
+                          itemID: item.id,
+                          kind: kind,
+                          maxWidth: maxWidth
+                      )
+                else { return nil }
+                if let playbackAccountID {
+                    rehydratedArtworkSources.append((
+                        signed,
+                        playbackAccountID
+                    ))
+                }
+                return signed
+            }
+
             if let poster =
                 reauthenticatedLocalURL(item.posterURL, maxWidth: 500)
+                ?? (item.posterURL == nil
+                    ? missingArtworkFallback(
+                        kind: .primary,
+                        maxWidth: 500
+                    )
+                    : nil)
                 ?? playbackFallback(
                     for: item.posterURL,
                     kind: .primary,
@@ -665,9 +693,21 @@ public extension UniversalWatchlistHost {
                 maxWidth: 500
             ) {
                 item.seriesPosterURL = seriesPoster
+            } else if item.seriesPosterURL == nil,
+                      let seriesPoster = missingArtworkFallback(
+                          kind: .primary,
+                          maxWidth: 500
+                      ) {
+                item.seriesPosterURL = seriesPoster
             }
             if let backdrop =
                 reauthenticatedLocalURL(item.backdropURL, maxWidth: 1280)
+                ?? (item.backdropURL == nil
+                    ? missingArtworkFallback(
+                        kind: .backdrop,
+                        maxWidth: 1280
+                    )
+                    : nil)
                 ?? playbackFallback(
                     for: item.backdropURL,
                     kind: .backdrop,
@@ -680,6 +720,12 @@ public extension UniversalWatchlistHost {
                     item.heroBackdropURL,
                     maxWidth: 3840
                 )
+                ?? (item.heroBackdropURL == nil
+                    ? missingArtworkFallback(
+                        kind: .backdrop,
+                        maxWidth: 3840
+                    )
+                    : nil)
                 ?? playbackFallback(
                     for: item.heroBackdropURL,
                     kind: .backdrop,

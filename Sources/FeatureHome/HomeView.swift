@@ -635,7 +635,10 @@ public struct HomeView: View {
         }
         // New content that lands while the viewer sits on Home appears without a
         // navigation round trip. Zero-size and render-isolated — see the type.
-        .onMoveCommand { _ in lastInteractionAt = .now }
+        .onMoveCommand { _ in
+            lastInteractionAt = .now
+            viewModel.noteHomeNavigationInteraction()
+        }
         .background(
             HomeShareScanRefreshObserver(
                 onRefresh: { Task { await viewModel.load(showLoadingState: false) } },

@@ -657,28 +657,15 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         selectedSourceAccountID = nil
         explicitSourceSelection = false
         if repairedLegacyAnimeContamination {
-            posterURL = nil
-            seriesPosterURL = nil
-            backdropURL = nil
-            heroBackdropURL = nil
-            fallbackArtworkURL = nil
-            logoURL = nil
-            artworkSelections = artworkSelections.compactMap { selection in
-                let local = selection.references.filter {
-                    if case .networkFile = $0 { return true }
-                    return false
-                }
-                guard !local.isEmpty else { return nil }
-                return ArtworkSelection(
-                    placement: selection.placement,
-                    references: local
-                )
-            }
+            // The bad anime image was an async fallback selected because these
+            // poisoned IDs misclassified a mainstream title. The snapshot's own
+            // server artwork is independent and often correct; discarding it
+            // forces the card to resolve another fallback after launch, producing
+            // the exact poster swap this migration exists to stop.
             ratings.removeAll { $0.source == .anilist }
             if metadataProvenance[.ratings]?.source == .anilist {
                 metadataProvenance[.ratings] = nil
             }
-            artworkSourceAccountIDsByURL.removeAll()
         }
     }
 

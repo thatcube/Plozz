@@ -757,8 +757,9 @@ public final class HomeViewModel {
 
     /// Re-resolves the durable alias-ordered Watchlist against already-loaded
     /// presentation candidates. No provider creation, disk read, or network work.
-    private var durableWatchlistSaveTask: Task<Void, Never>?
-    private var durableWatchlistRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var durableWatchlistSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var durableWatchlistRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var durableWatchlistRefreshPending = false
 
     /// Re-folds Home's watchlist row shortly after a change, rather than during it.
     ///
@@ -772,11 +773,25 @@ public final class HomeViewModel {
     /// Nothing here is urgent: it refreshes a row the viewer is not looking at,
     /// and the control they ARE looking at already answers from intent. Deferring
     /// lets the press paint first, and coalescing means a burst re-folds once.
+    /// Navigation input re-arms the same delay, so the O(row × identity) fold
+    /// cannot land during an active horizontal browse.
     public func scheduleDurableWatchlistRefresh() {
+        durableWatchlistRefreshPending = true
+        armDurableWatchlistRefresh()
+    }
+
+    /// Keeps a pending durable fold off the left/right scrolling hot path.
+    public func noteHomeNavigationInteraction() {
+        guard durableWatchlistRefreshPending else { return }
+        armDurableWatchlistRefresh()
+    }
+
+    private func armDurableWatchlistRefresh() {
         durableWatchlistRefreshTask?.cancel()
         durableWatchlistRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled, let self else { return }
+            self.durableWatchlistRefreshPending = false
             self.refreshDurableWatchlist()
         }
     }

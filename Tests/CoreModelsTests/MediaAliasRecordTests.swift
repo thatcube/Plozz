@@ -104,26 +104,30 @@ final class MediaAliasRecordTests: XCTestCase {
         )
     }
 
-    func testMediaItemSnapshotRepairsTheSameLegacyContamination() throws {
+    func testMediaItemSnapshotRepairsIdentityWithoutDiscardingValidArtwork() throws {
         let poisoned = MediaItem(
             id: "4407",
             title: "Arcane: League of Legends",
             kind: .series,
             productionYear: 2002,
-            posterURL: URL(string: "https://anime.example/wrong-poster.jpg"),
+            posterURL: URL(
+                string: "https://plex.example/library/metadata/4407/thumb/1"
+            ),
             seriesPosterURL: URL(
-                string: "https://anime.example/wrong-series-poster.jpg"
+                string: "https://plex.example/library/metadata/4407/thumb/1"
             ),
             backdropURL: URL(
-                string: "https://anime.example/wrong-backdrop.jpg"
+                string: "https://plex.example/library/metadata/4407/art/1"
             ),
             heroBackdropURL: URL(
-                string: "https://anime.example/wrong-hero.jpg"
+                string: "https://plex.example/library/metadata/4407/art/1"
             ),
             fallbackArtworkURL: URL(
-                string: "https://anime.example/wrong-fallback.jpg"
+                string: "https://plex.example/library/metadata/4407/art/1"
             ),
-            logoURL: URL(string: "https://anime.example/wrong-logo.png"),
+            logoURL: URL(
+                string: "https://plex.example/library/metadata/4407/logo/1"
+            ),
             ratings: [
                 ExternalRating(
                     source: .anilist,
@@ -154,7 +158,8 @@ final class MediaAliasRecordTests: XCTestCase {
                         .remote(
                             URL(
                                 string:
-                                    "https://anime.example/wrong-selection.jpg"
+                                    "https://plex.example"
+                                    + "/library/metadata/4407/art/2"
                             )!
                         )
                     ]
@@ -171,13 +176,16 @@ final class MediaAliasRecordTests: XCTestCase {
         XCTAssertNil(decoded.providerID(.myAnimeList))
         XCTAssertNil(decoded.providerID(.aniDB))
         XCTAssertEqual(decoded.providerID(.tmdb), "94605")
-        XCTAssertNil(decoded.posterURL)
-        XCTAssertNil(decoded.seriesPosterURL)
-        XCTAssertNil(decoded.backdropURL)
-        XCTAssertNil(decoded.heroBackdropURL)
-        XCTAssertNil(decoded.fallbackArtworkURL)
-        XCTAssertNil(decoded.logoURL)
-        XCTAssertTrue(decoded.artworkSelections.isEmpty)
+        XCTAssertEqual(decoded.posterURL, poisoned.posterURL)
+        XCTAssertEqual(decoded.seriesPosterURL, poisoned.seriesPosterURL)
+        XCTAssertEqual(decoded.backdropURL, poisoned.backdropURL)
+        XCTAssertEqual(decoded.heroBackdropURL, poisoned.heroBackdropURL)
+        XCTAssertEqual(
+            decoded.fallbackArtworkURL,
+            poisoned.fallbackArtworkURL
+        )
+        XCTAssertEqual(decoded.logoURL, poisoned.logoURL)
+        XCTAssertEqual(decoded.artworkSelections, poisoned.artworkSelections)
         XCTAssertEqual(decoded.ratings.map(\.source), [.imdb])
         XCTAssertNil(decoded.metadataProvenance[.ratings])
     }

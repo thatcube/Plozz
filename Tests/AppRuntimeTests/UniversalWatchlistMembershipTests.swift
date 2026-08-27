@@ -349,6 +349,54 @@ final class UniversalWatchlistMembershipTests: XCTestCase {
                 .absoluteString.contains("CURRENT-TOKEN")
         )
     }
+
+    func testMissingOwnedArtworkIsRebuiltBeforeFirstPaint() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        let item = MediaItem(
+            id: "4407",
+            title: "Arcane",
+            kind: .series,
+            locallyValidatedPlayableSource: true,
+            sourceAccountID: UniversalWatchlistHostDouble.accountID
+        )
+
+        let result = try XCTUnwrap(
+            host.rehydratedPersistedArtwork([item]).first
+        )
+        let poster = try XCTUnwrap(result.posterURL)
+        let backdrop = try XCTUnwrap(result.backdropURL)
+
+        XCTAssertTrue(poster.absoluteString.contains("CURRENT-TOKEN"))
+        XCTAssertTrue(backdrop.absoluteString.contains("CURRENT-TOKEN"))
+        XCTAssertEqual(
+            result.artworkSourceAccountID(for: poster),
+            UniversalWatchlistHostDouble.accountID
+        )
+        XCTAssertEqual(
+            result.artworkSourceAccountID(for: backdrop),
+            UniversalWatchlistHostDouble.accountID
+        )
+    }
+
+    func testMissingEpisodeArtworkIsNotInvented() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        let item = MediaItem(
+            id: "episode-id",
+            title: "Episode",
+            kind: .episode,
+            locallyValidatedPlayableSource: true,
+            sourceAccountID: UniversalWatchlistHostDouble.accountID
+        )
+
+        let result = try XCTUnwrap(
+            host.rehydratedPersistedArtwork([item]).first
+        )
+
+        XCTAssertNil(result.posterURL)
+        XCTAssertNil(result.seriesPosterURL)
+        XCTAssertNil(result.backdropURL)
+        XCTAssertNil(result.heroBackdropURL)
+    }
 }
 
 /// The smallest object that can answer `UniversalWatchlistHost`.

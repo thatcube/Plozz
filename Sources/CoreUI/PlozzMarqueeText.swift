@@ -15,13 +15,15 @@ import SwiftUI
 /// special cases. Text that runs long doesn't stop short with a "…"; it carries
 /// on and dissolves.
 ///
-/// The line itself never moves horizontally: it starts in the same place focused
-/// or not, so nothing lurches sideways as a card grows. What changes is the
-/// dissolve. A resting caption finishes just inside the card's edge — ending
-/// flush with it read as text running out of card rather than fading away —
-/// while a focused caption dissolves over a longer distance and out to the edge
-/// itself, because its card has grown around it and has the room. Focus is also
-/// what sets the line moving.
+/// The text sits in a band with the same clearance at both ends — `inset` in
+/// from the leading edge, `inset` in from the trailing one — and that band does
+/// not move or resize for anything. It had been running to the very edge on the
+/// right while the left kept its full inset, which is simply lopsided, and it
+/// looked worse still for changing with focus.
+///
+/// Focus decides exactly one thing here: whether the line walks. It decides
+/// nothing about the geometry, which is what keeps a focused caption from
+/// drifting sideways while it slides down.
 ///
 /// ## The scrolling line must not be part of the layout
 ///
@@ -75,61 +77,44 @@ public struct PlozzMarqueeText: View {
     }
 
     /// Where the line begins, and where its leading dissolve finishes.
-    ///
-    /// The same in both states, deliberately. Indenting a focused caption further
-    /// was tried and reverted twice over: it read as the text lurching sideways
-    /// as the card grew, and — because it changes how much of the line fits — it
-    /// also changed whether the line needed a dissolve at all, which is the one
-    /// thing that must never move (see `needsFade`).
     private var lead: CGFloat { inset }
 
-    /// How long the trailing dissolve is. Longer on a focused card, which has
-    /// grown around its caption and has the room for it.
-    private func fadeLength(focused: Bool) -> CGFloat {
-        inset * (focused
-            ? PlozzTheme.Metrics.marqueeFocusedFadeRatio
-            : PlozzTheme.Metrics.marqueeFadeRatio)
-    }
-
-    /// Where the line has completely dissolved. A focused caption uses the card's
-    /// full width; a resting one stops just short of it, so the text reads as
-    /// fading away rather than as running out of card.
-    private func fadeEnd(focused: Bool) -> CGFloat {
+    /// Where the line has completely dissolved.
+    ///
+    /// `inset` short of the caption's trailing edge — the mirror of `lead`, so
+    /// the text sits in a band with the same clearance either side. It had been
+    /// running to the very edge on the right while the left kept its full inset,
+    /// which is simply lopsided, and it looked worse still for changing with
+    /// focus.
+    private var fadeEnd: CGFloat {
         guard containerWidth > 0 else { return 0 }
-        let gap = focused ? 0 : inset * PlozzTheme.Metrics.marqueeRestingEdgeGapRatio
-        return containerWidth - gap
+        return containerWidth - inset
     }
 
     /// Where the trailing dissolve begins — and so the last point at which the
     /// text is still at full strength.
-    private func fadeStart(focused: Bool) -> CGFloat {
-        max(fadeEnd(focused: focused) - fadeLength(focused: focused), lead)
+    private var fadeStart: CGFloat {
+        max(fadeEnd - inset * PlozzTheme.Metrics.marqueeFadeRatio, lead)
     }
 
     /// How far the line runs past the point where it starts to dissolve — and
     /// therefore exactly how far it has to travel for its end to arrive there at
     /// full strength.
-    private func overflow(focused: Bool) -> CGFloat {
+    ///
+    /// Every term here is focus-independent, and that is deliberate. Twice now a
+    /// measurement that quietly varied with focus has changed whether the line
+    /// carries a mask at all, and a mask that appears when a card takes focus is
+    /// a structural change inside the subtree the focus animation is animating —
+    /// SwiftUI rebuilds rather than animates, and the caption stops sliding. The
+    /// fade's geometry is now simply fixed: nothing about it moves when focus
+    /// does, so nothing about it can break the animation. Focus decides one
+    /// thing, which is whether the line walks.
+    private var overflow: CGFloat {
         guard containerWidth > 0 else { return 0 }
-        return max(0, textWidth - (fadeStart(focused: focused) - lead))
+        return max(0, textWidth - (fadeStart - lead))
     }
 
-    /// How far *this* line has to travel right now.
-    private var overflow: CGFloat { overflow(focused: isScrolling) }
-
-    /// Whether this line is dissolved at all — and therefore whether it carries a
-    /// mask.
-    ///
-    /// Answered against the focused geometry in **both** states, which is what
-    /// keeps the answer from changing when focus does. A focused card dissolves
-    /// over a longer distance, so it is the state that needs the mask soonest;
-    /// asking about the current state instead meant a title that only just fitted
-    /// at rest gained a mask the moment its card took focus — a structural change
-    /// inside the subtree the focus animation is animating, which SwiftUI answers
-    /// by rebuilding rather than animating, and the caption stopped sliding down.
-    /// That is the same failure `EdgeFade` documents, arrived at from a different
-    /// direction; the rule is that this value must not depend on focus at all.
-    private var needsFade: Bool { overflow(focused: true) > 0.5 }
+    private var needsFade: Bool { overflow > 0.5 }
 
     /// Restarts the marquee when focus changes, or when a recycled card puts a
     /// different title in this line.
@@ -158,8 +143,8 @@ public struct PlozzMarqueeText: View {
             // the caption into place instead of letting it slide down.
             .modifier(EdgeFade(
                 lead: lead,
-                fadeStart: fadeStart(focused: isScrolling),
-                fadeEnd: fadeEnd(focused: isScrolling),
+                fadeStart: fadeStart,
+                fadeEnd: fadeEnd,
                 width: containerWidth,
                 isEnabled: needsFade
             ))
@@ -196,8 +181,22 @@ public struct PlozzMarqueeText: View {
     /// each end is what makes it readable, and what makes it read as a
     /// considered movement rather than something sliding back and forth.
     private func runMarquee() async {
+        // Back to the start INSTANTLY, never as an animation.
+        //
+        // This runs the moment focus changes, which is the moment the caption is
+        // sliding down (or up) — so animating the line back to its start put a
+        // sideways slide underneath that, and focusing a card moved its title
+        // down and to the right instead of just down. A card recycled by a lazy
+        // row carries the same hazard: it can arrive holding the scroll position
+        // of whatever title used it last, and would glide out of it in view.
+        //
+        // Snapping is invisible either way. On the card losing focus the line is
+        // dissolving and moving anyway; on the card gaining it the line is where
+        // it has always been, so there is nothing to see.
         if scroll != 0 {
-            withAnimation(.easeOut(duration: 0.3)) { scroll = 0 }
+            var immediate = Transaction()
+            immediate.disablesAnimations = true
+            withTransaction(immediate) { scroll = 0 }
         }
         let distance = overflow
         guard isScrolling, distance > 0.5 else { return }

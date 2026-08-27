@@ -427,17 +427,15 @@ public enum PlozzTheme {
         /// its own. At standard density the inset is 10–12pt, so a 1:1 fade was
         /// about a third of a character wide: technically a gradient, visually a
         /// cut.
-        public static let marqueeFadeRatio: CGFloat = 1.8
-        /// The same, for a caption whose card holds focus. Longer, because a
-        /// focused card is bigger and its artwork now reaches past the caption on
-        /// both sides — there is simply more room to dissolve into, and using it
-        /// is what keeps the fade in proportion to the card it belongs to.
-        public static let marqueeFocusedFadeRatio: CGFloat = 2.6
-        /// How far short of the card's edge a **resting** caption finishes
-        /// dissolving, as a multiple of the inset. Ending exactly on the edge
-        /// read as text running out of card rather than fading away; stopping
-        /// just inside it reads as deliberate.
-        public static let marqueeRestingEdgeGapRatio: CGFloat = 0.45
+        ///
+        /// One value for every state, deliberately. A fade that lengthened on
+        /// focus changed where the line began dissolving, which changed how much
+        /// of it fitted, which changed whether it was masked at all — and a mask
+        /// that appears when a card takes focus stops the caption animating (see
+        /// `PlozzMarqueeText.EdgeFade`). Focus decides whether the line walks;
+        /// it decides nothing about the line's geometry.
+        public static let marqueeFadeRatio: CGFloat = 2.2
+
         /// How fast a focused card's caption walks its overflow into view.
         ///
         /// Reading pace, not scrolling pace — and unhurried, because the line is

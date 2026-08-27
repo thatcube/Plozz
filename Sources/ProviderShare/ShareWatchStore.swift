@@ -41,12 +41,39 @@ public actor ShareWatchStore {
         /// with no live player) — the bar is simply omitted until the next play
         /// re-learns it. Missing in legacy JSON decodes to `nil` automatically.
         public var duration: TimeInterval?
+        /// When the viewer took this title off Continue Watching, if they have.
+        ///
+        /// Kept **alongside** the position rather than replacing it. A share's
+        /// watch state is Plozz's own — there is no server to tell — so hiding a
+        /// title costs nothing here: the row stops showing it and playing it again
+        /// still resumes where they were. That is the behaviour a managed server
+        /// only gets when it has a real dismissal action of its own.
+        ///
+        /// Compared against ``updatedAt`` rather than simply being cleared: a play
+        /// AFTER the dismissal means the viewer changed their mind, so the title
+        /// belongs back on the row without anything having to remember to reset
+        /// this. Missing in legacy JSON decodes to `nil` — never dismissed.
+        public var dismissedAt: Date?
 
-        public init(position: TimeInterval, played: Bool, updatedAt: Date, duration: TimeInterval? = nil) {
+        /// Whether this record should be kept off Continue Watching: dismissed, and
+        /// not played since.
+        public var isDismissedFromContinueWatching: Bool {
+            guard let dismissedAt else { return false }
+            return dismissedAt >= updatedAt
+        }
+
+        public init(
+            position: TimeInterval,
+            played: Bool,
+            updatedAt: Date,
+            duration: TimeInterval? = nil,
+            dismissedAt: Date? = nil
+        ) {
             self.position = position
             self.played = played
             self.updatedAt = updatedAt
             self.duration = duration
+            self.dismissedAt = dismissedAt
         }
     }
 
@@ -168,7 +195,30 @@ public actor ShareWatchStore {
         // resume drained from the outbox has no live player), so the progress bar
         // survives resume ticks that lack duration.
         let resolvedDuration = (duration.map { $0 > 0 ? $0 : nil } ?? nil) ?? all[itemID]?.duration
-        all[itemID] = Record(position: position, played: played, updatedAt: capturedAt, duration: resolvedDuration)
+        all[itemID] = Record(
+            position: position,
+            played: played,
+            updatedAt: capturedAt,
+            duration: resolvedDuration,
+            // Carried, not cleared: `isDismissedFromContinueWatching` compares it
+            // against `updatedAt`, so this write un-hides the title by being newer
+            // — while an out-of-order drain of an OLDER play cannot.
+            dismissedAt: all[itemID]?.dismissedAt
+        )
+        persist(all)
+    }
+
+    /// Takes a title off Continue Watching while keeping the viewer's place.
+    ///
+    /// A share's watch state is Plozz's own, so hiding costs nothing: there is no
+    /// server to tell and no other client to disagree. Playing it again resumes
+    /// where they were, and does so without anything having to remember to undo
+    /// this — the record simply becomes newer than the dismissal.
+    public func dismissFromContinueWatching(itemID: String, at date: Date = Date()) {
+        var all = loaded()
+        guard var record = all[itemID] else { return }
+        record.dismissedAt = date
+        all[itemID] = record
         persist(all)
     }
 

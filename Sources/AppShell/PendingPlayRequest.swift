@@ -23,6 +23,13 @@ public final class PendingPlayRequest {
     /// app is launched/foregrounded from a Top Shelf card, cleared once the Home
     /// tab has routed to it.
     public var itemID: String?
+    /// Which server the link said the title lives on, when it said.
+    ///
+    /// A bare id is unique only within one server — Plex ratingKeys are small
+    /// per-server integers — so on a device signed in to several, resolving by id
+    /// alone can open the wrong title. The link carries the account; this is where
+    /// it survives until the router can use it.
+    public var accountID: String?
 
     public init() {}
 }

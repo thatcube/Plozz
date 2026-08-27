@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import MetadataKit
 import RatingsService
 
@@ -188,6 +189,7 @@ public struct DetailOpenEnvironment {
         )
         let sources = selection.sources
         let selectedSource = selection.selected
+        Self.logDetailOpen(item: item, isDiscovery: isDiscovery, resolvedSources: sources)
         let selectedItem = selectedSource.map { item.selectingSource($0) } ?? item
         return ItemDetailViewModel(
             provider: resolveProvider(selectedSource?.accountID ?? item.sourceAccountID),
@@ -205,6 +207,39 @@ public struct DetailOpenEnvironment {
                 Self.relatedTitlesDisplayMode(isDiscoveryItem: isDiscovery)
             ),
             snapshotCache: snapshotCache
+        )
+    }
+
+    /// One line per detail open recording *why* the page chose the layout it did.
+    ///
+    /// A page with no Play button is indistinguishable, from a bug report, between
+    /// "the viewer genuinely doesn't own this", "the identity index hadn't warmed
+    /// yet", "the index has no key this item shares with the library copy" and "the
+    /// item was minted unvalidated and never rebound" (issue #33). Those need
+    /// different fixes, and the reporter can't tell them apart. These are the four
+    /// facts that separate them.
+    ///
+    /// Deliberately no title: the item id and the *names* of the id namespaces are
+    /// enough to triage, and a media title is the one thing that must never reach a
+    /// log this app also mirrors to stdout under a diagnostic env var.
+    static func logDetailOpen(
+        item: MediaItem,
+        isDiscovery: Bool,
+        resolvedSources: [MediaSourceRef]
+    ) {
+        guard isDiscovery else { return }
+        let idKeys = item.providerIDs.keys.sorted().joined(separator: ",")
+        let availability = item.availability.map { String(describing: $0) } ?? "none"
+        PlozzLog.app.info(
+            "Detail open: rendering discovery layout"
+                + " id=\(item.id)"
+                + " kind=\(item.kind)"
+                + " validated=\(item.locallyValidatedPlayableSource)"
+                + " availability=\(availability)"
+                + " itemSources=\(item.sources.count)"
+                + " resolvedSources=\(resolvedSources.count)"
+                + " watchlistAlias=\(item.watchlistAliasID != nil)"
+                + " ids=[\(idKeys)]"
         )
     }
 

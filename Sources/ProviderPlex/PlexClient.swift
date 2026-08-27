@@ -432,6 +432,39 @@ public struct PlexClient: Sendable {
         ).MediaContainer.Hub ?? []
     }
 
+    /// `GET /hubs/home/continueWatching` — the **actual** Continue Watching hub
+    /// the Plex apps render, as opposed to the older `/library/onDeck` feed this
+    /// client reads for the row.
+    ///
+    /// The two are not the same list and are not meant to be. The hub is the one
+    /// that honours Plex's "Remove from Continue Watching": dismissing a title
+    /// records an exclusion the hub applies and `onDeck` knows nothing about, so a
+    /// dismissed title keeps its `viewOffset` and keeps coming back through
+    /// `onDeck` forever. The hub also excludes next-up suggestions that `onDeck`
+    /// happily volunteers.
+    ///
+    /// Read **only** by the diagnostics path, to diff the two lists and prove
+    /// which of them a wrong row came from. Nothing user-facing consumes it, so
+    /// this cannot change what the row shows. Older servers may not route the
+    /// `home` variant; the caller falls back.
+    func continueWatchingHub(limit: Int, homeVariant: Bool = true) async throws -> [PlexMetadata] {
+        let container = try await decode(
+            PlexMediaContainerResponse.self,
+            Endpoint(
+                path: homeVariant ? "/hubs/home/continueWatching" : "/hubs/continueWatching",
+                queryItems: containerQuery(start: 0, size: limit),
+                headers: headers
+            )
+        ).MediaContainer
+        // The payload is a MediaContainer of Hubs; some servers inline the items
+        // directly instead. Accept both so a shape difference doesn't read as an
+        // empty hub, which would look exactly like "everything was dismissed".
+        if let hubs = container.Hub, !hubs.isEmpty {
+            return hubs.flatMap { $0.Metadata ?? [] }
+        }
+        return container.Metadata ?? []
+    }
+
     /// `GET /library/sections/{id}/firstCharacter` — the section's title
     /// first-character facet: one `Directory` per present letter (in ascending
     /// `titleSort` order) carrying its `titleSort` (`"A"`, `"1-9"`, `"#"`, …)
@@ -619,6 +652,30 @@ public struct PlexClient: Sendable {
                 URLQueryItem(name: "identifier", value: "com.plexapp.plugins.library"),
                 URLQueryItem(name: "time", value: String(timeMs)),
                 URLQueryItem(name: "state", value: state),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
+        _ = try await send(endpoint)
+    }
+
+    /// `PUT /actions/removeFromContinueWatching` — dismisses a title from the
+    /// Continue Watching hub without touching its watched state.
+    ///
+    /// This is the same action the Plex apps offer, and it records an exclusion
+    /// the hub honours. Clearing the saved position via `/:/progress` does not do
+    /// the same job: the title stops being *in progress* but the server may still
+    /// surface it — an unwatched next episode being the usual reason — so it comes
+    /// back looking untouched.
+    ///
+    /// Undocumented but long-standing, and used by Plex's own clients. Treated as
+    /// best-effort by the caller for exactly that reason.
+    func removeFromContinueWatching(ratingKey: String) async throws {
+        let endpoint = Endpoint(
+            method: .put,
+            path: "/actions/removeFromContinueWatching",
+            queryItems: [
+                URLQueryItem(name: "ratingKey", value: ratingKey),
                 URLQueryItem(name: "X-Plex-Token", value: token)
             ],
             headers: headers
@@ -846,6 +903,19 @@ public struct PlexClient: Sendable {
     /// Stops on the first short page, on a page that returns nothing, or once
     /// `totalSize` is reached, and refuses to loop forever if a server keeps
     /// handing back full pages.
+    /// How the watchlist is asked to be ordered.
+    ///
+    /// Without this the endpoint returns its own default, which is not the order
+    /// anything was added in and is not stable between reads — the reported
+    /// "seemingly random when I open the app". Everything downstream preserves the
+    /// order the server gave faithfully, so an unordered read is an unordered row.
+    ///
+    /// `watchlistedAt` is when the title was put on the watchlist, which is the
+    /// question being asked. `addedAt` looks similar and answers a different one:
+    /// when the title appeared in a library. Newest first, matching where Plex's
+    /// own clients put a fresh addition.
+    private static let watchlistSort = "watchlistedAt:desc"
+
     func watchlist() async throws -> [PlexMetadata] {
         let pageSize = 100
         // 10k titles. Far past any real watchlist, and the only purpose is to
@@ -854,8 +924,37 @@ public struct PlexClient: Sendable {
         var collected: [PlexMetadata] = []
         var start = 0
 
+        // A sort the service does not recognise must not cost the viewer their
+        // watchlist. These endpoints are undocumented and change without notice, so
+        // a refusal drops the ordering and re-asks for the same page — worse than
+        // sorted, far better than empty.
+        //
+        // Retried in place rather than probed up front: a probe would spend an
+        // extra request on every read to learn something only a failure can teach.
+        // Once dropped it stays dropped for the rest of the read, so a paged list
+        // cannot come back half ordered and half not, which would look more
+        // scrambled than never having asked.
+        var sort: String? = Self.watchlistSort
+
         for _ in 0..<hardCap {
-            let container = try await watchlistPage(start: start, size: pageSize)
+            let container: PlexMediaContainer
+            do {
+                container = try await watchlistPage(start: start, size: pageSize, sort: sort)
+            } catch {
+                guard sort != nil else { throw error }
+                // Start the whole read again rather than resuming.
+                //
+                // An offset only means anything within one ordering. Pages already
+                // banked were fetched sorted; continuing unsorted from the same
+                // offset would splice two different orderings together, so the
+                // result would repeat some titles and silently lose others —
+                // materially worse than the unordered list this is falling back to.
+                PlozzLog.networking.error("Plex refused the watchlist sort; re-reading in the service's own order")
+                sort = nil
+                collected.removeAll(keepingCapacity: true)
+                start = 0
+                container = try await watchlistPage(start: 0, size: pageSize, sort: nil)
+            }
             let page = container.Metadata ?? []
             collected.append(contentsOf: page)
             if page.count < pageSize { break }
@@ -867,7 +966,8 @@ public struct PlexClient: Sendable {
 
     private func watchlistPage(
         start: Int,
-        size: Int
+        size: Int,
+        sort: String?
     ) async throws -> PlexMediaContainer {
         let endpoint = Endpoint(
             path: "/library/sections/watchlist/all",
@@ -875,6 +975,9 @@ public struct PlexClient: Sendable {
                 URLQueryItem(name: "X-Plex-Token", value: plexTVToken),
                 URLQueryItem(name: "X-Plex-Container-Start", value: String(start)),
                 URLQueryItem(name: "X-Plex-Container-Size", value: String(size)),
+                // Omitted entirely when `nil` — an empty value is not the same as
+                // no preference, and some services treat it as a parse error.
+            ] + (sort.map { [URLQueryItem(name: "sort", value: $0)] } ?? []) + [
                 // `includeGuids=1` inlines each entry's external ids
                 // (imdb/tmdb/tvdb). Without it Plex returns only its own
                 // `plex://` guid, which identifies a title inside Plex and

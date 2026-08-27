@@ -297,11 +297,28 @@ public struct MediaPlaybackIndicatorState: Equatable, Sendable {
 }
 
 enum MediaPlaybackIndicatorPresentation {
+    /// Whether this card should wear a progress bar.
+    ///
+    /// A saved resume point is progress however small it looks as a fraction. The
+    /// old test asked only whether the percentage cleared one percent, which on a
+    /// feature-length film is the first minute — so starting something, or
+    /// restarting something already seen, produced a card indistinguishable from an
+    /// untouched one, while the server's own app showed a bar. The place the viewer
+    /// left off is the single most useful thing a card can say, and it does not
+    /// become less true for being early.
+    ///
+    /// The upper bound stays: something watched through has no resume point of its
+    /// own and reports a full percentage, and it should wear the watched mark
+    /// rather than a bar pinned at the end.
     static func showsProgress(for item: MediaPlaybackIndicatorState) -> Bool {
         guard PosterCardPresentation.showsPlaybackIndicators(for: item.kind),
-              let percentage = item.playedPercentage
+              let percentage = item.playedPercentage,
+              percentage < 0.99
         else { return false }
-        return percentage > 0.01 && percentage < 0.99
+        if let resume = item.resumePosition, resume > 0 { return true }
+        // No resume point: a container reporting the fraction of its episodes
+        // watched. Keep a floor there, since zero progress is not progress.
+        return percentage > 0.01
     }
 
     static func hasStartedPlayback(_ item: MediaPlaybackIndicatorState) -> Bool {

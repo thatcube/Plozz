@@ -56,11 +56,31 @@ struct PlozziOSDiagnosticsSettingsView: View {
                     isOn: $crashReporting.settings.isEnabled
                 )
                 .disabled(!appModel.crashReportingController.isConfigured)
+
+                // Debug/TestFlight only — see the tvOS panel for why a shipping
+                // build must not offer a viewer a way to file their crashes as
+                // developer noise.
+                if AppReleaseChannel.current != .production {
+                    Toggle(
+                        "This iPhone Is Used for Testing Plozz",
+                        isOn: $crashReporting.settings.isMaintainerDevice
+                    )
+                    .disabled(
+                        !appModel.crashReportingController.isConfigured
+                            || !crashReporting.settings.isEnabled
+                    )
+                }
             } footer: {
                 if appModel.crashReportingController.isConfigured {
-                    Text(
-                        "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included."
-                    )
+                    if AppReleaseChannel.current != .production {
+                        Text(
+                            "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included. Turn on the testing switch if this is a device you use to build or test Plozz, so its crashes are filed apart from the ones real viewers hit."
+                        )
+                    } else {
+                        Text(
+                            "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included."
+                        )
+                    }
                 } else {
                     Text("Crash reporting is unavailable in this build.")
                 }
@@ -104,7 +124,10 @@ struct PlozziOSDiagnosticsSettingsView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Help & Diagnostics")
-        .onChange(of: crashReporting.settings.isEnabled) {
+        .onChange(of: crashReporting.settings) {
+            // The whole value, not just `isEnabled`: the testing marker changes
+            // the reporter's environment, which only takes effect on a restart
+            // the controller performs from here.
             appModel.applyCrashReportingPreference()
             sendStatus = nil
         }

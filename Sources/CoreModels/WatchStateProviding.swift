@@ -63,3 +63,19 @@ public protocol ResumeStateWriting: Sendable {
     /// play jumps to the top of Continue Watching on the next Home load.
     func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async throws
 }
+
+/// A server that can take a title off its own Continue Watching row as a distinct
+/// act, rather than only by having its saved position cleared.
+///
+/// The two are not the same and the difference is visible to the viewer. Clearing
+/// a position says "you are no longer part-way through this"; a server is then
+/// free to keep offering the title for its own reasons — an unwatched next
+/// episode being the common one — and it reappears looking untouched. A dismissal
+/// says "stop showing me this", which is what was actually asked for.
+///
+/// Optional on purpose: a provider that cannot express the difference simply does
+/// not conform, and the caller falls back to clearing the position, which is
+/// close enough for a movie and imperfect for an episode.
+public protocol ContinueWatchingRemovable: Sendable {
+    func removeFromContinueWatching(itemID: String) async throws
+}

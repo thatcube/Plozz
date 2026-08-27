@@ -35,11 +35,38 @@ public enum TopShelfPosterComposer {
     /// those renders; `TopShelfStore.pruneArtwork` then deletes them.
     ///
     /// 1: brand-blue fill. 2: white chrome matching `PlozzMediaChrome`.
-    static let barStyleGeneration = 2
+    static let barStyleGeneration = 5
 
     /// Internal rather than private so `PlozzMediaChromeParityTests` can pin the
     /// two greys to CoreUI's live values.
     enum Bar {
+        /// The in-app resume chip's own measurements, as fractions of the poster
+        /// width they are tuned against (`PlozzTheme.Metrics`, 280pt card). The
+        /// shelf card is a different size, so a fraction travels where a constant
+        /// would not — and taking them from the same numbers is what stops the two
+        /// drifting into different-looking versions of one thing.
+        static let chipBarWidthFraction: CGFloat = 56.0 / 280.0
+        static let chipBarHeightFraction: CGFloat = 8.0 / 280.0
+        static let chipFontFraction: CGFloat = 24.0 / 280.0
+        static let chipInsetFraction: CGFloat = 18.0 / 280.0
+        /// Horizontal inset for the shelf, deliberately wider than the in-app one.
+        ///
+        /// The app draws this chip onto a card it lays out itself, so its own inset
+        /// is the whole story. tvOS instead takes the finished poster and fits it
+        /// into a card of its own — rounded, and not necessarily the same aspect —
+        /// so some of each edge is spent before the artwork is seen. A fraction
+        /// measured on the full image therefore lands nearer the visible edge than
+        /// the same fraction does in the app, which is exactly how it looked:
+        /// correct in the row, too close to the edge on the shelf.
+        ///
+        /// The vertical inset is left alone. Whatever the shelf trims, it did not
+        /// show at the bottom.
+        ///
+        /// A plain fraction rather than a ratio of the in-app numbers: it is not
+        /// derived from them, it is what the shelf turned out to need, and dressing
+        /// it up as `x / 280` would imply a relationship that does not exist.
+        static let chipHorizontalInsetFraction: CGFloat = 0.09
+
         static let heightFraction: CGFloat = 12.0 / 280.0
         static let insetFraction: CGFloat = 22.0 / 280.0
         static let scrimFraction: CGFloat = (12.0 * 8.5) / 280.0
@@ -70,7 +97,8 @@ public enum TopShelfPosterComposer {
     public static func compositedPosterURL(
         id: String,
         posterURL: URL,
-        progress: Double
+        progress: Double,
+        chip: String? = nil  // l10n:content — pre-formatted episode/remaining label
     ) async -> URL? {
         #if canImport(UIKit)
         guard progress > 0.01, progress < 0.99 else { return nil }
@@ -82,7 +110,11 @@ public enum TopShelfPosterComposer {
         // stretched backdrop) the composite is regenerated rather than served
         // stale. Stale files are then pruned by `TopShelfStore.pruneArtwork`.
         let artKey = String(fnv1a(posterURL.absoluteString), radix: 16)
-        let fileName = "\(sanitize(id))_\(bucket)_\(artKey)_v\(barStyleGeneration).png"
+        // The chip is part of what is drawn, so it is part of what identifies the
+        // render. Without it a title whose label changed — an episode gaining its
+        // numbering, a remaining time crossing a minute — would serve the old file.
+        let chipKey = chip.map { String(fnv1a($0), radix: 16) } ?? "n"
+        let fileName = "\(sanitize(id))_\(bucket)_\(artKey)_\(chipKey)_v\(barStyleGeneration).png"
         let destination = directory.appendingPathComponent(fileName)
 
         // Reuse an identical prior render (same item + same rounded percentage).
@@ -91,7 +123,7 @@ public enum TopShelfPosterComposer {
         }
 
         guard let base = await loadImage(from: posterURL) else { return nil }
-        guard let data = render(base: base, progress: CGFloat(progress)) else { return nil }
+        guard let data = render(base: base, progress: CGFloat(progress), chip: chip) else { return nil }
 
         do {
             try FileManager.default.createDirectory(
@@ -162,7 +194,7 @@ public enum TopShelfPosterComposer {
     /// Draws `base` with the progress bar overlaid, returning PNG data. The bar's
     /// scrim → track → fill layering and every colour/scale factor mirror
     /// `PosterCardView.progressBar` so the shelf and Home rows read identically.
-    private static func render(base: UIImage, progress: CGFloat) -> Data? {
+    private static func render(base: UIImage, progress: CGFloat, chip: String? = nil) -> Data? {  // l10n:content — pre-formatted label drawn via Core Graphics
         let size = base.size
         guard size.width > 0, size.height > 0 else { return nil }
 
@@ -173,7 +205,8 @@ public enum TopShelfPosterComposer {
 
         return renderer.pngData { context in
             base.draw(in: CGRect(origin: .zero, size: size))
-            drawProgressBar(in: context.cgContext, size: size, progress: progress)
+            drawScrim(in: context.cgContext, size: size)
+            drawResumeChip(in: context.cgContext, size: size, progress: progress, chip: chip)
         }
     }
 
@@ -239,6 +272,128 @@ public enum TopShelfPosterComposer {
     /// Draws the resume bar (scrim → track → fill) into `cg` for a card of `size`.
     /// Shared by the real-poster and placeholder renderers so the bar is identical
     /// everywhere and matches the in-app `PosterCardView.progressBar`.
+    /// Draws the resume chip — `▶ [bar] S1 · E1 · 21m` — as one row along the
+    /// bottom of the poster, mirroring the card the same title wears in the app.
+    ///
+    /// A shelf card is a name and a picture. For a row of half-watched things that
+    /// says what they are and nothing about where you are in any of them, and tvOS
+    /// draws its own progress bar only on `.hdtv` cards — these are posters — so
+    /// anything a poster says has to be painted into the artwork.
+    ///
+    /// The measurements are the in-app chip's own, carried across as fractions of
+    /// the poster width they are tuned against. That matters more than it sounds:
+    /// a full-width bar was tried first and read as a completely different
+    /// component sitting under a caption, rather than the same small gauge the
+    /// viewer already knows from Continue Watching.
+    private static func drawResumeChip(  // l10n:content — pre-formatted label drawn via Core Graphics
+        in cg: CGContext,
+        size: CGSize,
+        progress: CGFloat,
+        chip: String?
+    ) {
+        let width = size.width
+        let height = size.height
+        let inset = width * Bar.chipInsetFraction
+        let horizontalInset = width * Bar.chipHorizontalInsetFraction
+        let barWidth = width * Bar.chipBarWidthFraction
+        let barHeight = width * Bar.chipBarHeightFraction
+        let fontSize = width * Bar.chipFontFraction
+        let spacing = inset * 0.5
+
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
+        let textColor = UIColor.white
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor
+        ]
+
+        // Play glyph, sized to the text so the row scales as one.
+        let symbolConfig = UIImage.SymbolConfiguration(pointSize: fontSize * 0.82, weight: .bold)
+        let glyph = UIImage(systemName: "play.fill", withConfiguration: symbolConfig)?
+            .withTintColor(textColor, renderingMode: .alwaysOriginal)
+        let glyphWidth = glyph?.size.width ?? 0
+        let glyphHeight = glyph?.size.height ?? 0
+
+        let text = (chip?.isEmpty == false) ? chip : nil
+        let textSize = text.map { ($0 as NSString).size(withAttributes: attributes) } ?? .zero
+
+        let rowHeight = max(max(glyphHeight, barHeight), textSize.height)
+        // Measured from where the letters actually sit, not from the box they are
+        // drawn in. A text bounding box reserves room for descenders whether or not
+        // the string has any, and none of these do — so aligning the box to the
+        // inset left the row looking further from the bottom edge than from the
+        // left, despite both being the same number. Dropping the row by the
+        // descender puts the baseline where the box edge was, and the two gaps
+        // read as equal.
+        let descender = text == nil ? 0 : abs(font.descender)
+        let rowBottom = height - inset + descender
+        let rowTop = rowBottom - rowHeight
+        func centreY(_ elementHeight: CGFloat) -> CGFloat {
+            rowTop + (rowHeight - elementHeight) / 2
+        }
+
+        // A shadow rather than a heavier scrim: the gradient already laid down
+        // covers this band, and stacking another would grey out the artwork.
+        cg.saveGState()
+        cg.setShadow(
+            offset: .zero,
+            blur: width * Bar.shadowBlurFraction * 3,
+            color: UIColor.black.withAlphaComponent(0.85).cgColor
+        )
+
+        var x = horizontalInset
+        if let glyph {
+            glyph.draw(in: CGRect(x: x, y: centreY(glyphHeight), width: glyphWidth, height: glyphHeight))
+            x += glyphWidth + spacing
+        }
+
+        let radius = barHeight / 2
+        let barRect = CGRect(x: x, y: centreY(barHeight), width: barWidth, height: barHeight)
+        UIColor.white.withAlphaComponent(Bar.trackAlpha).setFill()
+        UIBezierPath(roundedRect: barRect, cornerRadius: radius).fill()
+        let fillWidth = min(barWidth, max(barHeight, barWidth * progress))
+        UIColor(white: Bar.fillWhite, alpha: 1).setFill()
+        UIBezierPath(
+            roundedRect: CGRect(x: x, y: barRect.minY, width: fillWidth, height: barHeight),
+            cornerRadius: radius
+        ).fill()
+        x += barWidth + spacing
+
+        if let text {
+            let available = max(0, width - horizontalInset - x)
+            (text as NSString).draw(
+                in: CGRect(x: x, y: centreY(textSize.height), width: available, height: textSize.height),
+                withAttributes: attributes
+            )
+        }
+        cg.restoreGState()
+    }
+
+    /// The legibility wash under the chip: clear at the top, black at the bottom
+    /// edge, so a bright poster cannot swallow the row drawn over it.
+    private static func drawScrim(in cg: CGContext, size: CGSize) {
+        let width = size.width
+        let height = size.height
+        let scrimHeight = width * Bar.scrimFraction
+        let scrimRect = CGRect(x: 0, y: height - scrimHeight, width: width, height: scrimHeight)
+        cg.saveGState()
+        cg.clip(to: scrimRect)
+        let space = CGColorSpaceCreateDeviceRGB()
+        let colors = [
+            UIColor.black.withAlphaComponent(0).cgColor,
+            UIColor.black.withAlphaComponent(0.75).cgColor,
+        ] as CFArray
+        if let gradient = CGGradient(colorsSpace: space, colors: colors, locations: [0, 1]) {
+            cg.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: 0, y: scrimRect.minY),
+                end: CGPoint(x: 0, y: scrimRect.maxY),
+                options: []
+            )
+        }
+        cg.restoreGState()
+    }
+
     private static func drawProgressBar(in cg: CGContext, size: CGSize, progress: CGFloat) {
         let width = size.width
         let height = size.height

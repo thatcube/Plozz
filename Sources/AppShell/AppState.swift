@@ -501,13 +501,13 @@ public final class AppState {
     /// is no longer deferred and its final resume/played write goes out. Sequenced
     /// in a single task so the end always precedes the enqueue's drain. `accountID`
     /// is optional so a barely-started/untargeted stop still flushes deferred work.
-    public func finishLiveWatchSession(accountID: String?, itemID: String, watchedPercent: Double, mutation: WatchMutation?) {
+    public func finishLiveWatchSession(accountID: String?, itemID: String, watchedPercent: Double, mutation: WatchMutation?, item: MediaItem? = nil) {
         let reconciler = watchReconciler
         // (a) Index state captured at the moment of stop — the value the fan-out
         // actually saw. If crossServer=0 here, the index never warmed a union for
         // any title, so the stop's targets could only be origin-only.
         FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(identityIndex.identitySnapshotStore.current, phase: "stop-index"))
-        publishOptimisticWatchState(itemID: itemID, mutation: mutation, watchedPercent: watchedPercent)
+        publishOptimisticWatchState(itemID: itemID, mutation: mutation, watchedPercent: watchedPercent, item: item)
         Task {
             if let accountID {
                 await reconciler.endLiveSession(accountID: accountID, itemID: itemID)
@@ -536,7 +536,7 @@ public final class AppState {
     ///    progress bar update in place — the "watched 4 min, pressed Back, page still
     ///    looks untouched" bug. `watchedPercent` (0...100) becomes the `0...1`
     ///    fraction `PosterCardView` reads.
-    private func publishOptimisticWatchState(itemID: String, mutation: WatchMutation?, watchedPercent: Double) {
+    private func publishOptimisticWatchState(itemID: String, mutation: WatchMutation?, watchedPercent: Double, item: MediaItem? = nil) {
         guard let mutation else { return }
         var ids = Set(mutation.targets.map(\.itemID))
         ids.insert(itemID)
@@ -546,10 +546,10 @@ public final class AppState {
         // flipping the wrong card's badge / resume bar / recency.
         let scoped = Set(mutation.targets.map(\.id))
         if mutation.played == true {
-            MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, played: true, resumePosition: 0, playedPercentage: 1).post()
+            MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, played: true, resumePosition: 0, playedPercentage: 1, item: item).post()
         } else if let resume = mutation.resumePosition {
             let fraction = max(0, min(watchedPercent / 100, 1))
-            MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, resumePosition: resume, playedPercentage: fraction).post()
+            MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, resumePosition: resume, playedPercentage: fraction, item: item).post()
         }
     }
 
@@ -1331,8 +1331,12 @@ public final class AppState {
         // first because it shares the scheme; outside DEBUG this always
         // declines, so a shipped build falls straight through to Top Shelf.
         if screenshotDirector.handle(url: url) { return }
-        if let id = TopShelf.itemID(from: url) {
-            pendingPlay.itemID = id
+        if let reference = TopShelf.itemReference(from: url) {
+            pendingPlay.itemID = reference.id
+            // Kept rather than discarded: the link knows which server the title
+            // came from, and throwing that away leaves the router guessing across
+            // every signed-in account for an id that is only unique within one.
+            pendingPlay.accountID = reference.accountID
         }
     }
 

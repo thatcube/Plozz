@@ -105,7 +105,47 @@ public struct JellyfinProvider: MediaProvider {
         // being dropped merely because in-progress Resume items filled the limit
         // first (r6-jf-precap).
         let stamped = merged.map(map(item:)).map { stampingSeriesRecency($0, using: seriesDates) }
+        logContinueWatchingFeed(merged, endpoint: "Items/Resume + Shows/NextUp")
         return Array(orderedByEffectiveRecency(stamped).prefix(limit))
+    }
+
+    /// Records the resume feed exactly as Jellyfin returned it, before mapping.
+    ///
+    /// Continue Watching here is `Items/Resume` *plus* `Shows/NextUp`, so the row
+    /// deliberately contains titles that are not in progress at all — next-episode
+    /// suggestions with no playback position. That is by design, and it is also a
+    /// reason the row can look out of step with what another client shows. Only
+    /// the raw feed distinguishes "the server said so" from "we got it wrong".
+    /// Gated and free when off.
+    private func logContinueWatchingFeed(_ items: [BaseItemDto], endpoint: String) {
+        guard ContinueWatchingDiagnostics.isEnabled else { return }
+        let rows = items.map { item in
+            ContinueWatchingDiagnostics.ServerRow(
+                id: item.Id,
+                kind: item.Type ?? "nil",
+                title: [item.SeriesName, item.Name].compactMap { $0 }.joined(separator: " – "),
+                viewOffsetMS: item.UserData?.PlaybackPositionTicks.map { Int($0 / 10_000) },
+                durationMS: item.RunTimeTicks.map { Int($0 / 10_000) },
+                viewCount: item.UserData?.Played == true ? 1 : 0,
+                lastViewedAt: item.UserData?.LastPlayedDate.flatMap(Self.parseJellyfinDate)
+            )
+        }
+        ContinueWatchingDiagnostics.emit(
+            ContinueWatchingDiagnostics.serverFeedLine(
+                provider: "jellyfin",
+                accountID: accountID,
+                endpoint: endpoint,
+                rows: rows
+            )
+        )
+    }
+
+    private static func parseJellyfinDate(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     /// Orders Continue Watching items by **effective recency** before any cap is
@@ -158,6 +198,19 @@ public struct JellyfinProvider: MediaProvider {
     /// merged Continue Watching row instead of inheriting a foreign timestamp or
     /// sinking to the bottom. In-progress Resume items (already timestamped) and
     /// non-series items are returned unchanged.
+    /// Stamps a Continue Watching item that carries no play timestamp of its own —
+    /// a next-episode suggestion whose `lastPlayedAt` is nil — with its series'
+    /// last-viewed date, so a just-finished show sorts by real recency in a merged
+    /// Continue Watching row instead of sinking to the bottom.
+    ///
+    /// The stamp is also what lets ``ContinueWatchingPolicy`` retire a suggestion
+    /// for a series left alone for months. Jellyfin bounds its own `Shows/NextUp`
+    /// with a server setting that defaults to a full year and is the viewer's to
+    /// choose, so Plozz deliberately does **not** override it with a
+    /// `NextUpDateCutoff` on the request; the shared policy applies the same
+    /// client-side rule here that it applies to every other backend. Removing this
+    /// stamp would silently exempt Jellyfin and Emby from that rule, because a
+    /// suggestion with no recency is kept fail-open.
     private func stampingSeriesRecency(_ item: MediaItem, using seriesDates: [String: Date]) -> MediaItem {
         guard item.lastPlayedAt == nil,
               let seriesID = item.seriesID,
@@ -273,6 +326,10 @@ public struct JellyfinProvider: MediaProvider {
                 result.append(stampingSeriesRecency(map(item: dto).taggingLibrary(libraryID), using: seriesDates))
             }
         }
+        logContinueWatchingFeed(
+            perLibrary.flatMap { $0 },
+            endpoint: "Items/Resume + Shows/NextUp (scoped to \(libraryIDs.count) libraries)"
+        )
         // Order by effective recency, then cap once — same rationale as the unscoped
         // path: a just-finished show's stamped next episode must survive the cut.
         return Array(orderedByEffectiveRecency(result).prefix(limit))

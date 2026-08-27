@@ -135,6 +135,27 @@ public struct AppShellWatchMutationApplier: WatchMutationApplying {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT ResumeStateWriting (no write, treated success)")
             return
         }
+        // Clearing a position and dismissing a title are different acts, and the
+        // difference is worth having: a server that can dismiss hides the title
+        // while REMEMBERING where the viewer got to, so playing it again a year
+        // later resumes rather than restarts. Clearing the position as well would
+        // throw that away for nothing — the title is already off the row.
+        //
+        // So: dismiss where possible and stop there. Only fall back to clearing
+        // when there is no dismissal to be had, either because the provider cannot
+        // express one (Jellyfin, where losing the position IS the mechanism) or
+        // because the server refused it. The endpoint is undocumented on Plex, so a
+        // refusal must degrade to the approximation rather than fail the write and
+        // leave it retrying forever.
+        if seconds == 0, let dismisser = provider as? ContinueWatchingRemovable {
+            do {
+                try await dismisser.removeFromContinueWatching(itemID: target.itemID)
+                FanoutDiagnostics.emit("write.removeFromCW acct=\(target.accountID) item=\(target.itemID) -> OK (position kept)")
+                return
+            } catch {
+                FanoutDiagnostics.emit("write.removeFromCW acct=\(target.accountID) item=\(target.itemID) -> FAILED, clearing position instead")
+            }
+        }
         try await resumeWriter.setResumePosition(seconds, itemID: target.itemID, capturedAt: capturedAt)
     }
 

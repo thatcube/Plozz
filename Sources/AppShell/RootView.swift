@@ -182,7 +182,8 @@ public struct RootView: View {
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.thatcube.Plozz",
             version: AppInfo.version,
             build: AppInfo.build,
-            providers: providers
+            providers: providers,
+            isMaintainerDevice: appState.crashReportingModel.settings.isMaintainerDevice
         )
     }
 
@@ -330,9 +331,9 @@ public struct RootView: View {
                                     appState.beginLiveWatchSession(accountID: accountID, itemID: itemID)
                                 }
                             },
-                            finishPlayback: { accountID, itemID, watchedPercent, mutation in
+                            finishPlayback: { accountID, itemID, watchedPercent, mutation, item in
                                 Task { @MainActor in
-                                    appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation)
+                                    appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation, item: item)
                                 }
                             },
                             checkpoint: { mutation in
@@ -633,7 +634,10 @@ public struct RootView: View {
             appState.drainWatchOutbox()
             reconcileCrashReporting()
         }
-        .onChange(of: appState.crashReportingModel.settings.isEnabled) { _, _ in
+        .onChange(of: appState.crashReportingModel.settings) { _, _ in
+            // Watches the whole value, not just `isEnabled`: flipping the
+            // maintainer marker changes the reporter's environment, and that only
+            // takes effect on a restart the controller performs from here.
             reconcileCrashReporting()
         }
         // Scene-phase side effects live in a zero-size child, NOT here.

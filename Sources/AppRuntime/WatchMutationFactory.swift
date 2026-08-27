@@ -177,6 +177,57 @@ public enum WatchMutationFactory {
     /// best-source switch resumes where you left off, on whichever server backs it.
     /// Returns `nil` when there is nothing worth converging (no targets, or an
     /// unfinished item barely started).
+    /// Takes a title off Continue Watching by clearing its saved position, on
+    /// every server that holds it.
+    ///
+    /// Deliberately leaves watched state alone. Marking an abandoned film watched
+    /// would clear the row too, and it would also tell every server — and any
+    /// tracker mirroring them — that it was finished, corrupting the history that
+    /// decides what to suggest next. The viewer asked for it off the row, not for
+    /// a claim about having seen it.
+    ///
+    /// Fans out for the same reason every other watch action does: the title can
+    /// live on several servers, and taking it off the row on one while leaving it
+    /// on another just moves the problem. Resume state converges or it does not
+    /// mean anything.
+    ///
+    /// No Trakt intent, for the same reason as above — nothing was watched.
+    public static func removeFromContinueWatching(
+        item: MediaItem,
+        primaryAccountID: String?,
+        additionalSources: [MediaSourceRef] = [],
+        crossServerSync: Bool = true,
+        capturedAt: Date = Date()
+    ) -> WatchMutation? {
+        let targets = targets(
+            for: item,
+            primaryAccountID: primaryAccountID,
+            additionalSources: additionalSources,
+            crossServerSync: crossServerSync
+        )
+        guard !targets.isEmpty else { return nil }
+        let episode = crossServerSync
+            ? episodeExpansion(for: item, primaryAccountID: primaryAccountID)
+            : (origin: nil, pending: false)
+        let identity = crossServerSync
+            ? identityExpansion(for: item)
+            : (identities: [], pending: false, anchorTitle: nil, anchorYear: nil)
+        return WatchMutation(
+            capturedAt: capturedAt,
+            canonicalMediaID: canonicalID(for: item),
+            seasonNumber: item.seasonNumber,
+            episodeNumber: item.episodeNumber,
+            clearResume: true,
+            targets: targets,
+            episodeOrigin: episode.origin,
+            expansionPending: episode.pending || identity.pending,
+            identities: identity.identities,
+            kind: item.kind,
+            anchorTitle: identity.anchorTitle,
+            anchorYear: identity.anchorYear
+        )
+    }
+
     public static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], crossServerSync: Bool = true, capturedAt: Date = Date()) -> WatchMutation? {
         let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources, crossServerSync: crossServerSync)
         guard !targets.isEmpty else { return nil }

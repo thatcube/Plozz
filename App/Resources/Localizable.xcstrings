@@ -185564,6 +185564,226 @@
         }
       }
     },
+    "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included. Turn on the testing switch if this is a device you use to build or test Plozz, so its crashes are filed apart from the ones real viewers hit." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مُفعَّل بشكل افتراضي خلال الإصدار التجريبي؛ يمكنك إيقافه في أي وقت. عند التفعيل، تساعد التفاصيل المجهولة الهوية عن الأعطال على تحسين Plozz. لا تُرسَل أبداً عناوين الخوادم أو عناوين المحتوى أو أسماء الملفات الشخصية أو بيانات الاعتماد. فعّل مفتاح الاختبار إذا كان هذا جهازاً تستخدمه لبناء Plozz أو اختباره، حتى تُسجَّل أعطاله بشكل منفصل عن الأعطال التي يواجهها المشاهدون العاديون."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "По подразбиране е включено по време на бетата; можеш да го изключиш по всяко време. Когато е включено, анонимните данни за срива помагат за подобряването на Plozz. Адресите на сървъри, заглавията на съдържанието, имената на профилите и данните за вход никога не се включват. Включи превключвателя за тестване, ако това е устройство, на което разработваш или тестваш Plozz, за да се записват сривовете му отделно от онези, на които се натъкват истинските зрители."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Activat per defecte durant la beta; el pots desactivar en qualsevol moment. Quan està activat, els detalls anònims de les fallades ajuden a millorar Plozz. Les adreces del servidor, els títols dels mitjans, els noms de perfil i les credencials no s'inclouen mai. Activa l'interruptor de proves si és un dispositiu que fas servir per desenvolupar o provar Plozz, perquè les seves fallades es registrin per separat de les que troben els espectadors reals."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Během bety je ve výchozím nastavení zapnuto; kdykoli to můžeš vypnout. Když je zapnuto, anonymní podrobnosti o pádech pomáhají vylepšovat Plozz. Adresy serverů, názvy médií, jména profilů ani přihlašovací údaje se nikdy neposílají. Zapni přepínač testování, pokud je to zařízení, na kterém sestavuješ nebo testuješ Plozz, aby se jeho pády evidovaly odděleně od těch, na které narazí běžní diváci."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Slået til som standard i betaperioden; du kan slå det fra når som helst. Når det er slået til, hjælper anonyme nedbrudsoplysninger med at forbedre Plozz. Serveradresser, medietitler, profilnavne og loginoplysninger inkluderes aldrig. Slå testkontakten til, hvis dette er en enhed, du bruger til at udvikle eller teste Plozz, så dens nedbrud registreres adskilt fra dem, som almindelige seere støder på."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Während der Beta ist diese Funktion standardmäßig aktiviert; du kannst sie jederzeit ausschalten. Wenn aktiviert, helfen anonyme Absturzdetails, Plozz zu verbessern. Serveradressen, Medientitel, Profilnamen und Anmeldedaten sind niemals enthalten. Aktiviere den Testschalter, wenn dies ein Gerät ist, mit dem du Plozz entwickelst oder testest, damit dessen Abstürze getrennt von denen normaler Zuschauer erfasst werden."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ενεργοποιημένο από προεπιλογή κατά τη διάρκεια της beta· μπορείς να το απενεργοποιήσεις όποτε θέλεις. Όταν είναι ενεργό, ανώνυμα στοιχεία κατάρρευσης βοηθούν στη βελτίωση του Plozz. Διευθύνσεις διακομιστών, τίτλοι πολυμέσων, ονόματα προφίλ και διαπιστευτήρια δεν αποστέλλονται ποτέ. Άνοιξε τον διακόπτη δοκιμών αν πρόκειται για συσκευή που χρησιμοποιείς για την ανάπτυξη ή τη δοκιμή του Plozz, ώστε οι καταρρεύσεις της να καταγράφονται ξεχωριστά από εκείνες που αντιμετωπίζουν οι πραγματικοί θεατές."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Activado por defecto durante la beta; puedes desactivarlo en cualquier momento. Cuando está activado, los detalles anónimos de los fallos ayudan a mejorar Plozz. Nunca se incluyen las direcciones del servidor, los títulos de los medios, los nombres de perfil ni las credenciales. Activa el interruptor de pruebas si es un dispositivo que usas para desarrollar o probar Plozz, para que sus fallos se registren aparte de los que sufren los espectadores reales."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "به‌طور پیش‌فرض در طول دورهٔ بتا روشن است؛ می‌توانید هر زمان که خواستید آن را خاموش کنید. وقتی روشن باشد، جزئیات ناشناس خرابی به بهبود Plozz کمک می‌کند. آدرس سرورها، عناوین محتوا، نام‌های نمایه و اطلاعات ورود هرگز ارسال نمی‌شوند. اگر این دستگاهی است که برای ساخت یا آزمایش Plozz از آن استفاده می‌کنید، کلید آزمایش را روشن کنید تا خرابی‌های آن جدا از خرابی‌هایی که بینندگان واقعی با آن‌ها روبه‌رو می‌شوند ثبت شود."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Käytössä oletusarvoisesti beta-vaiheen ajan; voit poistaa sen käytöstä milloin tahansa. Kun käytössä, anonyymit kaatumistiedot auttavat parantamaan Plozzia. Palvelinosoitteita, mediakohteiden nimiä, profiilien nimiä tai kirjautumistietoja ei koskaan lähetetä. Ota testauskytkin käyttöön, jos tämä on laite, jolla kehität tai testaat Plozzia, niin sen kaatumiset kirjataan erilleen niistä, joita todelliset katsojat kohtaavat."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Activé par défaut pendant la bêta ; vous pouvez le désactiver à tout moment. Une fois activé, les détails anonymes des plantages aident à améliorer Plozz. Les adresses de serveur, les titres de médias, les noms de profil et les identifiants ne sont jamais inclus. Activez le commutateur de test si c'est un appareil que vous utilisez pour développer ou tester Plozz, afin que ses plantages soient enregistrés séparément de ceux rencontrés par les utilisateurs habituels."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "מופעל כברירת מחדל בזמן הבטא; אפשר לכבות אותו בכל עת. כשמופעל, פרטי קריסה אנונימיים עוזרים לשפר את Plozz. כתובות שרתים, שמות של תכנים, שמות פרופיל ופרטי התחברות לעולם אינם נכללים. הפעל את מתג הבדיקות אם זהו מכשיר שאתה משתמש בו כדי לפתח או לבדוק את Plozz, כך שהקריסות שלו יירשמו בנפרד מאלה שצופים אמיתיים נתקלים בהן."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "बीटा के दौरान डिफ़ॉल्ट रूप से चालू है; आप इसे कभी भी बंद कर सकते हैं। चालू होने पर, अनाम क्रैश विवरण Plozz को बेहतर बनाने में मदद करते हैं। सर्वर पते, मीडिया शीर्षक, प्रोफ़ाइल नाम और क्रेडेंशियल कभी शामिल नहीं किए जाते। यदि यह वह डिवाइस है जिसका उपयोग आप Plozz बनाने या परीक्षण करने के लिए करते हैं, तो परीक्षण स्विच चालू करें ताकि इसके क्रैश असली दर्शकों के क्रैश से अलग दर्ज हों।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tijekom bete zadano je uključeno; možeš to isključiti u bilo kojem trenutku. Kad je uključeno, anonimni podaci o rušenju pomažu poboljšati Plozz. Adrese poslužitelja, nazivi medija, imena profila ni vjerodajnice nikad nisu uključeni. Uključi prekidač za testiranje ako je ovo uređaj na kojem gradiš ili testiraš Plozz, kako bi njegova rušenja bila zabilježena odvojeno od onih na koja nailaze pravi gledatelji."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A béta időszakában alapértelmezés szerint be van kapcsolva; bármikor kikapcsolhatod. Bekapcsolt állapotban a névtelen összeomlási adatok segítenek a Plozz fejlesztésében. Kiszolgálócímek, médiacímek, profilnevek és bejelentkezési adatok soha nem kerülnek elküldésre. Kapcsold be a tesztkapcsolót, ha ezt az eszközt a Plozz fejlesztésére vagy tesztelésére használod, hogy annak összeomlásai a valódi nézők által tapasztaltaktól elkülönítve legyenek rögzítve."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aktif secara default selama beta; Anda dapat mematikannya kapan saja. Saat diaktifkan, detail anonim tentang penutupan tak terduga membantu meningkatkan Plozz. Alamat server, judul media, nama profil, dan kredensial tidak pernah disertakan. Aktifkan sakelar pengujian jika ini adalah perangkat yang Anda gunakan untuk membangun atau menguji Plozz, agar penutupan tak terduga pada perangkat ini dicatat terpisah dari yang dialami penonton biasa."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Attivo per impostazione predefinita durante la beta; puoi disattivarlo in qualsiasi momento. Quando è attivo, i dettagli anonimi sugli arresti anomali aiutano a migliorare Plozz. Indirizzi dei server, titoli dei contenuti, nomi dei profili e credenziali non sono mai inclusi. Attiva l'interruttore di test se questo è un dispositivo che usi per sviluppare o testare Plozz, così i suoi arresti anomali vengono registrati separatamente da quelli riscontrati dagli utenti normali."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ベータ期間中はデフォルトでオンになっていますが、いつでもオフにできます。オンにすると、匿名のクラッシュ情報がPlozzの改善に役立ちます。サーバーアドレス、メディアタイトル、プロファイル名、認証情報が含まれることはありません。この端末をPlozzのビルドやテストに使用している場合は、実際の視聴者が遭遇したクラッシュと分けて記録できるよう、テスト用スイッチをオンにしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "베타 기간에는 기본적으로 켜져 있으며, 언제든지 끌 수 있습니다. 켜져 있으면 익명의 충돌 정보가 Plozz 개선에 도움이 됩니다. 서버 주소, 미디어 제목, 프로필 이름, 자격 증명은 절대 포함되지 않습니다. 이 기기를 Plozz 빌드나 테스트에 사용한다면, 실제 사용자의 충돌과 별도로 기록되도록 테스트 스위치를 켜십시오."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dihidupkan secara lalai semasa beta; anda boleh mematikannya bila-bila masa. Apabila dihidupkan, butiran ranap tanpa nama akan membantu memperbaik Plozz. Alamat pelayan, tajuk media, nama profil dan kelayakan tidak pernah disertakan. Hidupkan suis pengujian jika ini adalah peranti yang anda gunakan untuk membina atau menguji Plozz, supaya ranapnya direkodkan berasingan daripada yang dialami penonton sebenar."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "På som standard i betaperioden; du kan slå det av når som helst. Når det er på, hjelper anonyme krasjdetaljer med å forbedre Plozz. Serveradresser, medietitler, profilnavn og påloggingsinformasjon sendes aldri med. Slå på testbryteren hvis dette er en enhet du bruker til å utvikle eller teste Plozz, slik at krasjene fra den blir registrert atskilt fra dem som vanlige seere opplever."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Standaard aan tijdens de bèta; je kunt het altijd uitzetten. Als het is ingeschakeld, helpen anonieme crashgegevens Plozz te verbeteren. Serveradressen, mediatitels, profielnamen en inloggegevens worden nooit meegestuurd. Zet de testschakelaar aan als dit een apparaat is dat je gebruikt om Plozz te ontwikkelen of te testen, zodat de crashes daarvan apart worden geregistreerd van die van echte kijkers."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Domyślnie włączone w wersji beta; możesz to wyłączyć w każdej chwili. Gdy jest włączone, anonimowe szczegóły awarii pomagają ulepszać Plozz. Adresy serwerów, tytuły materiałów, nazwy profili ani dane logowania nigdy nie są dołączane. Włącz przełącznik testowania, jeśli to urządzenie, na którym budujesz lub testujesz Plozz, aby jego awarie były rejestrowane oddzielnie od tych zgłaszanych przez zwykłych widzów."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Durante a versão beta, esta opção fica ativada por padrão; você pode desativá-la a qualquer momento. Quando ativada, os detalhes anônimos de falhas ajudam a melhorar o Plozz. Endereços de servidor, títulos de mídia, nomes de perfil e credenciais nunca são incluídos. Ative a chave de teste se este for um dispositivo que você usa para desenvolver ou testar o Plozz, para que as falhas dele sejam registradas separadamente das que os usuários comuns encontram."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Activat implicit în timpul versiunii beta; îl poți dezactiva oricând. Când este activat, detaliile anonime despre închiderile neașteptate ajută la îmbunătățirea Plozz. Adresele serverelor, titlurile fișierelor media, numele profilurilor și acreditările nu sunt niciodată incluse. Activează comutatorul de testare dacă acesta este un dispozitiv pe care îl folosești pentru a dezvolta sau testa Plozz, astfel încât închiderile lui neașteptate să fie înregistrate separat de cele întâmpinate de utilizatorii obișnuiți."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "По умолчанию включено в период бета-версии; ты можешь отключить это в любой момент. Когда включено, анонимные сведения о сбоях помогают улучшать Plozz. Адреса серверов, названия материалов, имена профилей и учётные данные никогда не включаются. Включи переключатель тестирования, если это устройство, на котором ты собираешь или тестируешь Plozz, чтобы его сбои фиксировались отдельно от тех, с которыми сталкиваются обычные зрители."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Počas bety je predvolene zapnuté; kedykoľvek to môžeš vypnúť. Keď je zapnuté, anonymné podrobnosti o pádoch pomáhajú vylepšovať Plozz. Adresy serverov, názvy médií, mená profilov ani prihlasovacie údaje sa nikdy neposielajú. Zapni prepínač testovania, ak je to zariadenie, na ktorom zostavuješ alebo testuješ Plozz, aby sa jeho pády evidovali oddelene od tých, na ktoré narazia bežní diváci."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Med beto je privzeto vklopljeno; kadar koli lahko izklopiš. Ko je vklopljeno, anonimne podrobnosti o zrušitvah pomagajo izboljšati Plozz. Naslovi strežnikov, naslovi vsebin, imena profilov in poverilnice niso nikoli vključeni. Vklopi stikalo za testiranje, če je to naprava, na kateri gradiš ali testiraš Plozz, tako da so njene zrušitve zabeležene ločeno od tistih, na katere naletijo pravi gledalci."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tokom bete je podrazumevano uključeno; možeš to isključiti u bilo kom trenutku. Kad je uključeno, anonimni detalji o padovima pomažu da se Plozz poboljša. Adrese servera, nazivi medija, imena profila ni akreditivi nikada nisu uključeni. Uključi prekidač za testiranje ako je ovo uređaj na kome praviš ili testiraš Plozz, kako bi njegovi padovi bili zavedeni odvojeno od onih na koje nailaze pravi gledaoci."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aktiverad som standard under betaperioden; du kan stänga av den när som helst. När den är på hjälper anonyma kraschdetaljer till att förbättra Plozz. Serveradresser, medietitlar, profilnamn och inloggningsuppgifter skickas aldrig med. Slå på testreglaget om det här är en enhet du använder för att utveckla eller testa Plozz, så att dess krascher registreras separat från dem som vanliga tittare stöter på."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เปิดใช้งานตามค่าเริ่มต้นในช่วงเบต้า คุณสามารถปิดได้ตลอดเวลา เมื่อเปิดใช้งาน รายละเอียดการขัดข้องแบบไม่ระบุตัวตนจะช่วยปรับปรุง Plozz ที่อยู่เซิร์ฟเวอร์ ชื่อสื่อ ชื่อโปรไฟล์ และข้อมูลรับรองจะไม่ถูกรวมไว้เลย เปิดสวิตช์ทดสอบหากอุปกรณ์นี้เป็นเครื่องที่คุณใช้สร้างหรือทดสอบ Plozz เพื่อให้การขัดข้องของเครื่องนี้ถูกบันทึกแยกจากที่ผู้ชมจริงพบเจอ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Beta süresince öntanımlı olarak açıktır; istediğin zaman kapatabilirsin. Etkinleştirildiğinde, anonim çökme ayrıntıları Plozz'u geliştirmeye yardımcı olur. Sunucu adresleri, medya adları, profil adları ve kimlik bilgileri asla gönderilmez. Bu, Plozz'u geliştirmek veya sınamak için kullandığın bir aygıtsa test anahtarını aç; böylece bu aygıtın çökmeleri gerçek izleyicilerin karşılaştıklarından ayrı olarak kaydedilir."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "За замовчуванням увімкнено під час бети; ти можеш вимкнути це в будь-який час. Коли ввімкнено, анонімні відомості про збої допомагають покращувати Plozz. Адреси серверів, назви матеріалів, імена профілів і облікові дані ніколи не включаються. Увімкни перемикач тестування, якщо це пристрій, на якому ти збираєш або тестуєш Plozz, щоб його збої фіксувалися окремо від тих, з якими стикаються звичайні глядачі."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Được bật theo mặc định trong thời gian beta; bạn có thể tắt bất cứ lúc nào. Khi được bật, thông tin sự cố ẩn danh sẽ giúp cải thiện Plozz. Địa chỉ máy chủ, tên nội dung, tên hồ sơ và thông tin đăng nhập không bao giờ được đưa vào. Bật công tắc thử nghiệm nếu đây là thiết bị bạn dùng để xây dựng hoặc thử nghiệm Plozz, để các sự cố của nó được ghi riêng với các sự cố mà người xem thực gặp phải."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "测试版期间默认开启，你可以随时关闭。开启后，匿名崩溃信息将帮助改进 Plozz。服务器地址、媒体标题、个人资料名称和凭证均不会包含在内。如果这是你用于构建或测试 Plozz 的设备，请打开测试开关，让此设备的崩溃与普通用户遇到的崩溃分开记录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "測試版期間預設為開啟，你可以隨時關閉。開啟後，匿名的當機資訊將協助改進 Plozz。伺服器位址、媒體標題、個人檔案名稱和憑證均不會包含在內。如果這是你用來製作或測試 Plozz 的裝置，請開啟測試開關，讓此裝置的當機與一般使用者遇到的當機分開記錄。"
+          }
+        }
+      }
+    },
     "On the device you want to set up, open Plozz and choose “Set up from another device.” It’ll appear here." : {
       "localizations" : {
         "ar" : {
@@ -316630,6 +316850,226 @@
         }
       }
     },
+    "This Apple TV Is Used for Testing Plozz" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "يُستخدم Apple TV هذا لاختبار Plozz"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Този Apple TV се използва за тестване на Plozz"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aquesta Apple TV s'utilitza per provar Plozz"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tento Apple TV se používá k testování Plozz"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dette Apple TV bruges til at teste Plozz"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dieses Apple TV dient zum Testen von Plozz"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αυτό το Apple TV χρησιμοποιείται για δοκιμή του Plozz"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Este Apple TV se usa para probar Plozz"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "این Apple TV برای آزمایش Plozz استفاده می‌شود"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tätä Apple TV:tä käytetään Plozzin testaamiseen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cette Apple TV sert à tester Plozz"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apple TV זה משמש לבדיקת Plozz"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "यह Apple TV Plozz के परीक्षण के लिए है"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovaj Apple TV koristi se za testiranje Plozz"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ezt az Apple TV-t a Plozz tesztelésére használom"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apple TV ini digunakan untuk menguji Plozz"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Questa Apple TV è usata per testare Plozz"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "このApple TVをPlozzのテストに使用"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "이 Apple TV를 Plozz 테스트에 사용"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apple TV ini digunakan untuk menguji Plozz"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denne Apple TV-en brukes til å teste Plozz"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Deze Apple TV wordt gebruikt om Plozz te testen"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ten Apple TV jest używany do testowania Plozz"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Esta Apple TV é usada para testar o Plozz"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Acest Apple TV este folosit pentru testarea Plozz"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Этот Apple TV используется для тестирования Plozz"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tento Apple TV sa používa na testovanie Plozz"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ta Apple TV se uporablja za testiranje Plozz"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovaj Apple TV se koristi za testiranje Plozz"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denna Apple TV används för att testa Plozz"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ใช้ Apple TV เครื่องนี้เพื่อทดสอบ Plozz"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bu Apple TV, Plozz'u sınamak için kullanılıyor"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Цей Apple TV використовується для тестування Plozz"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dùng Apple TV này để thử nghiệm Plozz"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "此 Apple TV 用于测试 Plozz"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "此 Apple TV 用於測試 Plozz"
+          }
+        }
+      }
+    },
     "This NFS export connects without a sign-in — anyone on this Apple TV can browse it. Choose what shows on your Home under Profile › Your Libraries." : {
       "localizations" : {
         "ar" : {
@@ -321754,6 +322194,226 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "This iPhone Is Used for Testing Plozz" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "يُستخدم iPhone هذا لاختبار Plozz"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Този iPhone се използва за тестване на Plozz"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aquest iPhone s'utilitza per provar Plozz"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tento iPhone se používá k testování Plozz"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denne iPhone bruges til at teste Plozz"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dieses iPhone dient zum Testen von Plozz"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αυτό το iPhone χρησιμοποιείται για δοκιμή του Plozz"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Este iPhone se usa para probar Plozz"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "این iPhone برای آزمایش Plozz استفاده می‌شود"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tätä iPhonea käytetään Plozzin testaamiseen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cet iPhone sert à tester Plozz"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iPhone זה משמש לבדיקת Plozz"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "यह iPhone Plozz के परीक्षण के लिए है"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovaj iPhone koristi se za testiranje Plozz"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ezt az iPhone-t a Plozz tesztelésére használom"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iPhone ini digunakan untuk menguji Plozz"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Questo iPhone è usato per testare Plozz"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "このiPhoneをPlozzのテストに使用"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "이 iPhone을 Plozz 테스트에 사용"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iPhone ini digunakan untuk menguji Plozz"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denne iPhonen brukes til å teste Plozz"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Deze iPhone wordt gebruikt om Plozz te testen"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ten iPhone jest używany do testowania Plozz"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Este iPhone é usado para testar o Plozz"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Acest iPhone este folosit pentru testarea Plozz"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Этот iPhone используется для тестирования Plozz"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tento iPhone sa používa na testovanie Plozz"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ta iPhone se uporablja za testiranje Plozz"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovaj iPhone se koristi za testiranje Plozz"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denna iPhone används för att testa Plozz"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ใช้ iPhone เครื่องนี้เพื่อทดสอบ Plozz"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bu iPhone, Plozz'u sınamak için kullanılıyor"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Цей iPhone використовується для тестування Plozz"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dùng iPhone này để thử nghiệm Plozz"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "此 iPhone 用于测试 Plozz"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "此 iPhone 用於測試 Plozz"
           }
         }
       }
@@ -355707,6 +356367,226 @@
         }
       }
     },
+    "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. On by default during the beta; you can turn it off any time. Turn on the testing switch if this Apple TV is one you use to build or test Plozz, so its crashes are filed apart from the ones real viewers hit. Applies to this Apple TV." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "عند التفعيل، يُرسل Plozz تقريراً مجهول الهوية إذا تعطّل أو تجمّد، ليتسنّى إصلاح الأخطاء بسرعة أكبر. لا تتضمن التقارير سوى بيانات العطل نفسه إضافةً إلى إصدار التطبيق وإصدار tvOS وطراز الجهاز — ولا تتضمن أبداً خوادمك أو بيانات تسجيل الدخول أو رموز المصادقة أو ما كنت تشاهده. مُفعَّل بشكل افتراضي خلال الإصدار التجريبي؛ يمكنك إيقافه في أي وقت. فعّل مفتاح الاختبار إذا كنت تستخدم Apple TV هذا لبناء Plozz أو اختباره، حتى تُسجَّل أعطاله بشكل منفصل عن الأعطال التي يواجهها المشاهدون العاديون. يسري على Apple TV هذا."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Когато е включено, Plozz изпраща анонимен отчет, ако се срине или замръзне, за да могат грешките да се поправят по-бързо. Отчетите съдържат само самия срив и към него версията на приложението, версията на tvOS и модела на устройството — никога твоите сървъри, данни за вход, токени или това, което си гледал. По подразбиране е включено по време на бетата; можеш да го изключиш по всяко време. Включи превключвателя за тестване, ако този Apple TV е устройство, на което разработваш или тестваш Plozz, за да се записват сривовете му отделно от онези, на които се натъкват истинските зрители. Отнася се за този Apple TV."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Quan està activat, Plozz envia un informe anònim si falla o es queda bloquejat, perquè els errors es puguin corregir més ràpid. Els informes inclouen només la fallada en si, més la versió de l'app, la versió de tvOS i el model del dispositiu — mai els teus servidors, inicis de sessió, tokens ni el que estaves mirant. Activat per defecte durant la beta; el pots desactivar en qualsevol moment. Activa l'interruptor de proves si aquesta Apple TV és una que fas servir per desenvolupar o provar Plozz, perquè les seves fallades es registrin per separat de les que troben els espectadors reals. S'aplica a aquesta Apple TV."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Když je zapnuto, Plozz odešle anonymní hlášení, pokud spadne nebo zamrzne, aby se chyby daly opravit rychleji. Hlášení obsahuje jen samotný pád a k tomu verzi aplikace, verzi tvOS a model zařízení — nikdy tvé servery, přihlašovací údaje, tokeny ani to, co jsi sledoval. Během bety je ve výchozím nastavení zapnuto; kdykoli to můžeš vypnout. Zapni přepínač testování, pokud tento Apple TV používáš k sestavování nebo testování Plozz, aby se jeho pády evidovaly odděleně od těch, na které narazí běžní diváci. Platí pro tento Apple TV."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Når det er slået til, sender Plozz en anonym rapport, hvis appen går ned eller fryser, så fejl kan rettes hurtigere. Rapporter indeholder kun selve nedbruddet plus din app-version, tvOS-version og enhedsmodel — aldrig dine servere, loginoplysninger, tokens eller det, du var i gang med at se. Slået til som standard i betaperioden; du kan slå det fra når som helst. Slå testkontakten til, hvis dette Apple TV er et, du bruger til at udvikle eller teste Plozz, så dets nedbrud registreres adskilt fra dem, som almindelige seere støder på. Gælder for dette Apple TV."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wenn aktiviert, sendet Plozz einen anonymen Bericht, falls die App abstürzt oder einfriert, damit Fehler schneller behoben werden können. Berichte enthalten nur den Absturz selbst sowie deine App-Version, tvOS-Version und dein Gerätemodell – niemals deine Server, Anmeldungen, Tokens oder das, was du gerade angesehen hast. Während der Beta standardmäßig aktiviert; du kannst die Funktion jederzeit ausschalten. Aktiviere den Testschalter, wenn dieses Apple TV eines ist, mit dem du Plozz entwickelst oder testest, damit dessen Abstürze getrennt von denen normaler Zuschauer erfasst werden. Gilt für dieses Apple TV."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Όταν είναι ενεργό, το Plozz στέλνει μια ανώνυμη αναφορά αν καταρρεύσει ή κολλήσει, ώστε τα σφάλματα να διορθώνονται πιο γρήγορα. Οι αναφορές περιλαμβάνουν μόνο την ίδια την κατάρρευση καθώς και την έκδοση της εφαρμογής, την έκδοση tvOS και το μοντέλο της συσκευής — ποτέ τους διακομιστές σου, τα στοιχεία σύνδεσης, τα διακριτικά ή αυτό που παρακολουθούσες. Ενεργοποιημένο από προεπιλογή κατά τη διάρκεια της beta· μπορείς να το απενεργοποιήσεις όποτε θέλεις. Άνοιξε τον διακόπτη δοκιμών αν αυτό το Apple TV το χρησιμοποιείς για την ανάπτυξη ή τη δοκιμή του Plozz, ώστε οι καταρρεύσεις του να καταγράφονται ξεχωριστά από εκείνες που αντιμετωπίζουν οι πραγματικοί θεατές. Ισχύει για αυτό το Apple TV."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cuando está activado, Plozz envía un informe anónimo si se cierra inesperadamente o se queda bloqueado, para que los errores puedan corregirse antes. Los informes solo incluyen el fallo en sí, además de la versión de la app, la versión de tvOS y el modelo del dispositivo — nunca tus servidores, tus inicios de sesión, tus tokens ni lo que estabas viendo. Activado por defecto durante la beta; puedes desactivarlo en cualquier momento. Activa el interruptor de pruebas si este Apple TV es uno que usas para desarrollar o probar Plozz, para que sus fallos se registren aparte de los que sufren los espectadores reales. Se aplica a este Apple TV."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "وقتی روشن باشد، Plozz در صورت خرابی یا هنگ کردن یک گزارش ناشناس می‌فرستد تا اشکالات سریع‌تر برطرف شوند. گزارش‌ها فقط شامل خود خرابی به همراه نسخهٔ برنامه، نسخهٔ tvOS و مدل دستگاه هستند — و هرگز شامل سرورهای شما، اطلاعات ورود شما، توکن‌های شما یا آنچه در حال تماشای آن بودید نمی‌شوند. به‌طور پیش‌فرض در طول دورهٔ بتا روشن است؛ می‌توانید هر زمان که خواستید آن را خاموش کنید. اگر این Apple TV یکی از دستگاه‌هایی است که برای ساخت یا آزمایش Plozz از آن استفاده می‌کنید، کلید آزمایش را روشن کنید تا خرابی‌های آن جدا از خرابی‌هایی که بینندگان واقعی با آن‌ها روبه‌رو می‌شوند ثبت شود. این تنظیم فقط برای این Apple TV است."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kun käytössä, Plozz lähettää anonyymin raportin, jos se kaatuu tai jumiutuu, jotta viat voidaan korjata nopeammin. Raportit sisältävät vain itse kaatumisen sekä sovelluksen version, tvOS-version ja laitemallin — eivät koskaan palvelimiasi, kirjautumistietojasi, tunnuksiasi tai sitä, mitä olit katsomassa. Käytössä oletusarvoisesti beta-vaiheen ajan; voit poistaa sen käytöstä milloin tahansa. Ota testauskytkin käyttöön, jos käytät tätä Apple TV:tä Plozzin kehittämiseen tai testaamiseen, niin sen kaatumiset kirjataan erilleen niistä, joita todelliset katsojat kohtaavat. Koskee tätä Apple TV:tä."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lorsqu'il est activé, Plozz envoie un rapport anonyme s'il plante ou se fige, afin que les bugs puissent être corrigés plus rapidement. Les rapports contiennent uniquement le plantage lui-même, ainsi que la version de l'app, la version de tvOS et le modèle de l'appareil — jamais vos serveurs, vos identifiants, vos jetons ni ce que vous regardiez. Activé par défaut pendant la bêta ; vous pouvez le désactiver à tout moment. Activez le commutateur de test si cette Apple TV est un appareil que vous utilisez pour développer ou tester Plozz, afin que ses plantages soient enregistrés séparément de ceux rencontrés par les utilisateurs habituels. S'applique à cette Apple TV."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "כשמופעל, Plozz שולח דוח אנונימי אם הוא קורס או נתקע, כדי שאפשר יהיה לתקן באגים מהר יותר. הדוחות כוללים רק את הקריסה עצמה יחד עם גרסת האפליקציה, גרסת tvOS ודגם המכשיר — לעולם לא את השרתים שלך, פרטי ההתחברות, אסימונים או מה שצפית בו. מופעל כברירת מחדל בזמן הבטא; אפשר לכבות אותו בכל עת. הפעל את מתג הבדיקות אם אתה משתמש ב-Apple TV הזה כדי לפתח או לבדוק את Plozz, כך שהקריסות שלו יירשמו בנפרד מאלה שצופים אמיתיים נתקלים בהן. חל על Apple TV זה."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "चालू होने पर, यदि Plozz क्रैश या फ़्रीज़ हो जाए तो वह एक अनाम रिपोर्ट भेजता है, ताकि बग तेज़ी से ठीक हो सकें। रिपोर्ट में केवल क्रैश ही शामिल होता है, साथ ही आपका ऐप संस्करण, tvOS संस्करण और डिवाइस मॉडल — आपके सर्वर, लॉगिन, टोकन या आप जो देख रहे थे, वह कभी शामिल नहीं होता। बीटा के दौरान डिफ़ॉल्ट रूप से चालू है; आप इसे कभी भी बंद कर सकते हैं। यदि यह Apple TV वह है जिसका उपयोग आप Plozz बनाने या परीक्षण करने के लिए करते हैं, तो परीक्षण स्विच चालू करें ताकि इसके क्रैश असली दर्शकों के क्रैश से अलग दर्ज हों। यह इस Apple TV पर लागू होता है।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kad je uključeno, Plozz šalje anonimno izvješće ako se sruši ili zamrzne, kako bi se pogreške mogle brže popraviti. Izvješće sadrži samo rušenje te verziju aplikacije, verziju tvOS i model uređaja — nikada tvoje poslužitelje, prijave, tokene ni ono što si gledao. Tijekom bete zadano je uključeno; možeš to isključiti u bilo kojem trenutku. Uključi prekidač za testiranje ako je ovaj Apple TV uređaj koji koristiš za gradnju ili testiranje Plozz, kako bi njegova rušenja bila zabilježena odvojeno od onih na koja nailaze pravi gledatelji. Odnosi se na ovaj Apple TV."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bekapcsolt állapotban a Plozz névtelen jelentést küld, ha összeomlik vagy lefagy, hogy a hibák gyorsabban javíthatók legyenek. A jelentések csak magát az összeomlást tartalmazzák az alkalmazás verziójával, a tvOS verziójával és az eszközmodellel együtt — soha nem tartalmazzák a kiszolgálóidat, bejelentkezési adataidat, tokenjeidet vagy azt, amit néztél. A béta időszakában alapértelmezés szerint be van kapcsolva; bármikor kikapcsolhatod. Kapcsold be a tesztkapcsolót, ha ezt az Apple TV-t a Plozz fejlesztésére vagy tesztelésére használod, hogy annak összeomlásai a valódi nézők által tapasztaltaktól elkülönítve legyenek rögzítve. Erre az Apple TV-re vonatkozik."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Saat aktif, Plozz akan mengirim laporan anonim jika tertutup tiba-tiba atau berhenti merespons, sehingga bug dapat diperbaiki lebih cepat. Laporan hanya mencakup penutupan tak terduga itu sendiri beserta versi aplikasi, versi tvOS, dan model perangkat Anda — tidak pernah menyertakan server, info login, token, atau apa yang sedang Anda tonton. Aktif secara default selama beta; Anda dapat mematikannya kapan saja. Aktifkan sakelar pengujian jika Apple TV ini adalah perangkat yang Anda gunakan untuk membangun atau menguji Plozz, agar penutupan tak terduganya dicatat terpisah dari yang dialami penonton biasa. Berlaku untuk Apple TV ini."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Quando è attivo, Plozz invia un rapporto anonimo se si chiude inaspettatamente o smette di rispondere, così i bug possono essere corretti più rapidamente. I rapporti includono solo l'arresto anomalo e la versione dell'app, la versione di tvOS e il modello del dispositivo — mai i tuoi server, i tuoi accessi, i tuoi token o ciò che stavi guardando. Attivo per impostazione predefinita durante la beta; puoi disattivarlo in qualsiasi momento. Attiva l'interruttore di test se questa Apple TV è un dispositivo che usi per sviluppare o testare Plozz, così i suoi arresti anomali vengono registrati separatamente da quelli riscontrati dagli utenti normali. Si applica a questa Apple TV."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "オンにすると、Plozzがクラッシュしたり応答しなくなったりしたときに匿名のレポートが送信され、不具合をより早く修正できるようになります。レポートに含まれるのはクラッシュ自体と、Appのバージョン、tvOSのバージョン、デバイスモデルのみで、サーバー、ログイン情報、トークン、視聴中のコンテンツが含まれることはありません。ベータ期間中はデフォルトでオンになっていますが、いつでもオフにできます。このApple TVをPlozzのビルドやテストに使用している場合は、実際の視聴者が遭遇したクラッシュと分けて記録できるよう、テスト用スイッチをオンにしてください。この設定はこのApple TVにのみ適用されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "켜져 있으면 Plozz가 충돌하거나 멈추었을 때 익명 보고서를 전송하여 버그를 더 빨리 수정할 수 있도록 합니다. 보고서에는 충돌 자체와 App 버전, tvOS 버전, 기기 모델만 포함되며, 서버, 로그인 정보, 토큰, 시청 중이던 콘텐츠는 절대 포함되지 않습니다. 베타 기간에는 기본적으로 켜져 있으며, 언제든지 끌 수 있습니다. 이 Apple TV를 Plozz 빌드나 테스트에 사용한다면, 실제 사용자의 충돌과 별도로 기록되도록 테스트 스위치를 켜십시오. 이 설정은 이 Apple TV에만 적용됩니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apabila dihidupkan, Plozz akan menghantar laporan tanpa nama jika ia ranap atau tidak bertindak balas, supaya pepijat dapat dibaiki dengan lebih cepat. Laporan hanya merangkumi ranap itu sendiri berserta versi apl, versi tvOS dan model peranti anda — tidak sekali-kali termasuk pelayan, log masuk, token atau apa yang anda sedang tonton. Dihidupkan secara lalai semasa beta; anda boleh mematikannya bila-bila masa. Hidupkan suis pengujian jika anda menggunakan Apple TV ini untuk membina atau menguji Plozz, supaya ranapnya direkodkan berasingan daripada yang dialami penonton sebenar. Terpakai untuk Apple TV ini."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Når det er på, sender Plozz en anonym rapport hvis appen krasjer eller fryser, slik at feil kan rettes raskere. Rapportene inneholder bare selve krasjet pluss appversjon, tvOS-versjon og enhetsmodell — aldri serverne dine, påloggingsinformasjonen din, tokenene dine eller hva du så på. På som standard i betaperioden; du kan slå det av når som helst. Slå på testbryteren hvis denne Apple TV-en er en du bruker til å utvikle eller teste Plozz, slik at krasjene fra den blir registrert atskilt fra dem som vanlige seere opplever. Gjelder denne Apple TV-en."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Als dit aanstaat, stuurt Plozz een anoniem rapport wanneer de app crasht of vastloopt, zodat bugs sneller kunnen worden verholpen. Rapporten bevatten alleen de crash zelf plus je app-versie, tvOS-versie en apparaatmodel — nooit je servers, aanmeldingen, tokens of wat je aan het kijken was. Standaard aan tijdens de bèta; je kunt het altijd uitzetten. Zet de testschakelaar aan als deze Apple TV er een is die je gebruikt om Plozz te ontwikkelen of te testen, zodat de crashes daarvan apart worden geregistreerd van die van echte kijkers. Geldt voor deze Apple TV."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gdy opcja jest włączona, Plozz wysyła anonimowy raport w razie awarii lub zawieszenia, dzięki czemu błędy można naprawić szybciej. Raporty zawierają wyłącznie samą awarię oraz wersję aplikacji, wersję tvOS i model urządzenia — nigdy Twoich serwerów, danych logowania, tokenów ani tego, co oglądałeś. Domyślnie włączone w wersji beta; możesz to wyłączyć w każdej chwili. Włącz przełącznik testowania, jeśli tego Apple TV używasz do budowania lub testowania Plozz, aby jego awarie były rejestrowane oddzielnie od tych zgłaszanych przez zwykłych widzów. Dotyczy tego Apple TV."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Quando esta opção está ativada, o Plozz envia um relatório anônimo se fechar inesperadamente ou parar de responder, para que os bugs possam ser corrigidos mais rápido. Os relatórios incluem apenas a falha em si, mais a versão do app, a versão do tvOS e o modelo do dispositivo — nunca seus servidores, logins, tokens ou o que você estava assistindo. Durante a versão beta, esta opção fica ativada por padrão; você pode desativá-la a qualquer momento. Ative a chave de teste se você usa esta Apple TV para desenvolver ou testar o Plozz, para que as falhas dela sejam registradas separadamente das que os usuários comuns encontram. Aplica-se a esta Apple TV."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Când este activat, Plozz trimite un raport anonim dacă se închide neașteptat sau nu mai răspunde, astfel încât erorile să poată fi remediate mai repede. Rapoartele includ doar închiderea neașteptată, plus versiunea aplicației, versiunea tvOS și modelul dispozitivului — niciodată serverele tale, autentificările, jetoanele sau ce vizionai. Activat implicit în timpul versiunii beta; îl poți dezactiva oricând. Activează comutatorul de testare dacă folosești acest Apple TV pentru a dezvolta sau testa Plozz, astfel încât închiderile lui neașteptate să fie înregistrate separat de cele întâmpinate de utilizatorii obișnuiți. Se aplică acestui Apple TV."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Когда переключатель включён, Plozz отправляет анонимный отчёт при сбое или зависании, чтобы ошибки можно было исправить быстрее. Отчёты содержат только сам сбой, а также версию приложения, версию tvOS и модель устройства — никогда твои серверы, данные входа, токены или то, что ты смотрел. По умолчанию включено в период бета-версии; ты можешь отключить это в любой момент. Включи переключатель тестирования, если этот Apple TV — тот, на котором ты собираешь или тестируешь Plozz, чтобы его сбои фиксировались отдельно от тех, с которыми сталкиваются обычные зрители. Относится к этому Apple TV."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Keď je zapnuté, Plozz odošle anonymné hlásenie, ak spadne alebo zamrzne, aby sa chyby dali opraviť rýchlejšie. Hlásenia obsahujú len samotný pád a k tomu verziu aplikácie, verziu tvOS a model zariadenia — nikdy tvoje servery, prihlasovacie údaje, tokeny ani to, čo si sledoval. Počas bety je predvolene zapnuté; kedykoľvek to môžeš vypnúť. Zapni prepínač testovania, ak tento Apple TV používaš na zostavovanie alebo testovanie Plozz, aby sa jeho pády evidovali oddelene od tých, na ktoré narazia bežní diváci. Vzťahuje sa na tento Apple TV."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ko je vklopljeno, Plozz pošlje anonimno poročilo, če se zruši ali zamrzne, tako da je mogoče napake hitreje odpraviti. Poročila vključujejo le samo zrušitev ter različico aplikacije, različico tvOS in model naprave — nikoli tvojih strežnikov, prijav, žetonov ali tega, kar si gledal. Med beto je privzeto vklopljeno; kadar koli lahko izklopiš. Vklopi stikalo za testiranje, če ta Apple TV uporabljaš za gradnjo ali testiranje Plozz, tako da so njegove zrušitve zabeležene ločeno od tistih, na katere naletijo pravi gledalci. Velja za ta Apple TV."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kad je uključeno, Plozz šalje anonimni izveštaj ako se sruši ili zamrzne, kako bi se greške brže rešile. Izveštaji sadrže samo sam pad i uz to verziju aplikacije, verziju tvOS i model uređaja — nikada tvoje servere, prijave, tokene ni ono što si gledao. Tokom bete je podrazumevano uključeno; možeš to isključiti u bilo kom trenutku. Uključi prekidač za testiranje ako je ovaj Apple TV onaj koji koristiš za pravljenje ili testiranje Plozz, kako bi njegovi padovi bili zavedeni odvojeno od onih na koje nailaze pravi gledaoci. Odnosi se na ovaj Apple TV."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "När den är på skickar Plozz en anonym rapport om appen kraschar eller fryser, så att buggar kan åtgärdas snabbare. Rapporterna innehåller bara själva kraschen samt appversion, tvOS-version och enhetsmodell — aldrig dina servrar, inloggningsuppgifter, token eller det du tittade på. Aktiverad som standard under betaperioden; du kan stänga av den när som helst. Slå på testreglaget om denna Apple TV är en du använder för att utveckla eller testa Plozz, så att dess krascher registreras separat från dem som vanliga tittare stöter på. Gäller denna Apple TV."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เมื่อเปิดใช้งาน Plozz จะส่งรายงานแบบไม่ระบุตัวตนหากแอปขัดข้องหรือค้าง เพื่อให้แก้ไขข้อผิดพลาดได้เร็วขึ้น รายงานจะรวมเฉพาะการขัดข้องเอง พร้อมกับเวอร์ชั่นแอป เวอร์ชั่น tvOS และรุ่นอุปกรณ์ของคุณ — ไม่รวมเซิร์ฟเวอร์ ข้อมูลเข้าสู่ระบบ โทเค็น หรือสิ่งที่คุณกำลังรับชม เปิดใช้งานตามค่าเริ่มต้นในช่วงเบต้า คุณสามารถปิดได้ตลอดเวลา เปิดสวิตช์ทดสอบหาก Apple TV เครื่องนี้เป็นเครื่องที่คุณใช้สร้างหรือทดสอบ Plozz เพื่อให้การขัดข้องของเครื่องนี้ถูกบันทึกแยกจากที่ผู้ชมจริงพบเจอ ใช้กับ Apple TV เครื่องนี้เท่านั้น"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Açıkken Plozz, çökmesi ya da donması durumunda hataların daha hızlı düzeltilebilmesi için anonim bir rapor gönderir. Raporlar yalnızca çökmenin kendisini ve uygulama sürümünü, tvOS sürümünü ve aygıt modelini içerir — sunucularını, oturum bilgilerini, jetonlarını ya da izlediğin şeyi asla içermez. Beta süresince öntanımlı olarak açıktır; istediğin zaman kapatabilirsin. Bu Apple TV, Plozz'u geliştirmek veya sınamak için kullandığın bir aygıtsa test anahtarını aç; böylece bu aygıtın çökmeleri gerçek izleyicilerin karşılaştıklarından ayrı olarak kaydedilir. Bu Apple TV için geçerlidir."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Коли ввімкнено, Plozz надсилає анонімний звіт у разі збою або зависання, щоб помилки можна було виправити швидше. Звіти містять лише сам збій, а також версію застосунку, версію tvOS і модель пристрою — ніколи твої сервери, дані входу, токени чи те, що ти дивився. За замовчуванням увімкнено під час бети; ти можеш вимкнути це в будь-який час. Увімкни перемикач тестування, якщо цей Apple TV — той, на якому ти збираєш або тестуєш Plozz, щоб його збої фіксувалися окремо від тих, з якими стикаються звичайні глядачі. Стосується цього Apple TV."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Khi bật, Plozz sẽ gửi báo cáo ẩn danh nếu ứng dụng gặp sự cố hoặc bị treo, giúp sửa lỗi nhanh hơn. Báo cáo chỉ bao gồm sự cố cùng với phiên bản ứng dụng, phiên bản tvOS và mẫu thiết bị của bạn — không bao gồm máy chủ, thông tin đăng nhập, mã thông báo hay nội dung bạn đang xem. Được bật theo mặc định trong thời gian beta; bạn có thể tắt bất cứ lúc nào. Bật công tắc thử nghiệm nếu Apple TV này là thiết bị bạn dùng để xây dựng hoặc thử nghiệm Plozz, để các sự cố của nó được ghi riêng với các sự cố mà người xem thực gặp phải. Áp dụng cho Apple TV này."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "开启后，Plozz 在崩溃或无响应时会发送匿名报告，以便更快修复错误。报告仅包含崩溃本身以及你的 App 版本、tvOS 版本和设备型号——绝不包含你的服务器、登录信息、令牌或正在观看的内容。测试版期间默认开启，你可以随时关闭。如果此 Apple TV 是你用于构建或测试 Plozz 的设备，请打开测试开关，让此设备的崩溃与普通用户遇到的崩溃分开记录。此设置仅适用于此 Apple TV。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "開啟後，Plozz 在當機或無回應時會傳送匿名報告，以便更快修正錯誤。報告僅包含當機本身以及你的 App 版本、tvOS 版本和裝置型號——絕不包含你的伺服器、登入資訊、權杖或正在觀看的內容。測試版期間預設為開啟，你可以隨時關閉。如果此 Apple TV 是你用來製作或測試 Plozz 的裝置，請開啟測試開關，讓此裝置的當機與一般使用者遇到的當機分開記錄。此設定僅適用於此 Apple TV。"
+          }
+        }
+      }
+    },
     "When you return to a partially-watched title, playback starts a little before where you left off. Set anywhere from 0 to 60 seconds." : {
       "localizations" : {
         "ar" : {
@@ -383592,6 +384472,234 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "移除下載"
+          }
+        }
+      }
+    },
+    "mediaAction.removeFromContinueWatching" : {
+      "comment" : "Context-menu action taking a title off the Continue Watching row without marking it watched.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إزالة من متابعة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Премахни от „Продължи гледането“"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Treu de Continua veient"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odebrat z Pokračovat ve sledování"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fjern fra Fortsæt med at se"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aus Weiterschauen entfernen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αφαίρεση από τη Συνέχεια παρακολούθησης"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove from Continue Watching"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Quitar de Seguir viendo"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "حذف از ادامه تماشای"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poista kohdasta Jatka katselua"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retirer de Continuer à regarder"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הסר מהמשך לצפות"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "देखना जारी रखें से हटाएँ"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ukloni iz Nastavi gledati"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Eltávolítás a Megtekintés folytatása közül"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hapus dari Lanjutkan Menonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rimuovi da Continua a guardare"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "「続きを見る」から削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "계속 시청에서 제거"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alih keluar daripada Terus Menonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fjern fra Fortsett å se"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verwijderen uit Verder kijken"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usuń z Kontynuuj oglądanie"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Remover de Continuar assistindo"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Elimină din Continuă vizionarea"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Убрать из «Продолжить просмотр»"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odstrániť z Pokračovať v pozeraní"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odstrani iz Nadaljuj z ogledom"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ukloni iz Nastavi gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ta bort från Fortsätt titta"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "นำออกจากดูต่อ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzlemeye devam et’ten kaldır"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Прибрати з «Продовжити перегляд»"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Xóa khỏi Tiếp tục xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "从“继续观看”中移除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "從「繼續觀看」中移除"
           }
         }
       }

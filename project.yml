@@ -34,6 +34,14 @@ settings:
     # when set (mirrors the CURRENT_PROJECT_VERSION bake). Kept OUT of git — the
     # DSN is supplied via the untracked .env.fastlane / environment, never here.
     PLOZZ_SENTRY_DSN: ""
+    # Release channel this binary was built for ("testflight" / "production").
+    # Empty for local/device builds, which fall back to runtime detection.
+    # tools/generate-project.sh bakes the PLOZZ_RELEASE_CHANNEL env var here; the
+    # fastlane `beta` and `release` lanes set it. This exists because the runtime
+    # fallback sniffs `Bundle.main.appStoreReceiptURL`, which on tvOS can be nil
+    # (a receipt is only written after a purchase) — so a TestFlight build could
+    # read as production and silently default crash reporting OFF.
+    PLOZZ_RELEASE_CHANNEL: ""
 
 # Local Swift package providing all modular feature/code libraries.
 packages:
@@ -79,6 +87,9 @@ targets:
         # from the PLOZZ_SENTRY_DSN build setting (empty unless baked in), so
         # builds without a DSN never send anything.
         PlozzSentryDSN: "$(PLOZZ_SENTRY_DSN)"
+        # Build-time release channel, authoritative over receipt sniffing. Empty
+        # for local builds, which fall back to runtime detection.
+        PlozzReleaseChannel: "$(PLOZZ_RELEASE_CHANNEL)"
         # Background audio keeps music playing while the user browses other
         # screens or the tvOS screensaver starts. Required for the music MVP's
         # background/Now-Playing behaviour (AVAudioSession .playback).
@@ -295,6 +306,7 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
         PlozzSentryDSN: "$(PLOZZ_SENTRY_DSN)"
+        PlozzReleaseChannel: "$(PLOZZ_RELEASE_CHANNEL)"
         UILaunchScreen: {}
         UIRequiresFullScreen: false
         # remote-notification lets CloudKit (CKSyncEngine) wake the app to pull

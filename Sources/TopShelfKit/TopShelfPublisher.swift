@@ -24,6 +24,18 @@ public enum TopShelfPublisher {
     ///   titles here and stores finished text; the extension only renders.
     ///   Eager resolution is correct in this one case precisely because the
     ///   value crosses a process boundary.
+    /// How many titles each Top Shelf section carries.
+    ///
+    /// The shelf is a place to *launch* from, not to browse in. What gets clicked
+    /// there is something newly added or something obviously in progress; anything
+    /// requiring a search through a list is a reason to open the app instead. Three
+    /// per section is what Plex settles on, and it holds up: a scrollable shelf
+    /// nobody scrolls is just work done for an audience of none.
+    ///
+    /// Deliberately independent of the on-screen row's limit, which is sixty. That
+    /// row is for browsing and should hold everything; this one should not.
+    private static let maxItemsPerSection = 3
+
     public static func publish(
         continueWatching: [MediaItem],
         latest: [MediaItem],
@@ -31,14 +43,14 @@ public enum TopShelfPublisher {
     ) async {
         var sections: [TopShelfSnapshot.Section] = []
 
-        let resume = await items(from: continueWatching, compositeProgress: true)
+        let resume = await items(from: Array(continueWatching.prefix(maxItemsPerSection)), compositeProgress: true)
         if !resume.isEmpty {
             sections.append(.init(id: "continue",
                                   title: resolved("Continue Watching", locale),
                                   items: resume))
         }
 
-        let recent = await items(from: latest)
+        let recent = await items(from: Array(latest.prefix(maxItemsPerSection)))
         if !recent.isEmpty {
             sections.append(.init(id: "latest",
                                   title: resolved("Recently Added", locale),
@@ -60,6 +72,29 @@ public enum TopShelfPublisher {
         TopShelfStore.pruneArtwork(keeping: keptArtwork)
 
         TopShelfStore.save(TopShelfSnapshot(sections: sections))
+    }
+
+    /// What a half-watched card says beside its progress bar: which episode, and
+    /// how much is left — `S1 · E1 · 21m left`.
+    ///
+    /// A shelf of part-watched titles otherwise shows a name and a picture and
+    /// leaves the viewer to remember the rest. Both halves come straight from the
+    /// same values the in-app card uses, so the two cannot drift into describing
+    /// the same title differently.
+    ///
+    /// Either half may be missing — a movie has no episode numbering, and a title
+    /// whose runtime the server never reported has no remaining time — so this
+    /// joins whatever is available and returns `nil` rather than an empty chip.
+    static func resumeChipText(for item: MediaItem) -> String? {  // l10n:content — composed from server metadata + a formatted duration
+        var parts: [String] = []
+        if item.kind == .episode, let episodeLabel = item.subtitle {
+            parts.append(episodeLabel)
+        }
+        if let remaining = item.resumeRemainingText {
+            parts.append(remaining)
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " · ")
     }
 
     /// Maps domain items onto snapshot items. When `compositeProgress` is set, a
@@ -90,7 +125,10 @@ public enum TopShelfPublisher {
             if let poster = posterURL {
                 if let progress,
                    let composited = await TopShelfPosterComposer.compositedPosterURL(
-                       id: artworkID, posterURL: poster, progress: progress
+                       id: artworkID,
+                       posterURL: poster,
+                       progress: progress,
+                       chip: resumeChipText(for: item)
                    ) {
                     imageURL = composited
                 } else {

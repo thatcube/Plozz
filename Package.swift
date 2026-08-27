@@ -767,6 +767,10 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI"]
         ),
         .testTarget(
+            name: "CrashReportingTests",
+            dependencies: ["CrashReporting"]
+        ),
+        .testTarget(
             name: "FeatureWatchlistCoreTests",
             dependencies: ["FeatureWatchlistCore", "CoreModels"]
         ),

@@ -8,8 +8,8 @@ import FeatureProfiles
 /// leading edge with the selected destination filling the rest of the screen.
 ///
 /// Two layout rules make this feel right on a TV:
-/// - the content is inset by the **collapsed** rail width and the rail *overlays*
-///   the page when it expands, so opening the navigation never relayouts a poster
+/// - the content clears the **collapsed** rail, while the expanded rail overlays
+///   stationary content, so opening navigation never moves or relayouts a poster
 ///   grid mid-scroll; and
 /// - the whole rail — and its inset — goes away while a detail page is pushed, so
 ///   a title page is full-bleed exactly as it is under the native chrome.
@@ -40,16 +40,6 @@ struct NavigationRailShell<Content: View>: View {
     /// returns to the page.
     @State private var railReturnToken = 0
 
-    /// How far the page slides right while the rail is expanded.
-    ///
-    /// The page MOVES rather than being covered. Covering it meant the expanded
-    /// rail needed an opaque panel to stay readable — which read as a slab bolted
-    /// over the picture — and, worse, it occluded the very cards a Right press
-    /// needs to land on, so leaving the rail could fail. Sliding solves both.
-    private var pageShift: CGFloat {
-        NavigationRailMetrics.expandedWidth - NavigationRailMetrics.collapsedWidth
-    }
-
     var body: some View {
         let hidden = chrome.isChromeHidden
         return ZStack(alignment: .leading) {
@@ -67,13 +57,10 @@ struct NavigationRailShell<Content: View>: View {
                     \.plozzNavigationContentInset,
                     hidden ? 0 : NavigationRailMetrics.contentInset
                 )
-                .offset(x: railExpanded && !hidden ? pageShift : 0)
                 // Content is the scope's preferred focus ONLY while the rail does
-                // not hold focus. Left into the rail changes `railExpanded`, which
-                // shifts the page — and a layout change re-asserts the scope's
-                // preferred focus. Left unconditional, that pulled focus straight
-                // back out of the rail in the same frame it arrived: the rail lit up
-                // and vanished again.
+                // not hold focus. Opening the rail changes its focusable subtree;
+                // leaving this unconditional can re-assert content focus in the
+                // same transaction and immediately close the rail again.
                 .prefersDefaultFocus(!railExpanded, in: focusScopeID)
 
 

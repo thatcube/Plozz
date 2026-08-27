@@ -70,6 +70,11 @@ public struct HomeHeroBackdrop: View {
     /// renderer in an already-measured usable region and disables that breakout
     /// so the explicit width stays anchored through the physical trailing edge.
     var ignoresHorizontalSafeArea: Bool = true
+    /// Custom-rail-only alignment. Its content inset gives this fixed-width
+    /// artwork a slot wider than the panel; leading alignment prevents that extra
+    /// width being split into a black strip on the left. Native tab styles keep
+    /// the historical centered alignment.
+    var alignsArtworkToLeadingEdge: Bool = false
     /// Home relinquishes its scrim during a navigation push while preserving the
     /// shared video underneath. The incoming detail hero supplies the one visible
     /// scrim, preventing the two dark overlays from stacking during handoff.
@@ -88,6 +93,7 @@ public struct HomeHeroBackdrop: View {
         trailerController: HeroTrailerController? = nil,
         showsTrailer: Bool = false,
         ignoresHorizontalSafeArea: Bool = true,
+        alignsArtworkToLeadingEdge: Bool = false,
         scrimOpacity: Double = 1
     ) {
         self.references = references
@@ -102,6 +108,7 @@ public struct HomeHeroBackdrop: View {
         self.trailerController = trailerController
         self.showsTrailer = showsTrailer
         self.ignoresHorizontalSafeArea = ignoresHorizontalSafeArea
+        self.alignsArtworkToLeadingEdge = alignsArtworkToLeadingEdge
         self.scrimOpacity = scrimOpacity
     }
 
@@ -118,6 +125,7 @@ public struct HomeHeroBackdrop: View {
         trailerController: HeroTrailerController? = nil,
         showsTrailer: Bool = false,
         ignoresHorizontalSafeArea: Bool = true,
+        alignsArtworkToLeadingEdge: Bool = false,
         scrimOpacity: Double = 1
     ) {
         self.init(
@@ -133,6 +141,7 @@ public struct HomeHeroBackdrop: View {
             trailerController: trailerController,
             showsTrailer: showsTrailer,
             ignoresHorizontalSafeArea: ignoresHorizontalSafeArea,
+            alignsArtworkToLeadingEdge: alignsArtworkToLeadingEdge,
             scrimOpacity: scrimOpacity
         )
     }
@@ -156,11 +165,7 @@ public struct HomeHeroBackdrop: View {
     /// spilling off-screen to the right. Leading-aligned, the artwork starts at the
     /// panel edge — which is what full-bleed means here.
     private var artworkAlignment: Alignment {
-        #if os(tvOS)
-        return .leading
-        #else
-        return .center
-        #endif
+        alignsArtworkToLeadingEdge ? .leading : .center
     }
 
     public var body: some View {

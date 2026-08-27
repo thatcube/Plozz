@@ -9,16 +9,16 @@ import Foundation
 /// shell chrome and the Settings ▸ Appearance screen writes it. Foundation-only
 /// so it can live in `CoreModels` and be edited without importing SwiftUI.
 ///
-/// `.tabBar` and `.sidebar` are native tvOS 18 `TabView` presentations over the
-/// *same* tabs — the individual pages are byte-for-byte identical regardless of
-/// choice, so switching only swaps the surrounding chrome. `.rail` is Plozz's own
-/// chrome: a collapsed icon rail that expands on focus, lists the viewer's
+/// `.tabBar` and `.sidebar` are native tvOS 18 `TabView` presentations. The top
+/// bar keeps the compact fixed destinations; the sidebar also exposes the active
+/// profile and configured library destinations. `.rail` is Plozz's own chrome: a
+/// collapsed icon rail that expands over stationary content, lists the viewer's
 /// libraries as first-class destinations, and disappears entirely on a detail page.
 public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendable {
     // Case order drives the picker order in Settings, so the default option is
     // listed first (left-most).
     /// Plozz's custom collapsible left rail. Collapsed to icons until focus enters
-    /// it, then expands over the content; libraries are top-level destinations and
+    /// it, then expands over stationary content; libraries are top-level destinations and
     /// Settings is pinned to the bottom. Default.
     case rail
     /// The native collapsible left sidebar (`.sidebarAdaptable`): tabs collapse

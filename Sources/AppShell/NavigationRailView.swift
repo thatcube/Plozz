@@ -99,8 +99,8 @@ struct NavigationRailView: View {
     let entries: [NavigationRailLibraryEntry]
     let showsMusic: Bool
     @Binding var selection: NavigationRailDestination
-    /// Mirrors "focus is inside the rail" outward, so the shell can slide the page
-    /// aside rather than let the expanded rail cover it.
+    /// Mirrors "focus is inside the rail" outward, so the shell can coordinate
+    /// preferred focus and directional fallback while the overlay is open.
     @Binding var isExpandedOutward: Bool
     let onOpenProfileSwitcher: () -> Void
     /// Bumped by the shell when its leading-edge catcher takes a Left press, so the
@@ -504,10 +504,9 @@ struct NavigationRailView: View {
     /// (applied above) keeps those legible over anything without covering
     /// artwork. So the wash appears only when the labels do.
     ///
-    /// Expanded it is a wide, slow gradient that has fully dissolved before it
-    /// reaches the page: a short one over a bright backdrop reads as a hard
-    /// vertical seam. The page also slides aside on expand, so this never has to
-    /// make text readable over content it overlaps.
+    /// Expanded it is an opaque panel under the rail, with a short trailing fade.
+    /// The page stays stationary now, so labels need a stable surface instead of
+    /// inheriting whatever artwork happens to sit behind them.
     @ViewBuilder
     private var backdrop: some View {
         if isExpanded {
@@ -518,13 +517,13 @@ struct NavigationRailView: View {
     }
 
     private var expandedBackdrop: some View {
-        let strength = 0.82
+        let strength = 0.96
         return LinearGradient(
             stops: [
                 .init(color: .black.opacity(strength), location: 0),
-                .init(color: .black.opacity(strength * 0.92), location: 0.35),
-                .init(color: .black.opacity(strength * 0.55), location: 0.68),
-                .init(color: .black.opacity(strength * 0.18), location: 0.87),
+                .init(color: .black.opacity(strength), location: 0.72),
+                .init(color: .black.opacity(strength * 0.75), location: 0.84),
+                .init(color: .black.opacity(strength * 0.25), location: 0.95),
                 .init(color: .black.opacity(0), location: 1)
             ],
             startPoint: .leading,

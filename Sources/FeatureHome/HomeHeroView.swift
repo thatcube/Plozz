@@ -819,6 +819,10 @@ struct HomeHeroView: View {
                 receded: receded,
                 trailerController: trailerController,
                 showsTrailer: trailerVisible,
+                // Gate on STYLE, not the live inset. The rail hides (and publishes
+                // inset 0) during a detail push while Home remains alive underneath;
+                // using the inset would recenter artwork mid-transition.
+                alignsArtworkToLeadingEdge: navigationStyle == .rail,
                 scrimOpacity: isFrontmost ? 1 : 0
             )
         } else {

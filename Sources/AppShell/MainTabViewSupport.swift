@@ -21,24 +21,6 @@ import AniListService
 import MALService
 import LastFmService
 
-extension View {
-    /// Applies the native tvOS 18 `TabView` presentation matching the user's
-    /// `NavigationStyle`. Kept as a `@ViewBuilder` switch (rather than a ternary)
-    /// because `.sidebarAdaptable` and `.tabBarOnly` are distinct concrete
-    /// `TabViewStyle` types that can't share one expression.
-    ///
-    /// `.rail` never reaches here — that style replaces the `TabView` outright with
-    /// ``NavigationRailShell`` — but it still has to be handled, and the sidebar is
-    /// the closest native shape if it ever did.
-    @ViewBuilder
-    func plozzTabStyle(_ style: NavigationStyle) -> some View {
-        switch style {
-        case .tabBar: self.tabViewStyle(.tabBarOnly)
-        case .sidebar, .rail: self.tabViewStyle(.sidebarAdaptable)
-        }
-    }
-}
-
 /// Resolves the provider that owns `accountID`, falling back to the primary
 /// (first) account. `accounts` is guaranteed non-empty by the caller
 /// (`RootView`).

@@ -572,6 +572,7 @@ struct HomeTab: View {
             DeepLinkPlayRouter(
                 pendingPlay: runtime.pendingPlay,
                 accounts: accounts,
+                isActive: isActiveTab,
                 // Open the title's page, then start it. Playing straight from the
                 // shelf left the viewer on Home the moment they backed out — the
                 // title they had just been watching nowhere in sight, and no way
@@ -593,6 +594,7 @@ struct HomeTab: View {
             ScreenshotRouter(
                 director: runtime.screenshotDirector,
                 accounts: accounts,
+                isActive: isActiveTab,
                 onHome: {
                     // The player is presented over the stack, not pushed onto
                     // it, so emptying the path leaves it up — and every request
@@ -645,6 +647,7 @@ struct HomeTab: View {
     private struct ScreenshotRouter: View {
         let director: ScreenshotDirector
         let accounts: [ResolvedAccount]
+        let isActive: Bool
         let onHome: () -> Void
         let onPush: (any Hashable) -> Void
         let onPlay: (MediaItem, Double) -> Void
@@ -653,10 +656,21 @@ struct HomeTab: View {
             Color.clear
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
-                .task(id: director.request) { await perform() }
+                // Active state is part of identity so a request that arrived while
+                // this tab was hidden runs when the tab becomes visible.
+                .task(id: RouteRequest(
+                    request: director.request,
+                    isActive: isActive
+                )) { await perform() }
+        }
+
+        private struct RouteRequest: Equatable {
+            let request: ScreenshotDirector.Request?
+            let isActive: Bool
         }
 
         private func perform() async {
+            guard isActive else { return }
             guard let request = director.request else { return }
             director.request = nil
             director.finish(await reach(request))
@@ -864,6 +878,7 @@ struct HomeTab: View {
     private struct DeepLinkPlayRouter: View {
         let pendingPlay: PendingPlayRequest
         let accounts: [ResolvedAccount]
+        let isActive: Bool
         let onResolved: (MediaItem) -> Void
 
         var body: some View {
@@ -878,7 +893,8 @@ struct HomeTab: View {
                 .task(id: RouteRequest(
                     itemID: pendingPlay.itemID,
                     accountID: pendingPlay.accountID,
-                    accountIDs: accounts.map(\.account.id)
+                    accountIDs: accounts.map(\.account.id),
+                    isActive: isActive
                 )) { await route() }
         }
 
@@ -887,9 +903,11 @@ struct HomeTab: View {
             let itemID: String?
             let accountID: String?
             let accountIDs: [String]
+            let isActive: Bool
         }
 
         private func route() async {
+            guard isActive else { return }
             guard let id = pendingPlay.itemID else { return }
             // Nothing to ask yet. Deliberately keeps the request pending: accounts
             // arriving is a change this task is watching, so it will run again with

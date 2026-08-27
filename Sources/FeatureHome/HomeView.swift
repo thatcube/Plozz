@@ -358,6 +358,14 @@ public struct HomeView: View {
             )
             let heroActive = heroSlotState == .content
             let heroLayoutActive = heroSlotState != .hidden
+            let ignoredScrollEdges: Edge.Set = (
+                heroLayoutActive ? Edge.Set.top : []
+            ).union(
+                // Gate on STYLE, not the live inset. The rail publishes inset 0
+                // while hidden for a detail push, but Home stays rendered beneath
+                // that transition and must not change horizontal geometry.
+                navigationStyle == .rail ? Edge.Set.trailing : []
+            )
             // Account-scoped ids of every watchlisted title, so the hero can show
             // the *series'* watchlist state on an episode/season slide.
             let watchlistedKeys = Set(content.watchlist.map {
@@ -564,15 +572,10 @@ public struct HomeView: View {
                 // above the backdrop (the gap that made the hero sit too low).
                 // An empty edge set is a no-op, so the classic rows layout keeps
                 // its normal top inset under the tab bar.
-                // `.trailing` lets the rows scroll out to the physical edge of the
-                // panel. The scroll view was reserving a trailing inset, so every
-                // row's viewport ended short of the screen and cards were cut there
-                // with a dead black bar beyond. It can only be refused here, at the
-                // scroll view — by the time layout reaches a row the inset has
-                // already been applied, which is why `ignoresSafeArea` on the row
-                // itself did nothing. Leading is deliberately still honoured: the
-                // rail's gutter is measured from it.
-                .ignoresSafeArea(.container, edges: heroLayoutActive ? [.top, .trailing] : .trailing)
+                // The custom rail alone needs `.trailing`: its content inset
+                // otherwise leaves each row short of the physical edge. Native
+                // top/sidebar styles retain their original safe-area behavior.
+                .ignoresSafeArea(.container, edges: ignoredScrollEdges)
             }
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too. Only in

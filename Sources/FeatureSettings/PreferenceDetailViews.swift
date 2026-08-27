@@ -95,11 +95,11 @@ struct AppearanceDetailView: View {
             + SpoilerRowsBuilder(spoilers: spoilers).rows
     }
 
-    /// The rail's library arrangement, offered only while the rail is the chosen
-    /// chrome — under the two native tab styles there is no library list to
-    /// arrange, and a row that edits something invisible is worse than no row.
+    /// Library arrangement is shared by both leading-edge navigation styles.
+    /// Top bar has no library destinations, so showing its editor there would edit
+    /// invisible state.
     private var navigationLibraryRows: [SettingsSplitRow] {
-        guard navigation.style == .rail else { return [] }
+        guard navigation.style != .tabBar else { return [] }
         return [
             SettingsSplitRow(
                 id: "navigation-libraries",

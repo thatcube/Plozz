@@ -1017,6 +1017,7 @@ public struct SettingsView: View {
         case .appearance:
             AppearanceDetailView(
                 librariesScope: context.librariesScope,
+                settingsNavigation: navigation,
                 theme: theme,
                 nightShift: nightShift,
                 spoilers: spoilers

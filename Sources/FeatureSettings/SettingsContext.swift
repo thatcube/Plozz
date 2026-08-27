@@ -145,6 +145,10 @@ public enum SettingsRoute: Hashable {
 @Observable
 public final class SettingsNavigationModel {
     var path: [SettingsRoute] = []
+    /// Live row mirrored in Appearance's detail pane. Stored beside the path so
+    /// replacing the surrounding tab/sidebar shell restores not only Appearance,
+    /// but the exact feature row the viewer was editing inside it.
+    var appearanceRowID: String?
 
     public init() {}
 }

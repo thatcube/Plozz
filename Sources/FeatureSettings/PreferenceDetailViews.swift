@@ -8,6 +8,8 @@ struct AppearanceDetailView: View {
     /// navigation-arrangement pane. Passed in (rather than reached for) so this
     /// view stays a plain function of what Settings already resolved.
     let librariesScope: ProfileLibrariesScope
+    /// Keeps the selected Appearance feature stable while navigation shell changes.
+    let settingsNavigation: SettingsNavigationModel
     @Bindable var theme: ThemeSettingsModel
     /// Circadian Mode (night-warming) settings, folded in as sections here — it's
     /// a display concern, so it no longer earns its own top-level row.
@@ -31,7 +33,12 @@ struct AppearanceDetailView: View {
     @Environment(AppLanguageSettingsModel.self) private var appLanguage
 
     var body: some View {
-        SettingsSplitLayout(title: "Appearance", rows: rows)
+        @Bindable var settingsNavigation = settingsNavigation
+        SettingsSplitLayout(
+            title: "Appearance",
+            rows: rows,
+            selection: $settingsNavigation.appearanceRowID
+        )
             // Circadian's day/night preview animates a model flag; make sure it
             // never keeps running once you leave Appearance or turn Circadian off.
             .onChange(of: nightShift.settings.isEnabled) { _, enabled in

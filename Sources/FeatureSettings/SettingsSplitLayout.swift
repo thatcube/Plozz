@@ -109,7 +109,12 @@ struct SettingsSplitLayout: View {
     let title: LocalizedStringResource
     let rows: [SettingsSplitRow]
 
-    @State private var selectedRowID: String?
+    /// Optional external selection for a split page that must survive its view
+    /// being re-hosted. Most pages use local state; Appearance injects the
+    /// SettingsNavigationModel-backed value because changing navigation style
+    /// replaces the surrounding shell while this page is open.
+    private let externalSelectedRowID: Binding<String?>?
+    @State private var localSelectedRowID: String?
     @FocusState private var focusedRow: String?
     /// Scopes the master list so the selected row can be its *preferred* default
     /// focus. Pressing left out of the detail pane (or returning from a pushed
@@ -121,6 +126,32 @@ struct SettingsSplitLayout: View {
     /// left-press out of a control has exactly one place to land (the row you
     /// came in from), with no geometrically-nearer row to steal it.
     @State private var focusInDetail = false
+
+    init(
+        title: LocalizedStringResource,
+        rows: [SettingsSplitRow],
+        selection: Binding<String?>? = nil
+    ) {
+        self.title = title
+        self.rows = rows
+        self.externalSelectedRowID = selection
+        // Never read the external observable binding in init. Doing so happens
+        // inside the parent's body and subscribes that parent to every focus-driven
+        // selection change, rebuilding all of its row descriptors per keypress.
+        // External mode never uses this fallback; local mode starts empty as before.
+        self._localSelectedRowID = State(initialValue: nil)
+    }
+
+    private var selectedRowID: String? {
+        get { externalSelectedRowID?.wrappedValue ?? localSelectedRowID }
+        nonmutating set {
+            if let externalSelectedRowID {
+                externalSelectedRowID.wrappedValue = newValue
+            } else {
+                localSelectedRowID = newValue
+            }
+        }
+    }
 
     private var allRows: [SettingsSplitRow] { rows }
     private var allRowIDs: [String] { allRows.map(\.id) }
@@ -147,6 +178,11 @@ struct SettingsSplitLayout: View {
             }
             .padding(.leading, PlozzTheme.Metrics.screenPadding)
         }
+        // A pushed split page must own its background. Native sidebar can re-host
+        // the active destination when navigation style changes; relying on the
+        // Settings root behind it left the master column transparent, exposing the
+        // root Settings page underneath while the detail material stayed intact.
+        .background { SettingsPageBackground() }
         .ignoresSafeArea(edges: .trailing)
         .onAppear {
             if selectedRowID == nil { selectedRowID = allRowIDs.first }

@@ -183,6 +183,45 @@ private struct SequentialAsyncImage<Content: View, Placeholder: View>: View {
 }
 
 #if canImport(UIKit)
+/// Identity of one artwork-resolution session.
+///
+/// The URL candidates alone are not enough. A card with no direct candidates can
+/// still resolve through `asyncFallbackURL`, and that closure is title-specific:
+/// "DOTA: Dragon's Blood" and "A Series of Unfortunate Events" both start with an
+/// empty `references` array, but they are absolutely not the same request.
+///
+/// Before `pinIdentity` entered this key, every posterless card shared:
+///
+/// ```
+/// posterCard
+/// <max aspect ratio>
+/// <no references>
+/// ```
+///
+/// The first fallback to finish was memoized under that key, then synchronously
+/// seeded into every other posterless card. In the Plex Watchlist that happened
+/// to be "A Series of Unfortunate Events", so dozens of unrelated titles wore its
+/// poster. The provider, alias and presentation layers all had distinct identities
+/// and correct URLs; the collision existed only here, at the final image state.
+enum ArtworkResolveKey {
+    static func make(
+        references: [ArtworkReference],
+        variant: ArtworkImageVariant,
+        maxAspectRatio: CGFloat?,
+        pinIdentity: String?
+    ) -> String {
+        (
+            [
+                variant.rawValue,
+                maxAspectRatio.map { "\($0)" } ?? "nil",
+                pinIdentity.map { "pin:\($0)" } ?? "pin:nil"
+            ]
+            + references.map(\.privacySafeIdentity)
+        )
+        .joined(separator: "\n")
+    }
+}
+
 /// Loads candidates in order, decoding each to inspect its true pixel aspect
 /// ratio, and shows the first one that is poster-shaped enough (≤ `maxAspectRatio`).
 /// Anything wider is skipped. Falls back to the placeholder when none qualify.
@@ -304,7 +343,12 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // for these exact references, so a rebuild repaints precisely what was
         // already on screen: no blank, and no swap either, because it is the same
         // image rather than a lesser candidate.
-        let memoKey = Self.makeKey(references: references, variant: variant, maxAspectRatio: maxAspectRatio)
+        let memoKey = ArtworkResolveKey.make(
+            references: references,
+            variant: variant,
+            maxAspectRatio: maxAspectRatio,
+            pinIdentity: pinIdentity
+        )
         let seeded = Self.cachedUsableImage(
             references: references,
             maxAspectRatio: maxAspectRatio,
@@ -318,13 +362,23 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         _resolved = State(initialValue: seeded != nil || seededPreview != nil)
         _isPreviewQuality = State(initialValue: seeded == nil && seededPreview != nil)
         _loadedKey = State(initialValue: seeded?.index == references.startIndex
-            ? Self.makeKey(references: references, variant: variant, maxAspectRatio: maxAspectRatio)
+            ? ArtworkResolveKey.make(
+                references: references,
+                variant: variant,
+                maxAspectRatio: maxAspectRatio,
+                pinIdentity: pinIdentity
+            )
             : nil)
         _pinnedIdentity = State(initialValue: seeded != nil ? pinIdentity : nil)
     }
 
     private var taskKey: String {
-        Self.makeKey(references: references, variant: variant, maxAspectRatio: maxAspectRatio)
+        ArtworkResolveKey.make(
+            references: references,
+            variant: variant,
+            maxAspectRatio: maxAspectRatio,
+            pinIdentity: pinIdentity
+        )
     }
 
     var body: some View {
@@ -472,11 +526,6 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
 
     /// Stable key for a given set of inputs, used both as the `.task` id and to
     /// remember which inputs the current `image` was resolved for.
-    private static func makeKey(references: [ArtworkReference], variant: ArtworkImageVariant, maxAspectRatio: CGFloat?) -> String {
-        ([variant.rawValue, maxAspectRatio.map { "\($0)" } ?? "nil"] + references.map(\.privacySafeIdentity))
-            .joined(separator: "\n")
-    }
-
     /// First already-decoded candidate (in priority order) that is acceptable for
     /// this context, read synchronously from `ArtworkImageCache`.
     /// The best already-decoded image for these references.

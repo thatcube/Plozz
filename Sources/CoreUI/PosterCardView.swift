@@ -670,7 +670,12 @@ public struct PosterCardView: View {
             references: artworkReferences,
             maxAspectRatio: posterAspectGuard,
             variant: artworkVariant,
-            asyncFallbackURL: asyncArtworkFallback
+            asyncFallbackURL: asyncArtworkFallback,
+            // Required even when `artworkReferences` is empty: the async fallback
+            // is title-specific, so its task/memo identity has to be too.
+            // Otherwise every posterless card shares one empty-reference key and
+            // inherits whichever fallback image resolved first.
+            pinIdentity: item.stablePresentationID
         ) {
             neutralPlaceholder
         }

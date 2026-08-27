@@ -703,6 +703,13 @@ private struct PlozziOSAboutSettingsView: View {
                         ] as? String ?? "—"
                     )
                 }
+                if ReleaseNotesModel.shared.isAvailable {
+                    NavigationLink {
+                        ReleaseNotesSettingsView(model: .shared)
+                    } label: {
+                        Label("Release Notes", systemImage: "doc.text")
+                    }
+                }
             }
 
             if hasAccounts {
@@ -1081,6 +1088,13 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
                 LabeledContent("Build") {
                     Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
+                }
+                if ReleaseNotesModel.shared.isAvailable {
+                    NavigationLink {
+                        ReleaseNotesSettingsView(model: .shared)
+                    } label: {
+                        Label("Release Notes", systemImage: "doc.text")
+                    }
                 }
                 if !appModel.accounts.isEmpty, !appModel.profiles.activeProfile.isKids {
                     Button("Sign Out of All Accounts", role: .destructive) {

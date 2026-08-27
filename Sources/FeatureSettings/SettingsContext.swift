@@ -126,6 +126,7 @@ public enum SettingsRoute: Hashable {
     case seerr
     case syncSetup
     case seerUserPicker(profileID: String)
+    case releaseNotes
     case attributions
     case help
     case recentActivity

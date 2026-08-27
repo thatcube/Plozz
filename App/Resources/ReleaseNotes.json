@@ -1,0 +1,524 @@
+{
+  "schemaVersion": 1,
+  "releases": [
+    {
+      "id": "release/029",
+      "version": "2026.8.25",
+      "build": 29,
+      "releasedAt": "2026-08-25",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Detail pages now show different artwork from the Home hero"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Hero logos are now the same size on Home and the detail page"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Show pages no longer open with a blank hero",
+            "Continue Watching now shows time remaining on titles whose runtime was missing"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/028",
+      "version": "2026.8.23",
+      "build": 28,
+      "releasedAt": "2026-08-24",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Release dates on movie and show pages",
+            "Option to hide ratings until you've finished watching"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Continue Watching card shape, spacing and logo legibility",
+            "Home artwork now appears instantly at launch and refreshes in the background"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Network shares: shows whose episodes sit in season folders were missing from the TV Shows and Anime libraries",
+            "Network shares: a show held on both a server and a share showed up twice in Continue Watching, with the second card missing its progress bar and episode number",
+            "Recently Added no longer blurs show posters that gave nothing away (real episode thumbnails are still blurred)",
+            "Air dates showing a day early on Jellyfin outside the Americas"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/027",
+      "version": "2026.8.22",
+      "build": 27,
+      "releasedAt": "2026-08-23",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Continue Watching artwork styles",
+            "Autoplay next episode setting"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Watchlist performance",
+            "Language picker now uses a native menu",
+            "Playback engine update, including HDR and Dolby Vision playback"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Blurred Continue Watching row when spoiler protection is on",
+            "Plex watchlist removal",
+            "Invisible buttons on dark themes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/024",
+      "version": "2026.8.7",
+      "build": 24,
+      "releasedAt": "2026-08-07",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Home hero now shows ratings, description, and air schedule for shows"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Hero artwork blends into the page more smoothly and matches across Apple TV and iPhone/iPad",
+            "Hero text is easier to read"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Play from the Home hero now works when the hero is showing a TV show",
+            "Home no longer goes blank when every server or library is switched off",
+            "Deleting a profile no longer blanks the screen",
+            "Any profile can now be deleted, not just some",
+            "PIN entry now fits properly when unlocking a profile",
+            "Plex now recovers on its own after a server drops out"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/023",
+      "version": "2026.8.6",
+      "build": 23,
+      "releasedAt": "2026-08-06",
+      "sections": [
+        {
+          "category": "Updated",
+          "items": [
+            "Faster app launch"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Turning a server off now removes its watchlist titles again",
+            "Removed titles stay removed, even if a server still lists them",
+            "Plex watchlists: the full list now loads, not just the first page",
+            "Titles you own are now recognised instead of prompting you to request them",
+            "Anime no longer shows up twice",
+            "Switching Plex user now updates Home and the watchlist right away"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/022",
+      "version": "2026.8.3",
+      "build": 22,
+      "releasedAt": "2026-08-04",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Watchlist is now a single list that follows you across Apple TV, iPhone, and iPad, and syncs to connected trackers (Simkl, AniList, MyAnimeList, Plex, and Jellyfin); anime is matched via AniDB/MAL/AniList ids",
+            "'New episode every Friday' now appears on Home on iPhone and iPad, matching the Apple TV"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Tracker sign-ins now sync across devices, so connecting a tracker like Simkl on one device no longer signs you out on others",
+            "iPhone/iPad: the trailer button now sits next to Play and is the last action to fold away"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Saving a show from an episode page or from Continue Watching now saves the show, not the episode",
+            "Watchlisted titles on a server you cannot currently reach now show their poster instead of a blank card",
+            "Home no longer keeps a CPU core busy while idle; battery use is now well under 1%",
+            "The Home hero trailer now stops when you leave Home or the app, instead of continuing to play in the background",
+            "iPhone/iPad: the watchlist button is back on hero pages that front an episode",
+            "iPhone/iPad: heroes no longer drift sideways on titles with a wide logo",
+            "iPhone/iPad: the paging dots (including the progress bar inside them) now animate smoothly"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/021",
+      "version": "2026.8.1",
+      "build": 21,
+      "releasedAt": "2026-08-02",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Detail pages for titles outside your library now show richer details: release and streaming availability, trailers, cast, ratings, related titles, and request status",
+            "New poster marks distinguish titles not in your library from titles you can request"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/020",
+      "version": "2026.7.30",
+      "build": 20,
+      "releasedAt": "2026-07-30",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Playback now remembers which version of a show you picked and reuses it everywhere, including the next episode, and prefers the closest server when a title is on more than one",
+            "iOS: Downloads is now its own tab"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "tvOS player controls redesigned: title and Subtitles/Audio/Speed buttons now sit on one line above the scrub bar, with Info as a tab below it (press Up from the scrub bar for the buttons, Down for the Info card)",
+            "Series pages now load a whole season at once and scroll more smoothly",
+            "iOS: Search moved to the system search slot",
+            "Playback engine updated to AetherEngine 6.0.2"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "tvOS: Back no longer quits the app when a context menu is closing"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/019",
+      "version": "2026.7.29",
+      "build": 19,
+      "releasedAt": "2026-07-29",
+      "sections": [
+        {
+          "category": "Updated",
+          "items": [
+            "Series detail: the hero-to-episodes transition has been rebuilt for smoother, more fluid focus movement"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "The first season chip and the focused Play button are no longer clipped on their left edge",
+            "The episode rail's loading label is now translated"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/018",
+      "version": "2026.7.28",
+      "build": 18,
+      "releasedAt": "2026-07-28",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Related — a new rail above the cast on every movie and series page, listing other titles in your library connected to what you're viewing; anime pages lead with actual sequels and side stories, and everything listed is something you own and can play",
+            "Media shares now show cast information for their titles",
+            "iPhone and iPad gained air-schedule badges, upcoming episodes in the rail, and the new Related row, matching the Apple TV"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "When the same title exists on both a media server and a file share, the server's copy now fronts the card since it carries the curated record; playback still prefers whichever copy is closest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/016",
+      "version": "2026.7.18",
+      "build": 16,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Play/Resume buttons now name the episode they'll play (e.g. \"Play S21, E8\", or a resume bar showing \"S5, E12 - 43m\")",
+            "Player controls: the control bar now auto-hides when idle (stays up while a menu is open)",
+            "New Home Performance Overlay toggle under Help & Diagnostics in Settings",
+            "Added NFO / local sidecar metadata support"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Home hero: smoother page-to-page animation, tidier spacing, and a lighter left-edge scrim",
+            "Home hero logos now fade in instead of popping"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Dolby Vision / direct-file HDR now carries correctly across back-to-back episodes, with display sync fixed",
+            "Seeking during load no longer snaps back to the start (notably Dolby Vision over SMB)",
+            "Cleaner playback startup: the spinner now holds until the picture is really on screen, loading messages are paced better, and network files start faster",
+            "Fixed an end-of-file glitch when seeking near the end of a network file"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/015",
+      "version": "2026.7.17",
+      "build": 15,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Media shares now show scan and artwork progress on Home and in Settings",
+            "Movies and shows from media shares now resume where you left off and support subtitle files stored alongside the video"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Dolby Atmos badges now stay accurate after background checks and source changes",
+            "Switching between copies on different servers now works more reliably without leaving the detail page",
+            "Posters, descriptions, and logos now choose the best available information more reliably across your servers",
+            "Signing in to or updating a media share now recovers more reliably if saving is interrupted"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/014",
+      "version": "2026.7.16",
+      "build": 14,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Full Emby support, including movies, TV, music, subtitles, skip intro, and HDR/Dolby Vision playback"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Smoother Home Hero paging and tab switching"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Fixed episode ordering",
+            "Fixed HDR/Dolby badges",
+            "Fixed clipped ratings"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/013",
+      "version": "2026.7.15",
+      "build": 13,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "Updated",
+          "items": [
+            "Redesigned media-share setup for SMB, WebDAV, SFTP, FTP/FTPS, and NFS, including automatic protocol detection and folder browsing",
+            "Improved local-library matching, metadata, duplicate handling, watch progress, and resume behavior across servers and file shares"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Playback now recovers after leaving Plozz and returning, with video, controls, and progress resuming correctly"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/012",
+      "version": "2026.7.12",
+      "build": 12,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Season requests: search a partly owned show, open Request More, and request one season or all missing seasons (with per-profile Seerr users and pending/processing/failed/retry/completed states)",
+            "Per-profile server/library toggles in Appearance and Profiles"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Series browsing: opening long-running shows from series, season, or episode cards now shows the current season immediately, without an extra scroll, and keeps episode/season navigation centered and stable",
+            "Redesigned animated onboarding setup flow for Plex and Jellyfin, including Plex QR/manual sign-in, Jellyfin Quick Connect, Back navigation, focus movement, and library selection",
+            "SMB and local shares: improved scanning of mixed movie/TV folders, version grouping, season deduplication, watch state, sidecar subtitles, search, sorting, and browsing responsiveness",
+            "Playback: improved Dolby Vision/HDR playback and episode handoffs, Up Next, subtitle search/download/hot-load, and a redesigned Playback Info display"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Detail-page Cast now remains a consistent size at every display density"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/011",
+      "version": "2026.7.8",
+      "build": 11,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "New Watched Indicator setting in Appearance — choose between a watched checkmark or an unwatched blue corner flag",
+            "Edit Profile now has emoji avatars, a new color grid, auto-save, and a delete button",
+            "SMB media shares now scan into Recently Added, Search, and Movies/TV/Anime rows with posters and artwork",
+            "Seerr requests can now be made as a specific user via per-user mapping"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Redesigned Settings: Customize Home (shared rows plus a toggle for per-library rows), simpler library on/off, Spoilers moved to Appearance, and Integrations renamed to Trackers"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "In-progress items no longer show as watched",
+            "Blank movie/TV posters now fill in",
+            "Hero images no longer blur",
+            "Detail pages no longer jump when moving across the top buttons"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/010",
+      "version": "2026.7.6",
+      "build": 10,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Customizable Home hero",
+            "Seerr integration — request media from the hero or search, with the button reflecting download status",
+            "Choose whether to merge your home page across servers",
+            "Select which rows appear on Home"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Reorganized Settings (still a work in progress)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/009",
+      "version": "2026.7.3",
+      "build": 9,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Tentative SMB support",
+            "New navigation paradigm, with an option in Settings to switch back to top tabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/008",
+      "version": "2026.7.3",
+      "build": 8,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Limited SMB share support (expect breakage)",
+            "New navigation toggle in Settings"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Default navigation is now side navigation"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "AirPlay now works more consistently with music"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release/007",
+      "version": "2026.6.29",
+      "build": 7,
+      "releasedAt": "2026-07-18",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Add both a Jellyfin and a Plex server and combine them into one multi-server library",
+            "Browse Movies, TV, and Music",
+            "Playback with resume and automatic skip of intros/credits",
+            "Switch between tvOS profiles",
+            "Themes, display-size settings, and night mode"
+          ]
+        }
+      ]
+    }
+  ]
+}

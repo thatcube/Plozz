@@ -111,6 +111,7 @@ public struct RootView: View {
     /// consent in `appState.crashReportingModel` — nothing is sent unless the user
     /// has opted in AND a DSN is present.
     @State private var crashReporting = CrashReportingController()
+    private var releaseNotes: ReleaseNotesModel { .shared }
 
     /// Maps the active content identity (profile + accounts + Plex Home-user
     /// generation) to one scoped detail-snapshot cache, memoized for the app's
@@ -197,6 +198,18 @@ public struct RootView: View {
             profileID: profile.id,
             plexPlaybackIdentityKey: profile.plexPlaybackIdentityKey(for: accounts)
         )
+    }
+
+    private var releaseNotesStartupReady: Bool {
+        guard appState.profileFlow.pendingSetupProfile == nil else { return false }
+        guard case .ready = appState.state else { return false }
+        return !appState.profileFlow.isChoosingProfile
+            && appState.profileFlow.pendingLockedProfile == nil
+            && appState.profileFlow.pendingParentalSwitch == nil
+            && appState.profileFlow.pendingIdentityAccountID == nil
+            && appState.profileFlow.pendingLockOfferProfile == nil
+            && !appState.profileFlow.isPickingThemeForNewProfile
+            && appState.plexHomeUsers.pendingPlexPINRequest == nil
     }
 
     public var body: some View {
@@ -563,6 +576,24 @@ public struct RootView: View {
                 },
                 onSkip: { appState.profileFlow.dismissLockOffer() }
             )
+        }
+        .task(id: releaseNotesStartupReady) {
+            if releaseNotesStartupReady {
+                releaseNotes.prepareForStartup()
+            }
+        }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { releaseNotes.hasPendingStartupNotes },
+                set: { presented in
+                    if !presented {
+                        releaseNotes.dismissStartupNotes()
+                    }
+                }
+            ),
+            onDismiss: { releaseNotes.dismissStartupNotes() }
+        ) {
+            ReleaseNotesStartupView(model: releaseNotes)
         }
         // One-time theme picker for a profile just created in-app (Settings →
         // "Add Profile"). The app has already switched to the new profile, so

@@ -764,9 +764,8 @@ public struct SettingsView: View {
     @ViewBuilder
     private var aboutAndSignOut: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Self-contained focusable inverted-card panel (logo / version /
-            // build / disclaimers / QR) — perfect to drop in inline. Selecting it
-            // seven times unlocks the hidden Developer Mode rows below.
+            // App identity, version/build, release notes, and QR. The version row
+            // retains the seven-select Developer Mode shortcut.
             SettingsAboutSection(
                 version: appVersion,
                 build: appBuild,
@@ -1063,6 +1062,8 @@ public struct SettingsView: View {
             if let profile = profiles.first(where: { $0.id == profileID }) {
                 SeerUserPickerView(seer: seer, profile: profile, onSelect: { onSetSeerrUser(profileID, $0) })
             }
+        case .releaseNotes:
+            ReleaseNotesSettingsView(model: .shared)
         case .attributions:
             AttributionsDetailView()
         case .help:

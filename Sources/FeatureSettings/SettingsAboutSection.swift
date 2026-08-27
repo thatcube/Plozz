@@ -1,21 +1,14 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreModels
 import CoreUI
 #if canImport(UIKit)
 import UIKit
 #endif
 
-/// Footer panel for Settings showing app identity, the auto-stamped version /
-/// build, open-source info, and a QR code linking to the GitHub repo. tvOS has
-/// no browser, so a scannable code is how we hand the URL off to a phone.
-///
-/// The whole panel is focusable so that on tvOS it can actually be reached: a
-/// non-interactive view never receives focus, which previously meant the user
-/// could not scroll the content into view and the About text was effectively
-/// unreadable on the 10-foot UI. It uses the shared `FocusableSettingsPanel`
-/// focus look — a soft, theme-tinted outline blooming around the whole panel,
-/// matching the avatar/cast/profile-tile treatment — so focus never inverts the
-/// panel's contrast.
+/// Footer panel for Settings showing app identity, release notes, open-source
+/// info, and a QR code linking to the GitHub repo. Its two explicit rows provide
+/// focus targets, so the surrounding informational card does not need focus.
 struct SettingsAboutSection: View {
     let version: String
     let build: String
@@ -25,7 +18,7 @@ struct SettingsAboutSection: View {
     var onActivate: (() -> Void)? = nil
 
     var body: some View {
-        FocusableSettingsPanel(onActivate: onActivate) {
+        SettingsPanel {
             HStack(alignment: .top, spacing: 36) {
                 VStack(alignment: .leading, spacing: 16) {
                     Image("PlozzLogo")
@@ -34,8 +27,29 @@ struct SettingsAboutSection: View {
                         .scaledToFit()
                         .frame(width: 72, height: 72)
 
-                    Text("Version \(version) (Build \(build))")
-                        .font(.headline)
+                    if let onActivate {
+                        Button(action: onActivate) {
+                            versionRow
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+                    } else {
+                        versionRow
+                    }
+
+                    if ReleaseNotesModel.shared.isAvailable {
+                        NavigationLink(value: SettingsRoute.releaseNotes) {
+                            SettingsRowLabel(
+                                icon: "doc.text",
+                                title: "Release Notes",
+                                trailing: {
+                                    Image(systemName: "chevron.forward")
+                                        .font(.caption.weight(.semibold))
+                                        .settingsRowSecondary()
+                                }
+                            )
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+                    }
 
                     Text("Bring all of your media together into one unified experience. Free forever and open source.")
                         .font(.callout)
@@ -53,12 +67,19 @@ struct SettingsAboutSection: View {
                         .multilineTextAlignment(.center)
                         .plozzForeground(.secondary)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Scan to view the Plozz GitHub repository")
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("About Plozz. Version \(version), build \(build). Bring all of your media together into one unified experience. Free forever and open source. Scan the on-screen code to view the GitHub repository.")
         }
     }
 
+    private var versionRow: some View {
+        SettingsRowLabel(
+            icon: "number",
+            title: "Version \(version) (Build \(build))"
+        )
+        .accessibilityLabel("Version \(version), build \(build)")
+    }
 }
 
 #endif

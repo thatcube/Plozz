@@ -57,6 +57,7 @@ struct NavigationRailShell<Content: View>: View {
                     \.plozzNavigationContentInset,
                     hidden ? 0 : NavigationRailMetrics.contentInset
                 )
+                .environment(\.plozzPinnedSidebarActive, true)
                 // Content is the scope's preferred focus ONLY while the rail does
                 // not hold focus. Opening the rail changes its focusable subtree;
                 // leaving this unconditional can re-assert content focus in the

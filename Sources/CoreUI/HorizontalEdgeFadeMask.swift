@@ -50,10 +50,16 @@ public struct HorizontalEdgeFadeMask: View {
 public struct LeadingEdgeFadeMask: View {
     private let fadeWidth: CGFloat
     private let verticalOverhang: CGFloat
+    private let horizontalOverhang: CGFloat
 
-    public init(fadeWidth: CGFloat, verticalOverhang: CGFloat = 0) {
+    public init(
+        fadeWidth: CGFloat,
+        verticalOverhang: CGFloat = 0,
+        horizontalOverhang: CGFloat = 0
+    ) {
         self.fadeWidth = fadeWidth
         self.verticalOverhang = verticalOverhang
+        self.horizontalOverhang = horizontalOverhang
     }
 
     public var body: some View {
@@ -72,6 +78,57 @@ public struct LeadingEdgeFadeMask: View {
             Color.black
         }
         .padding(.vertical, -verticalOverhang)
+        // A visible leading fade starts at the row edge by design. When the
+        // pinned sidebar hides and fadeWidth reaches zero, extend the opaque mask
+        // on BOTH sides so focused-card bloom remains unclipped. Trailing always
+        // overhangs because no fade is drawn there.
+        .padding(.leading, fadeWidth > 0 ? 0 : -horizontalOverhang)
+        .padding(.trailing, -horizontalOverhang)
+    }
+}
+
+/// Applies pinned-sidebar scroll clearance and fading without touching native
+/// navigation styles.
+///
+/// A mask clips its source even when the visible gradient width is zero. Applying
+/// `leadingEdgeFadeMask(fadeWidth: 0)` under native top/sidebar navigation therefore
+/// clipped focused cards at the row's left and right bounds despite drawing no fade.
+/// Branching in this dedicated view means native content receives no mask at all,
+/// while pinned-sidebar content keeps the exact safe-area + feather treatment.
+public struct PinnedSidebarLeadingFade<Content: View>: View {
+    private let isActive: Bool
+    private let inset: CGFloat
+    private let verticalOverhang: CGFloat
+    private let content: Content
+
+    public init(
+        isActive: Bool,
+        inset: CGFloat,
+        verticalOverhang: CGFloat = 0,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.isActive = isActive
+        self.inset = inset
+        self.verticalOverhang = verticalOverhang
+        self.content = content()
+    }
+
+    @ViewBuilder
+    public var body: some View {
+        // `isActive` is navigation-style state and stays stable across a detail
+        // push. Branching on the live inset would replace every wrapped ScrollView
+        // when the sidebar hides (64 → 0), losing row offsets and focus on Back.
+        if isActive {
+            content
+                .safeAreaPadding(.leading, inset)
+                .leadingEdgeFadeMask(
+                    fadeWidth: inset,
+                    verticalOverhang: verticalOverhang,
+                    horizontalOverhang: verticalOverhang
+                )
+        } else {
+            content
+        }
     }
 }
 
@@ -173,12 +230,14 @@ public extension View {
     /// and below so a focused card's lift and shadow are not clipped by it.
     func leadingEdgeFadeMask(
         fadeWidth: CGFloat,
-        verticalOverhang: CGFloat = 0
+        verticalOverhang: CGFloat = 0,
+        horizontalOverhang: CGFloat = 0
     ) -> some View {
         mask {
             LeadingEdgeFadeMask(
                 fadeWidth: fadeWidth,
-                verticalOverhang: verticalOverhang
+                verticalOverhang: verticalOverhang,
+                horizontalOverhang: horizontalOverhang
             )
         }
     }

@@ -201,6 +201,7 @@ public struct HomeView: View {
     /// How far the navigation rail insets page content, so the libraries row can
     /// carry the same gutter as every media row.
     @Environment(\.plozzNavigationContentInset) private var navigationContentInset
+    @Environment(\.plozzPinnedSidebarActive) private var pinnedSidebarActive
 
     public init(
         viewModel: HomeViewModel,
@@ -1034,30 +1035,30 @@ public struct HomeView: View {
             Text("Libraries")
                 .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 .padding(.leading, PlozzTheme.Metrics.screenPadding + navigationContentInset)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: metrics.cardSpacing) {
-                    ForEach(libraries) { aggregated in
-                        LibraryCardView(
-                            aggregated: aggregated,
-                            subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
-                            action: { onSelectLibrary(aggregated.library) }
-                        )
-                    }
-                }
-                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                // Reserve room *inside* the clip for the focused tile's lift +
-                // shadow. The negative outer padding cancels that room in layout, so
-                // the row's height and spacing are unchanged — only the clip grows.
-                .padding(.vertical, metrics.railShadowClearance)
-            }
-            .padding(.top, metrics.railTopClearanceOffset)
-            .padding(.bottom, metrics.railBottomClearanceOffset)
-            // Same navigation gutter as every media row — see `MediaRowView`.
-            .safeAreaPadding(.leading, navigationContentInset)
-            .leadingEdgeFadeMask(
-                fadeWidth: navigationContentInset,
+            PinnedSidebarLeadingFade(
+                isActive: pinnedSidebarActive,
+                inset: navigationContentInset,
                 verticalOverhang: metrics.railShadowClearance
-            )
+            ) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: metrics.cardSpacing) {
+                        ForEach(libraries) { aggregated in
+                            LibraryCardView(
+                                aggregated: aggregated,
+                                subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
+                                action: { onSelectLibrary(aggregated.library) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                    // Reserve room *inside* the clip for the focused tile's lift +
+                    // shadow. The negative outer padding cancels that room in layout, so
+                    // the row's height and spacing are unchanged — only the clip grows.
+                    .padding(.vertical, metrics.railShadowClearance)
+                }
+                .padding(.top, metrics.railTopClearanceOffset)
+                .padding(.bottom, metrics.railBottomClearanceOffset)
+            }
         }
     }
 

@@ -35,12 +35,23 @@ public struct LibraryBrowseView: View {
     private let onSelect: (MediaItem) -> Void
 
     @Environment(\.plozzMetrics) private var metrics
+    /// Custom pinned-sidebar clearance. Native top/sidebar styles publish zero.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
     /// Per-profile card presentation. Decides how far a grid card insets its
     /// artwork, which is what the banner's edges have to match.
     @Environment(\.plozzCardStyle) private var cardStyle
     /// App-wide media-share scan/enrich status (optional so previews/tests that
     /// don't inject it don't crash). Feeds the banner under this library's title.
     @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
+
+    /// Library roots need a little more separation than Home rails: large focused
+    /// posters bloom toward the pinned icons, so the base sidebar inset alone
+    /// leaves them visually touching.
+    private var contentLeadingPadding: CGFloat {
+        HomeLayout.horizontalPadding
+            + navigationContentInset
+            + (navigationContentInset > 0 ? 16 : 0)
+    }
 
     public init(
         viewModel: LibraryBrowseViewModel,
@@ -88,7 +99,8 @@ public struct LibraryBrowseView: View {
                                 .id(index)
                             }
                         }
-                        .padding(.horizontal, HomeLayout.horizontalPadding)
+                        .padding(.leading, contentLeadingPadding)
+                        .padding(.trailing, HomeLayout.horizontalPadding)
                         .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                         .focusSection()
                     }
@@ -206,7 +218,8 @@ public struct LibraryBrowseView: View {
             sortControl
         }
 
-        .padding(.horizontal, HomeLayout.horizontalPadding)
+        .padding(.leading, contentLeadingPadding)
+        .padding(.trailing, HomeLayout.horizontalPadding)
         .focusSection()
     }
 
@@ -228,7 +241,8 @@ public struct LibraryBrowseView: View {
                 status: shareScanStatus,
                 shareID: viewModel.sourceServerID
             )
-            .padding(.horizontal, HomeLayout.horizontalPadding + posterArtworkInset)
+            .padding(.leading, contentLeadingPadding + posterArtworkInset)
+            .padding(.trailing, HomeLayout.horizontalPadding + posterArtworkInset)
             .padding(.vertical, Self.scanBannerVerticalGap)
         }
     }

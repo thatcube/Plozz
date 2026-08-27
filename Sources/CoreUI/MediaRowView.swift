@@ -95,6 +95,8 @@ public struct MediaRowView: View {
     /// spans the full width — which is what lets cards scroll *under* the rail and
     /// fade out there instead of being cut off at a narrowed viewport edge.
     @Environment(\.plozzNavigationContentInset) private var navigationContentInset
+    /// Keeps branch-specific masking completely out of native navigation styles.
+    @Environment(\.plozzPinnedSidebarActive) private var pinnedSidebarActive
 
     /// Extra scroll margin beyond the fade, so a FOCUSED card — which grows
     /// outward past its layout frame — still parks entirely clear of the feather.
@@ -352,8 +354,13 @@ public struct MediaRowView: View {
                         .padding(.leading, leadingInset + navigationContentInset)
                 }
 
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
+                PinnedSidebarLeadingFade(
+                    isActive: pinnedSidebarActive,
+                    inset: navigationContentInset,
+                    verticalOverhang: layoutMetrics.railShadowClearance
+                ) {
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: layoutMetrics.cardSpacing) {
                             ForEach(items, id: \.stablePresentationID) { item in
                                 tappableCard(for: item)
@@ -384,11 +391,6 @@ public struct MediaRowView: View {
                     // insetting the viewport puts the gutter outside the scroll view
                     // entirely, so it either hard-cuts or the engine scrolls cards
                     // back in. The safe area is the only one that does all three.
-                    .safeAreaPadding(.leading, navigationContentInset)
-                    .leadingEdgeFadeMask(
-                        fadeWidth: navigationContentInset,
-                        verticalOverhang: layoutMetrics.railShadowClearance
-                    )
                     // Section the whole rail VIEWPORT (the full-width horizontal
                     // ScrollView) — NOT the scrolled inner LazyHStack — but ONLY for
                     // the gated single-target flow (the episode rail). tvOS only enters
@@ -471,9 +473,10 @@ public struct MediaRowView: View {
                         if let target = gateTarget { scrollToIfNeeded(target, using: proxy) }
                     }
                 }
-                .onDisappear {
-                    pendingReport?.cancel()
-                    pendingReport = nil
+                    .onDisappear {
+                        pendingReport?.cancel()
+                        pendingReport = nil
+                    }
                 }
             }
         }

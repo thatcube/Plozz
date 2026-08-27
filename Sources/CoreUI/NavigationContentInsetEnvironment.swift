@@ -22,11 +22,25 @@ private struct PlozzNavigationContentInsetKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
 
+private struct PlozzPinnedSidebarActiveKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 public extension EnvironmentValues {
     /// The leading inset the navigation chrome has applied to page content.
     var plozzNavigationContentInset: CGFloat {
         get { self[PlozzNavigationContentInsetKey.self] }
         set { self[PlozzNavigationContentInsetKey.self] = newValue }
+    }
+
+    /// Whether Plozz's custom pinned sidebar owns the surrounding shell.
+    ///
+    /// Separate from the live inset because the sidebar publishes inset 0 while
+    /// hidden behind a detail page, but branch-specific drawing behavior must stay
+    /// stable until the navigation style itself changes.
+    var plozzPinnedSidebarActive: Bool {
+        get { self[PlozzPinnedSidebarActiveKey.self] }
+        set { self[PlozzPinnedSidebarActiveKey.self] = newValue }
     }
 }
 

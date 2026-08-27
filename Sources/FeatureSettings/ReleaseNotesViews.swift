@@ -13,7 +13,7 @@ public struct ReleaseNotesSettingsView: View {
     public var body: some View {
         #if os(tvOS)
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            LazyVStack(alignment: .leading, spacing: 28) {
                 SettingsPageHeader("Release Notes")
                 ReleaseNotesStartupPreferenceView(model: model)
                 ForEach(model.allVersionGroups) { group in
@@ -48,6 +48,7 @@ public struct ReleaseNotesStartupView: View {
     }
 
     private let model: ReleaseNotesModel
+    @Environment(\.themePalette) private var palette
     @State private var confirmsDisable = false
     @FocusState private var focusedAction: FocusedAction?
 
@@ -74,6 +75,7 @@ public struct ReleaseNotesStartupView: View {
                     .buttonStyle(.borderedProminent)
                     .focused($focusedAction, equals: .done)
                 }
+                .focusSection()
 
                 FadingScrollView(maxHeight: 600) {
                     VStack(alignment: .leading, spacing: 32) {
@@ -91,7 +93,7 @@ public struct ReleaseNotesStartupView: View {
             }
             .padding(40)
             .frame(maxWidth: 1120)
-            .background(.ultraThinMaterial)
+            .background(palette.settingsBackground)
             .clipShape(
                 RoundedRectangle(
                     cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius,

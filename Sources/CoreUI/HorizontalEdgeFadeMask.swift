@@ -75,7 +75,100 @@ public struct LeadingEdgeFadeMask: View {
     }
 }
 
+/// Smoothly feathers both vertical edges while leaving horizontal overflow alone.
+///
+/// For a list that scrolls between fixed chrome — the navigation rail's library
+/// list, which sits under a section label and above the pinned Settings row.
+/// Clipping alone would cut a row mid-glyph at each end; this dissolves it
+/// instead, so nothing ever appears to overlap the chrome.
+///
+/// `horizontalOverhang` widens the mask left and right so a focused row's own
+/// lift and shadow are not clipped by it.
+public struct VerticalEdgeFadeMask: View {
+    private let topFade: CGFloat
+    private let bottomFade: CGFloat
+    private let horizontalOverhang: CGFloat
+
+    /// Feathers both ends by the same amount.
+    public init(fadeHeight: CGFloat, horizontalOverhang: CGFloat = 0) {
+        self.init(
+            topFade: fadeHeight,
+            bottomFade: fadeHeight,
+            horizontalOverhang: horizontalOverhang
+        )
+    }
+
+    /// Feathers each end independently. A fade of `0` leaves that end hard, which
+    /// is what a list wants at an end it is not scrolled past — an always-on fade
+    /// dims the first or last row for no reason.
+    public init(topFade: CGFloat, bottomFade: CGFloat, horizontalOverhang: CGFloat = 0) {
+        self.topFade = topFade
+        self.bottomFade = bottomFade
+        self.horizontalOverhang = horizontalOverhang
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            if topFade > 0 {
+                edgeFade(reversed: false).frame(height: topFade)
+            }
+            Color.black
+            if bottomFade > 0 {
+                edgeFade(reversed: true).frame(height: bottomFade)
+            }
+        }
+        .padding(.horizontal, -horizontalOverhang)
+    }
+
+    private func edgeFade(reversed: Bool) -> some View {
+        let samples = 24
+        let stops = (0 ... samples).map { step -> Gradient.Stop in
+            let t = Double(step) / Double(samples)
+            let eased = t * t * (3 - 2 * t)
+            return Gradient.Stop(
+                color: .black.opacity(reversed ? 1 - eased : eased),
+                location: t
+            )
+        }
+        return LinearGradient(
+            stops: stops,
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+
 public extension View {
+    /// Feathers the top and bottom edges. `horizontalOverhang` expands the mask
+    /// left and right so a focused row's lift and shadow are not clipped by it.
+    func verticalEdgeFadeMask(
+        fadeHeight: CGFloat,
+        horizontalOverhang: CGFloat = 0
+    ) -> some View {
+        mask {
+            VerticalEdgeFadeMask(
+                fadeHeight: fadeHeight,
+                horizontalOverhang: horizontalOverhang
+            )
+        }
+    }
+
+    /// Feathers each end independently, so a list only dissolves at an end it is
+    /// actually scrolled past.
+    func verticalEdgeFadeMask(
+        topFade: CGFloat,
+        bottomFade: CGFloat,
+        horizontalOverhang: CGFloat = 0
+    ) -> some View {
+        mask {
+            VerticalEdgeFadeMask(
+                topFade: topFade,
+                bottomFade: bottomFade,
+                horizontalOverhang: horizontalOverhang
+            )
+        }
+    }
+
     /// Feathers the leading edge only. `verticalOverhang` expands the mask above
     /// and below so a focused card's lift and shadow are not clipped by it.
     func leadingEdgeFadeMask(

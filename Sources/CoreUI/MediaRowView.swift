@@ -359,9 +359,8 @@ public struct MediaRowView: View {
                                 tappableCard(for: item)
                             }
                         }
-                        // The row's ordinary page gutters, unchanged from before the
-                        // navigation rail existed. Only the extra NAVIGATION inset is
-                        // handled differently (by the viewport below) — this is not.
+                        // The row's ordinary page gutter, unchanged from before the
+                        // navigation rail existed.
                         .padding(.leading, leadingInset)
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                         // Reserve generous vertical room *inside* the clip so a
@@ -373,25 +372,19 @@ public struct MediaRowView: View {
                     }
                     .padding(.top, layoutMetrics.railTopClearanceOffset)
                     .padding(.bottom, layoutMetrics.railBottomClearanceOffset)
-                    // The navigation gutter is a scroll-content MARGIN, not a
-                    // narrower viewport — the same shape as the in-player cast rail.
+                    // The navigation gutter is the scroll view's SAFE AREA — the
+                    // same mechanism that lets a row scroll under the system tab bar
+                    // on tvOS, and the reason that has never needed any of this.
                     //
-                    // As a viewport inset it was wrong in both directions: the row
-                    // gained a gutter's worth of extra travel, and because cards draw
-                    // outside the viewport (clip disabled, for the fade) a card
-                    // already visible in the gutter still had to be scrolled INTO the
-                    // viewport when focused — so moving focus back left jumped.
-                    //
-                    // A margin keeps the viewport full width and IS honoured by the
-                    // focus engine, so a card parks just inside the gutter and its
-                    // neighbour stays where it was drawn. (An earlier attempt at this
-                    // appeared not to work only because the stack also carried leading
-                    // padding, which fought it.)
-                    .contentMargins(.leading, navigationContentInset, for: .scrollContent)
-                    .scrollClipDisabled()
-                    // With the clip off, cards keep drawing into the margin. This
-                    // feathers them there and clips whatever is left, so content
-                    // slides under the rail instead of ending at a hard line.
+                    // A safe area is the one inset the focus engine parks a focused
+                    // card against, while the viewport stays full width so the card
+                    // still DRAWS in the gutter on its way past and can be feathered
+                    // there. Padding inside the stack scrolls away; `contentMargins`
+                    // is ignored by focus scrolling (only the first card landed);
+                    // insetting the viewport puts the gutter outside the scroll view
+                    // entirely, so it either hard-cuts or the engine scrolls cards
+                    // back in. The safe area is the only one that does all three.
+                    .safeAreaPadding(.leading, navigationContentInset)
                     .leadingEdgeFadeMask(
                         fadeWidth: navigationContentInset,
                         verticalOverhang: layoutMetrics.railShadowClearance

@@ -1049,11 +1049,8 @@ public struct HomeView: View {
             }
             .padding(.top, metrics.railTopClearanceOffset)
             .padding(.bottom, metrics.railBottomClearanceOffset)
-            // Same navigation gutter as every media row — see `MediaRowView`. A
-            // scroll-content margin rather than a viewport inset, so the focus
-            // engine parks a tile just inside the gutter instead of jumping.
-            .contentMargins(.leading, navigationContentInset, for: .scrollContent)
-            .scrollClipDisabled()
+            // Same navigation gutter as every media row — see `MediaRowView`.
+            .safeAreaPadding(.leading, navigationContentInset)
             .leadingEdgeFadeMask(
                 fadeWidth: navigationContentInset,
                 verticalOverhang: metrics.railShadowClearance

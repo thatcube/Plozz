@@ -34,6 +34,11 @@ struct NavigationRailShell<Content: View>: View {
     @Namespace private var focusScopeID
     /// Whether focus is inside the rail, reported up from it.
     @State private var railExpanded = false
+    /// Bumped each time the catcher takes a Left press, so the rail claims focus.
+    @State private var focusRequestToken = 0
+    /// Bumped each time a Right press inside the rail resolves to nothing, so focus
+    /// returns to the page.
+    @State private var railReturnToken = 0
 
     /// How far the page slides right while the rail is expanded.
     ///
@@ -63,7 +68,31 @@ struct NavigationRailShell<Content: View>: View {
                     hidden ? 0 : NavigationRailMetrics.contentInset
                 )
                 .offset(x: railExpanded && !hidden ? pageShift : 0)
-                .prefersDefaultFocus(true, in: focusScopeID)
+                // Content is the scope's preferred focus ONLY while the rail does
+                // not hold focus. Left into the rail changes `railExpanded`, which
+                // shifts the page — and a layout change re-asserts the scope's
+                // preferred focus. Left unconditional, that pulled focus straight
+                // back out of the rail in the same frame it arrived: the rail lit up
+                // and vanished again.
+                .prefersDefaultFocus(!railExpanded, in: focusScopeID)
+
+
+            // Left opens the navigation from anywhere, and Right leaves it from
+            // anywhere — including across a grid or rail whose own focus section
+            // would otherwise absorb the press. See `NavigationRailEdgeCatcher`;
+            // both are fallbacks for a press that resolved to nothing, so no
+            // existing behaviour in either direction changes.
+            if !hidden {
+                NavigationRailEdgeCatcher(
+                    onOpenNavigation: { focusRequestToken &+= 1 },
+                    onLeaveNavigation: { railReturnToken &+= 1 },
+                    railHasFocus: railExpanded,
+                    isEnabled: true
+                )
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
 
             if !hidden {
                 NavigationRailView(
@@ -72,7 +101,9 @@ struct NavigationRailShell<Content: View>: View {
                     showsMusic: showsMusic,
                     selection: $selection,
                     isExpandedOutward: $railExpanded,
-                    onOpenProfileSwitcher: onOpenProfileSwitcher
+                    onOpenProfileSwitcher: onOpenProfileSwitcher,
+                    focusRequestToken: focusRequestToken,
+                    focusReleaseToken: railReturnToken
                 )
                 // Breaks out of the title-safe area so the icons sit in the empty
                 // margin down the side of the picture rather than inside the

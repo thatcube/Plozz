@@ -342,6 +342,14 @@ struct DetailHeroView: View, Equatable {
     /// CHEAP signal — the durable one re-resolves every card and saves the content
     /// store, which is precisely the main-thread work that was stopping the new
     /// state from reaching the screen.
+    ///
+    /// **`heroWatchlistAction` must read it.** A `@State` value only invalidates
+    /// the bodies that actually read it, so for a while this was bumped and read
+    /// nowhere — which invalidates nothing at all. The listener fired, the counter
+    /// moved, and the button went on showing the old label until some unrelated
+    /// change happened to redraw the page. What that usually waited on was the
+    /// durable write returning from plex.tv, so a change the app had already
+    /// accepted looked like one it was still thinking about.
     @State private var watchlistRevision = 0
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
@@ -417,6 +425,18 @@ struct DetailHeroView: View, Equatable {
     /// watched toggle, which deliberately resolves against the play target for the
     /// same reason in reverse: each button acts on the thing it is actually about.
     private var heroWatchlistAction: MediaItemAction? {
+        // Read so SwiftUI records the dependency.
+        //
+        // Whether this title is watchlisted lives in the coordinator, not in any
+        // state this view owns, so nothing here changes when the answer does — and
+        // a `@State` counter is only a redraw trigger for a body that actually
+        // reads it. Bumped and never read, it invalidated nothing: the press was
+        // accepted at once, the coordinator knew immediately, and the button went
+        // on showing the old label until something unrelated happened to redraw the
+        // page. That wait was the durable write finishing, which is a network round
+        // trip to plex.tv and can take many seconds — so a change the app had
+        // already made looked like one it was still thinking about.
+        _ = watchlistRevision
         let subject = backdrop.watchlistSubject
         let actions = subject.id == item.id
             ? heroActions

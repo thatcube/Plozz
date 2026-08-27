@@ -438,14 +438,6 @@ public enum PlozzTheme {
         /// read as text running out of card rather than fading away; stopping
         /// just inside it reads as deliberate.
         public static let marqueeRestingEdgeGapRatio: CGFloat = 0.45
-        /// How far a **focused** caption indents, as a multiple of the inset.
-        ///
-        /// Only the focused one moves. A resting caption keeps the exact position
-        /// it has always had, so nothing shifts in a grid you're scrolling past;
-        /// the focused card, which has grown around its caption, takes the extra
-        /// indent — and that indent is the room its leading dissolve needs.
-        public static let marqueeFocusedLeadRatio: CGFloat = 1.5
-
         /// How fast a focused card's caption walks its overflow into view.
         ///
         /// Reading pace, not scrolling pace — and unhurried, because the line is

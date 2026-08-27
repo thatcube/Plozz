@@ -36,6 +36,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     private let beginUniversalWatchlistFanOut:
         @MainActor (Bool, MediaItem) -> Void
     private let resolveDurableWatchlist: ([MediaItem]) -> [MediaItem]
+    private let durableWatchlistPresentationReady: () -> Bool
     private let seedLegacyUniversalWatchlist: ([MediaItem]) async -> Void
     /// Current offline state for an item, or `nil` on a surface without download
     /// capability. Injected as a closure so AppRuntime needn't depend on
@@ -154,6 +155,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         resolveDurableWatchlist: @escaping ([MediaItem]) -> [MediaItem] = {
             $0.filter(\.isFavorite)
         },
+        durableWatchlistPresentationReady: @escaping () -> Bool = { true },
         seedLegacyUniversalWatchlist: @escaping ([MediaItem]) async -> Void = { _ in },
         downloadState: @escaping (MediaItem) -> MediaItemDownloadState?? = { _ in nil },
         performDownloadAction: @escaping (MediaItemAction, MediaItem) -> Void = { _, _ in }
@@ -172,6 +174,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             presentUniversalWatchlistFeedback
         self.beginUniversalWatchlistFanOut = beginUniversalWatchlistFanOut
         self.resolveDurableWatchlist = resolveDurableWatchlist
+        self.durableWatchlistPresentationReady =
+            durableWatchlistPresentationReady
         self.seedLegacyUniversalWatchlist = seedLegacyUniversalWatchlist
         self.downloadState = downloadState
         self.performDownloadAction = performDownloadAction
@@ -700,6 +704,10 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         universalWatchlistEnabled()
             ? resolveDurableWatchlist(candidates)
             : candidates.filter(\.isFavorite)
+    }
+
+    public func isDurableWatchlistPresentationReady() -> Bool {
+        !universalWatchlistEnabled() || durableWatchlistPresentationReady()
     }
 
     public func seedLegacyWatchlist(_ items: [MediaItem]) async {

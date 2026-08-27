@@ -677,7 +677,7 @@ public extension UniversalWatchlistHost {
             let known = Dictionary(
                 universalWatchlistNativeView.bucket(for: read.destinationID)?
                     .entries.compactMap { entry in
-                        entry.ownedSource.map { (entry.aliasID, $0) }
+                        entry.ownedCopy.map { (entry.aliasID, $0) }
                     } ?? [],
                 uniquingKeysWith: { first, _ in first }
             )
@@ -689,15 +689,27 @@ public extension UniversalWatchlistHost {
             ].enumerated() {
                 let (aliasID, entry) = resolved
                 var owned = known[aliasID]
-                if owned == nil, let resolver {
-                    owned = await resolver(entry)
+                if owned?.presentation == nil, let resolver,
+                   let refreshed = await resolver(entry) {
+                    // Also refresh an older cached ownership that has a source
+                    // but predates `ownedPresentation`. Without this, the source
+                    // made the badge instant but the missing presentation could
+                    // never heal — `owned != nil` suppressed the only lookup that
+                    // knew the local poster.
+                    owned = refreshed
                 }
                 guard let value = NativeWatchlistEntry(
                     aliasID: aliasID,
                     kind: entry.kind,
                     presentation: entry.presentation,
                     index: offset,
-                    ownedSource: owned
+                    ownedSource: owned?.source,
+                    // Once the server has proved its own copy, its presentation
+                    // belongs with that answer. Persisting only the source ref let
+                    // the badge flip now but left Discover artwork on screen
+                    // until a later Home rebuild happened to find the full local
+                    // MediaItem.
+                    ownedPresentation: owned?.presentation
                 ) else { continue }
                 entries.append(value)
             }

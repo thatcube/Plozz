@@ -79,12 +79,69 @@ final class UniversalWatchlistHomeTests: XCTestCase {
             [newlyAdded.stablePresentationID, older.stablePresentationID]
         )
     }
+
+    /// Home's own snapshot is already a complete last-known presentation. Before
+    /// the watchlist runtime has opened its native-view cache, resolving against
+    /// the runtime means resolving against explicit intents only — and replacing
+    /// this complete row with a smaller, unowned one.
+    func testCachedRowIsNotDowngradedBeforeWatchlistCacheLoads() {
+        let cachedOwned = MediaItem(
+            id: "owned",
+            title: "Cached owned copy",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID(),
+            locallyValidatedPlayableSource: true
+        )
+        let explicitOnly = MediaItem(
+            id: "explicit",
+            title: "Explicit only",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID(),
+            availability: .unknown,
+            locallyValidatedPlayableSource: false
+        )
+        let store = UniversalWatchlistHomeStore(
+            content: .init(watchlist: [cachedOwned])
+        )
+        let handler = UniversalWatchlistHomeHandler(
+            items: [explicitOnly],
+            ready: false
+        )
+
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: store,
+            mediaItemActionHandler: handler
+        )
+
+        guard case .loaded(let initial) = model.state else {
+            return XCTFail("Expected cached content")
+        }
+        XCTAssertEqual(initial.watchlist.map(\.id), ["owned"])
+        XCTAssertTrue(
+            initial.watchlist[0].locallyValidatedPlayableSource,
+            "The first frame must keep last-known ownership"
+        )
+
+        // Once cache restoration says the runtime is authoritative, its ordinary
+        // refresh path takes over.
+        handler.ready = true
+        model.refreshDurableWatchlist()
+        guard case .loaded(let refreshed) = model.state else {
+            return XCTFail("Expected refreshed content")
+        }
+        XCTAssertEqual(refreshed.watchlist.map(\.id), ["explicit"])
+    }
 }
 
 @MainActor
 private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
     var items: [MediaItem]
-    init(items: [MediaItem]) { self.items = items }
+    var ready: Bool
+    init(items: [MediaItem], ready: Bool = true) {
+        self.items = items
+        self.ready = ready
+    }
     func actions(
         for item: MediaItem,
         context: MediaItemActionContext
@@ -97,6 +154,7 @@ private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
     func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem] {
         items
     }
+    func isDurableWatchlistPresentationReady() -> Bool { ready }
 }
 
 private final class UniversalWatchlistHomeStore:

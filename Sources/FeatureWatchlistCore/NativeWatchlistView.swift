@@ -22,13 +22,22 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
     /// both of which correctly present as not-in-library rather than as a
     /// library title with nothing to play.
     public let ownedSource: MediaSourceRef?
+    /// Presentation supplied by that owned library copy.
+    ///
+    /// Separate from `presentation`, which is what the watchlist destination
+    /// itself supplied (Plex Discover, Trakt, and so on). Overloading that field
+    /// would make a v1 cache ambiguous: an entry with `ownedSource != nil` may
+    /// still carry Discover artwork because older builds persisted only the source
+    /// ref. Optional so those files decode and self-upgrade on the next refresh.
+    public let ownedPresentation: MediaAliasPresentation?
 
     public init?(
         aliasID: MediaAliasID,
         kind: MediaItemKind,
         presentation: MediaAliasPresentation? = nil,
         index: Int,
-        ownedSource: MediaSourceRef? = nil
+        ownedSource: MediaSourceRef? = nil,
+        ownedPresentation: MediaAliasPresentation? = nil
     ) {
         guard kind == .movie || kind == .series else { return nil }
         self.aliasID = aliasID
@@ -36,6 +45,18 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
         self.presentation = presentation?.sanitizedForSync()
         self.index = index
         self.ownedSource = ownedSource
+        self.ownedPresentation = ownedPresentation?.sanitizedForSync()
+    }
+
+    /// Last-known owned copy, including the presentation the library supplied.
+    ///
+    /// Kept as a computed value so call sites cannot accidentally separate the
+    /// two halves. Older v1 files decode `ownedPresentation` as nil and the
+    /// runtime re-asks the server once to fill it.
+    public var ownedCopy: WatchlistLibraryCopy? {
+        ownedSource.map {
+            WatchlistLibraryCopy(source: $0, presentation: ownedPresentation)
+        }
     }
 }
 

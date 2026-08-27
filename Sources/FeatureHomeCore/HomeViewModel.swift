@@ -232,13 +232,29 @@ public final class HomeViewModel {
         // snapshot is used; anything else leaves
         // `state == .idle` so a genuine first launch shows the normal loading state.
         if var cached = contentStore.load() {
-            if let mediaItemActionHandler {
+            if let mediaItemActionHandler,
+               mediaItemActionHandler.isDurableWatchlistPresentationReady() {
                 let resolved = mediaItemActionHandler.durableWatchlistItems(
                     from: cached.watchlist + cached.latest
                 )
                 if !resolved.isEmpty || cached.watchlist.isEmpty {
                     cached.watchlist = resolved
                 }
+            } else {
+                // Last session's Home snapshot is a complete, resolved view. The
+                // watchlist runtime opens its own persisted native view a little
+                // later in startup; until then it contains only explicit Plozz
+                // intents. Re-resolving now downgraded 181 cached titles to 78
+                // explicit ones and erased every last-known `ownedSource`, which
+                // put "+" on the whole row before the runtime cache restored the
+                // same answers seconds later.
+                //
+                // Trust the snapshot until the cache-loaded notification asks us
+                // to fold the now-authoritative runtime in. A local removal may
+                // therefore survive for those few milliseconds after a crash
+                // that interrupted the snapshot save — a safe stale answer, and
+                // strictly better than discarding every native title on every
+                // ordinary launch.
             }
             // With NO servers to watch, every SERVER-derived row in the snapshot
             // belongs to a library this profile no longer sees. Repainting them

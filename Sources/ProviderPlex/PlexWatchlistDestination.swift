@@ -112,7 +112,7 @@ public struct PlexWatchlistDestination: WatchlistLibraryResolving {
     /// account-level list, but the LIBRARY belongs to the server.
     public func resolveLibraryCopy(
         for entry: WatchlistDestinationEntry
-    ) async -> MediaSourceRef? {
+    ) async -> WatchlistLibraryCopy? {
         // Plex's own id already carries its scheme (`plex://movie/…`), so
         // prefixing it again produced `plex://plex://movie/…` and matched
         // nothing. It is also the id most likely to match, because a library
@@ -132,11 +132,20 @@ public struct PlexWatchlistDestination: WatchlistLibraryResolving {
         guard let item = await provider.libraryItem(matchingAnyOf: guids) else {
             return nil
         }
-        return MediaSourceRef(
-            accountID: provider.accountID,
-            itemID: item.id,
-            kind: item.kind,
-            providerKind: .plex
+        return WatchlistLibraryCopy(
+            source: MediaSourceRef(
+                accountID: provider.accountID,
+                itemID: item.id,
+                kind: item.kind,
+                providerKind: .plex
+            ),
+            presentation: MediaAliasPresentation(
+                title: item.title,
+                year: item.productionYear,
+                artworkURL: item.posterURL?.absoluteString,
+                backdropURL:
+                    (item.heroBackdropURL ?? item.backdropURL)?.absoluteString
+            )
         )
     }
 

@@ -43,14 +43,19 @@ public struct MediaBrowserWatchlistDestination: WatchlistLibraryResolving {
     /// happened to land.
     public func resolveLibraryCopy(
         for entry: WatchlistDestinationEntry
-    ) async -> MediaSourceRef? {
+    ) async -> WatchlistLibraryCopy? {
         guard let binding = entry.corroboratedProviderBinding,
               binding.accountDescriptorID == provider.accountID else { return nil }
-        return MediaSourceRef(
-            accountID: provider.accountID,
-            itemID: binding.providerItemID,
-            kind: entry.kind,
-            providerKind: provider.kind
+        return WatchlistLibraryCopy(
+            source: MediaSourceRef(
+                accountID: provider.accountID,
+                itemID: binding.providerItemID,
+                kind: entry.kind,
+                providerKind: provider.kind
+            ),
+            // A Jellyfin/Emby favourite IS the library item, so the presentation
+            // the destination already read is the owned presentation.
+            presentation: entry.presentation
         )
     }
 

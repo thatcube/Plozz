@@ -86,6 +86,8 @@ public struct WatchlistUnion: Sendable, Equatable {
         // What each server said it owns, keyed by alias, so an explicit intent
         // that a server ALSO holds still picks up the owned copy.
         var ownedByAlias: [MediaAliasID: MediaSourceRef] = [:]
+        var ownedPresentationByAlias:
+            [MediaAliasID: MediaAliasPresentation] = [:]
         var ownedTitleKeys: Set<String> = []
         for (rawID, bucket) in nativeView.bucketsByDestinationID {
             guard let destinationID = WatchlistDestinationID(rawValue: rawID),
@@ -95,6 +97,8 @@ public struct WatchlistUnion: Sendable, Equatable {
                     ?? entry.aliasID
                 if ownedByAlias[aliasID] == nil {
                     ownedByAlias[aliasID] = entry.ownedSource
+                    ownedPresentationByAlias[aliasID] =
+                        entry.ownedPresentation
                 }
                 if let key = Self.titleKey(
                     kind: entry.kind,
@@ -112,7 +116,12 @@ public struct WatchlistUnion: Sendable, Equatable {
             entries.append(WatchlistUnionEntry(
                 aliasID: aliasID,
                 kind: intent.kind,
-                presentation: intent.presentation,
+                // An explicit intent determines order and membership, not which
+                // poster is best. When a server has proved the owned copy, keep
+                // its presentation with the source so the badge and artwork
+                // upgrade together.
+                presentation:
+                    ownedPresentationByAlias[aliasID] ?? intent.presentation,
                 isExplicit: true,
                 ownedSource: ownedByAlias[aliasID]
             ))
@@ -181,7 +190,8 @@ public struct WatchlistUnion: Sendable, Equatable {
             entries.append(WatchlistUnionEntry(
                 aliasID: aliasID,
                 kind: entry.kind,
-                presentation: entry.presentation,
+                presentation:
+                    entry.ownedPresentation ?? entry.presentation,
                 isExplicit: false,
                 ownedSource: entry.ownedSource ?? ownedByAlias[aliasID]
             ))

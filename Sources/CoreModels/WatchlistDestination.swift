@@ -460,11 +460,32 @@ public protocol WatchlistDestination: Sendable {
 /// you own. Asking the server directly is what removes the dependency on a
 /// complete, current, successfully-published client-side catalogue index just to
 /// decide whether a title is in the library.
+/// One title the media server proved it owns, with enough presentation to
+/// upgrade the card at the same time as its availability.
+///
+/// A source ref alone answers "can I play it?" but carries no artwork. Persisting
+/// only that ref made the "+" disappear while the Discover poster stayed put;
+/// Home could not switch to the library poster until some later rebuild happened
+/// to bring the full local `MediaItem` into its candidate set. Ownership is one
+/// answer, so its play target and presentation travel together.
+public struct WatchlistLibraryCopy: Codable, Hashable, Sendable {
+    public let source: MediaSourceRef
+    public let presentation: MediaAliasPresentation?
+
+    public init(
+        source: MediaSourceRef,
+        presentation: MediaAliasPresentation? = nil
+    ) {
+        self.source = source
+        self.presentation = presentation?.sanitizedForSync()
+    }
+}
+
 public protocol WatchlistLibraryResolving: WatchlistDestination {
     /// The owned copy of `entry`, or `nil` when this server doesn't have it.
     func resolveLibraryCopy(
         for entry: WatchlistDestinationEntry
-    ) async -> MediaSourceRef?
+    ) async -> WatchlistLibraryCopy?
 }
 
 public extension WatchlistDestination {

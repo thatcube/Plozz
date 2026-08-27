@@ -32,6 +32,17 @@ public protocol MediaItemActionHandling: AnyObject {
     /// Resolves the durable ordered row against current presentation candidates.
     func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem]
 
+    /// Whether the durable watchlist runtime has restored its last-known native
+    /// view and can authoritatively re-resolve a saved Home row.
+    ///
+    /// Home itself has a persisted snapshot. On process start that snapshot is
+    /// ready before the watchlist runtime has opened its own file. Resolving it
+    /// against the still-empty runtime does not "freshen" it — it throws away
+    /// every native-only entry and every cached ownership answer, producing the
+    /// 78 explicit intents where the saved row held 181 resolved titles. Until
+    /// this turns true, last session's Home snapshot is the more complete truth.
+    func isDurableWatchlistPresentationReady() -> Bool
+
     /// One-time bounded Home-cache migration before native imports.
     func seedLegacyWatchlist(_ items: [MediaItem]) async
 
@@ -43,6 +54,7 @@ public extension MediaItemActionHandling {
     func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem] {
         candidates.filter(\.isFavorite)
     }
+    func isDurableWatchlistPresentationReady() -> Bool { true }
     func seedLegacyWatchlist(_ items: [MediaItem]) async {}
 }
 

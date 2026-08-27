@@ -69,6 +69,10 @@ public enum WatchlistPresentationResolver {
                 if let owned = entry.ownedSource,
                    !candidate.locallyValidatedPlayableSource {
                     var resolved = candidate.selectingSource(owned)
+                    resolved = applyingOwnedPresentation(
+                        entry.presentation,
+                        to: resolved
+                    )
                     resolved.availability = nil
                     resolved.watchlistAliasID = aliasID
                     return WatchlistPresentationEntry(
@@ -130,12 +134,41 @@ public enum WatchlistPresentationResolver {
             // answer first, the index only as a fallback.
             var item = entry.ownedSource.map {
                 var owned = placeholder.selectingSource($0)
+                owned = applyingOwnedPresentation(
+                    entry.presentation,
+                    to: owned
+                )
                 owned.availability = nil
                 return owned
             } ?? resolved ?? placeholder
             item.watchlistAliasID = aliasID
             return WatchlistPresentationEntry(aliasID: aliasID, item: item)
         }
+    }
+
+    /// Carries the owned library's artwork onto the item at the same moment its
+    /// source makes the availability badge disappear.
+    ///
+    /// `selectingSource` deliberately changes playback identity only:
+    /// `MediaSourceRef` has no artwork. Without this fold, the card learned "you
+    /// own it" immediately but kept its Discover poster until a later Home rebuild
+    /// happened to bring the full library item into the candidate set — which is
+    /// why leaving Home and returning changed the artwork after the "+" was
+    /// already gone.
+    private static func applyingOwnedPresentation(
+        _ presentation: MediaAliasPresentation?,
+        to item: MediaItem
+    ) -> MediaItem {
+        guard let presentation else { return item }
+        var item = item
+        if let artwork = presentation.artworkURL.flatMap(URL.init(string:)) {
+            item.posterURL = artwork
+        }
+        if let backdrop = presentation.backdropURL.flatMap(URL.init(string:)) {
+            item.backdropURL = backdrop
+            item.heroBackdropURL = backdrop
+        }
+        return item
     }
 
     public static func indexCurrentItems(

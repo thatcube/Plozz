@@ -488,7 +488,7 @@ public actor WatchlistReconciler {
     /// and so the registry stays the single place destinations are looked up.
     public func libraryResolver(
         for destinationID: WatchlistDestinationID
-    ) -> (@Sendable (WatchlistDestinationEntry) async -> MediaSourceRef?)? {
+    ) -> (@Sendable (WatchlistDestinationEntry) async -> WatchlistLibraryCopy?)? {
         guard let destination = registry[destinationID]
                 as? any WatchlistLibraryResolving else { return nil }
         return { entry in await destination.resolveLibraryCopy(for: entry) }

@@ -359,6 +359,11 @@ final class PlozziOSAppModel {
             resolveDurableWatchlist: { [unowned self] items in
                 self.resolvedUniversalWatchlistItems(candidates: items)
             },
+            durableWatchlistPresentationReady: { [unowned self] in
+                // Installed at the same time as the cached native view. Until
+                // then Home's own snapshot is the more complete answer.
+                self.universalWatchlistNativeViewStore != nil
+            },
             seedLegacyUniversalWatchlist: { [weak self] _ in
                 try? await self?.seedLegacyUniversalWatchlist()
             },

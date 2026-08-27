@@ -312,13 +312,22 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
                 NativeWatchlistEntry(
                     aliasID: aliasID,
                     kind: .series,
-                    presentation: MediaAliasPresentation(title: "Your Honor", year: 2020),
+                    presentation: MediaAliasPresentation(
+                        title: "Your Honor",
+                        year: 2020,
+                        artworkURL: "https://discover.example/your-honor.jpg"
+                    ),
                     index: 0,
                     ownedSource: MediaSourceRef(
                         accountID: "plex-account",
                         itemID: "library-rating-key",
                         kind: .series,
                         providerKind: .plex
+                    ),
+                    ownedPresentation: MediaAliasPresentation(
+                        title: "Your Honor",
+                        year: 2020,
+                        artworkURL: "https://library.example/your-honor.jpg"
                     )
                 )!
             ]
@@ -334,6 +343,9 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
             id: "discover-series",
             title: "Your Honor",
             kind: .series,
+            posterURL: URL(
+                string: "https://discover.example/your-honor.jpg"
+            ),
             locallyValidatedPlayableSource: false
         )
 
@@ -353,6 +365,11 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
         )
         XCTAssertTrue(item.locallyValidatedPlayableSource)
         XCTAssertNil(item.availability)
+        XCTAssertEqual(
+            item.posterURL?.absoluteString,
+            "https://library.example/your-honor.jpg",
+            "The badge and owned artwork must upgrade in the same publication"
+        )
     }
 
     /// And with no live candidate either — a watchlisted title that appears in
@@ -367,13 +384,23 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
                 NativeWatchlistEntry(
                     aliasID: aliasID,
                     kind: .movie,
-                    presentation: MediaAliasPresentation(title: "Coco", year: 2017),
+                    presentation: MediaAliasPresentation(
+                        title: "Coco",
+                        year: 2017,
+                        artworkURL: "https://discover.example/coco.jpg"
+                    ),
                     index: 0,
                     ownedSource: MediaSourceRef(
                         accountID: "plex-account",
                         itemID: "owned-42",
                         kind: .movie,
                         providerKind: .plex
+                    ),
+                    ownedPresentation: MediaAliasPresentation(
+                        title: "Coco",
+                        year: 2017,
+                        artworkURL: "https://library.example/coco.jpg",
+                        backdropURL: "https://library.example/coco-backdrop.jpg"
                     )
                 )!
             ]
@@ -395,6 +422,14 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
         let item = try XCTUnwrap(resolved.first?.item)
         XCTAssertEqual(item.id, "owned-42")
         XCTAssertTrue(item.locallyValidatedPlayableSource)
+        XCTAssertEqual(
+            item.posterURL?.absoluteString,
+            "https://library.example/coco.jpg"
+        )
+        XCTAssertEqual(
+            item.heroBackdropURL?.absoluteString,
+            "https://library.example/coco-backdrop.jpg"
+        )
     }
 
     /// The upgrade must never invent a match. Retargeting on title+year alone
@@ -443,6 +478,40 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
         let item = try XCTUnwrap(resolved.first?.item)
         XCTAssertFalse(item.locallyValidatedPlayableSource)
         XCTAssertEqual(item.availability, .unknown)
+    }
+
+    /// v1 native-view files already on devices have an owned source but no
+    /// `ownedPresentation` field. They must decode intact so the source keeps the
+    /// badge correct while the next refresh fills the local artwork once.
+    func testOwnedSourceWithoutOwnedPresentationStillDecodes() throws {
+        let entry = try XCTUnwrap(NativeWatchlistEntry(
+            aliasID: MediaAliasID(),
+            kind: .movie,
+            presentation: MediaAliasPresentation(
+                title: "Discover title",
+                year: 2024,
+                artworkURL: "https://discover.example/poster.jpg"
+            ),
+            index: 0,
+            ownedSource: MediaSourceRef(
+                accountID: "plex",
+                itemID: "42",
+                kind: .movie,
+                providerKind: .plex
+            )
+        ))
+
+        let decoded = try JSONDecoder().decode(
+            NativeWatchlistEntry.self,
+            from: JSONEncoder().encode(entry)
+        )
+
+        XCTAssertEqual(decoded.ownedSource?.itemID, "42")
+        XCTAssertNil(decoded.ownedPresentation)
+        XCTAssertEqual(
+            decoded.presentation?.artworkURL,
+            "https://discover.example/poster.jpg"
+        )
     }
 }
 

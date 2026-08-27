@@ -5,16 +5,23 @@ import SwiftUI
 /// truncating with an ellipsis, and walks its overflow into view while its card
 /// holds focus.
 ///
-/// The geometry is borrowed rather than invented. A caption already sits inset
-/// from the card's edges — that inset is what keeps text clear of the rounded
-/// corners (see `PlozzMetrics.posterCaptionInset`) — so the marquee uses that
-/// same gap as its fade zone and the card's own edges as the hard cut-off. Text
-/// that runs long doesn't stop short with a "…"; it carries on into the gap,
-/// dissolving as it goes, and is completely gone by the card's edge.
+/// The geometry is derived from the card rather than invented. A caption already
+/// sits inset from the card's edges — that inset is what keeps text clear of the
+/// rounded corners (see `PlozzMetrics.posterCaptionInset`) — and every dimension
+/// here is a multiple of it. That is what makes one component fit every card:
+/// poster and landscape have different corner radii, framed and borderless
+/// different insets again, and all of them move with the display-size setting,
+/// so a fade expressed in *card* terms tracks all of it without a table of
+/// special cases. Text that runs long doesn't stop short with a "…"; it carries
+/// on and dissolves.
 ///
-/// At rest the line sits exactly where it always did: same position, same
-/// left-hand start. The only difference is what happens at the far end — a fade
-/// where there used to be an ellipsis. Focus is what sets it moving.
+/// A resting caption keeps the exact position it has always had, so nothing
+/// shifts in a grid you are scrolling past, and it finishes dissolving just
+/// inside the card's edge — ending flush with the edge read as text running out
+/// of card rather than fading away. A focused caption indents further and
+/// dissolves over a longer distance: its card has grown around it, so there is
+/// more room on both sides, and using that room is what keeps the fade in
+/// proportion to the card it belongs to. Focus is also what sets it moving.
 ///
 /// ## The scrolling line must not be part of the layout
 ///
@@ -27,12 +34,12 @@ import SwiftUI
 ///
 /// ## Why the mask is constant
 ///
-/// The fade is defined in the *container's* coordinates — clear at the edge,
-/// solid `inset` points in — and never changes. The text slides underneath it.
+/// The fade is defined in the *container's* coordinates and the text slides
+/// underneath it, so it changes only when focus does — never while scrolling.
 /// That matters for more than tidiness: a gradient computed from the scroll
 /// position would have to be rebuilt on every frame of the scroll, which means
-/// re-evaluating this view sixty times a second. A fixed mask lets the movement
-/// be a pure transform, which animates without the body running at all.
+/// re-evaluating this view sixty times a second. Holding it still lets the
+/// movement be a pure transform, which animates without the body running at all.
 ///
 /// It also costs nothing for the common case: a caption that fits is never
 /// masked, because there is nothing to fade.
@@ -67,11 +74,43 @@ public struct PlozzMarqueeText: View {
         self.isFocused = isFocused
     }
 
-    /// How far the line runs past the point where the trailing fade begins — and
-    /// therefore exactly how far it has to travel to show its end.
+    /// Where the line begins, and where its leading dissolve finishes.
+    ///
+    /// A focused caption indents further: its card has grown around it, so there
+    /// is room, and that room is what its longer dissolve needs. A resting
+    /// caption keeps exactly the position it has always had.
+    private var lead: CGFloat {
+        isScrolling ? inset * PlozzTheme.Metrics.marqueeFocusedLeadRatio : inset
+    }
+
+    /// How long the trailing dissolve is.
+    private var fadeLength: CGFloat {
+        inset * (isScrolling
+            ? PlozzTheme.Metrics.marqueeFocusedFadeRatio
+            : PlozzTheme.Metrics.marqueeFadeRatio)
+    }
+
+    /// Where the line has completely dissolved.
+    ///
+    /// A focused caption uses the card's full width; a resting one stops just
+    /// short of it, so the text reads as fading away rather than as running out
+    /// of card.
+    private var fadeEnd: CGFloat {
+        guard containerWidth > 0 else { return 0 }
+        let gap = isScrolling ? 0 : inset * PlozzTheme.Metrics.marqueeRestingEdgeGapRatio
+        return containerWidth - gap
+    }
+
+    /// Where the trailing dissolve begins — and so the last point at which the
+    /// text is still at full strength.
+    private var fadeStart: CGFloat { max(fadeEnd - fadeLength, lead) }
+
+    /// How far the line runs past the point where it starts to dissolve — and
+    /// therefore exactly how far it has to travel for its end to arrive there at
+    /// full strength.
     private var overflow: CGFloat {
         guard containerWidth > 0 else { return 0 }
-        return max(0, textWidth - (containerWidth - inset * 2))
+        return max(0, textWidth - (fadeStart - lead))
     }
 
     private var fades: Bool { overflow > 0.5 }
@@ -101,7 +140,13 @@ public struct PlozzMarqueeText: View {
             // the very subtree the focus animation is animating, and SwiftUI
             // responds by rebuilding it rather than animating it — which snapped
             // the caption into place instead of letting it slide down.
-            .modifier(EdgeFade(inset: inset, width: containerWidth, isEnabled: fades))
+            .modifier(EdgeFade(
+                lead: lead,
+                fadeStart: fadeStart,
+                fadeEnd: fadeEnd,
+                width: containerWidth,
+                isEnabled: fades
+            ))
             .clipped()
             .task(id: cycle) { await runMarquee() }
     }
@@ -123,7 +168,7 @@ public struct PlozzMarqueeText: View {
             } action: { width in
                 textWidth = width
             }
-            .offset(x: inset - scroll)
+            .offset(x: lead - scroll)
     }
 
     /// Walks the line out until its end clears the fade, holds it there long
@@ -158,8 +203,8 @@ public struct PlozzMarqueeText: View {
     }
 }
 
-/// Dissolves the caption into the gap either side of it: transparent at the
-/// card's edge, solid `inset` points in.
+/// Dissolves the caption at both ends, over distances the caller works out from
+/// the card's own geometry.
 ///
 /// ## It is keyed on overflow alone, never on focus (learned the hard way)
 ///
@@ -182,18 +227,24 @@ public struct PlozzMarqueeText: View {
 /// (`CardFocusHighlight.CardArrivalLean`). Anything a focused card wears that an
 /// unfocused one doesn't must differ by its *values*, not by its existence.
 private struct EdgeFade: ViewModifier {
-    let inset: CGFloat
+    /// Where the leading dissolve finishes, in points from the caption's leading
+    /// edge — which is also where the text begins.
+    let lead: CGFloat
+    /// Where the trailing dissolve begins and ends, same coordinates.
+    let fadeStart: CGFloat
+    let fadeEnd: CGFloat
     let width: CGFloat
     let isEnabled: Bool
 
     func body(content: Content) -> some View {
-        if isEnabled, width > 0, inset > 0 {
+        if isEnabled, width > 0 {
             content.mask(
                 LinearGradient(
                     stops: [
                         .init(color: .clear, location: 0),
-                        .init(color: .black, location: leadingEdge),
-                        .init(color: .black, location: trailingEdge),
+                        .init(color: .black, location: leadStop),
+                        .init(color: .black, location: fadeStartStop),
+                        .init(color: .clear, location: fadeEndStop),
                         .init(color: .clear, location: 1)
                     ],
                     startPoint: .leading,
@@ -205,9 +256,14 @@ private struct EdgeFade: ViewModifier {
         }
     }
 
-    /// Clamped so the two ramps can never cross on a very narrow card, which
-    /// would put the gradient's stops out of order.
-    private var leadingEdge: CGFloat { min(inset / width, 0.45) }
-    private var trailingEdge: CGFloat { max(1 - inset / width, 0.55) }
+    // Gradient stops have to be in ascending order or the gradient is undefined,
+    // and these are derived from card geometry that a narrow card or a large
+    // caption inset can invert. Each one is therefore clamped against the one
+    // before it rather than assumed to be in range.
+    private var leadStop: CGFloat { clamp(lead / width) }
+    private var fadeStartStop: CGFloat { max(clamp(fadeStart / width), leadStop) }
+    private var fadeEndStop: CGFloat { max(clamp(fadeEnd / width), fadeStartStop) }
+
+    private func clamp(_ value: CGFloat) -> CGFloat { min(max(value, 0), 1) }
 }
 #endif

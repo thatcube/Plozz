@@ -417,6 +417,35 @@ public enum PlozzTheme {
 
         // MARK: Card captions
 
+        /// How long a caption's dissolve is, as a multiple of the caption inset
+        /// it lives in.
+        ///
+        /// A multiple rather than a fixed width, because that inset is already
+        /// derived per card — poster and landscape have different corner radii,
+        /// and every radius moves with the display-size setting — so expressing
+        /// the fade this way makes it track every card variation and density on
+        /// its own. At standard density the inset is 10–12pt, so a 1:1 fade was
+        /// about a third of a character wide: technically a gradient, visually a
+        /// cut.
+        public static let marqueeFadeRatio: CGFloat = 1.8
+        /// The same, for a caption whose card holds focus. Longer, because a
+        /// focused card is bigger and its artwork now reaches past the caption on
+        /// both sides — there is simply more room to dissolve into, and using it
+        /// is what keeps the fade in proportion to the card it belongs to.
+        public static let marqueeFocusedFadeRatio: CGFloat = 2.6
+        /// How far short of the card's edge a **resting** caption finishes
+        /// dissolving, as a multiple of the inset. Ending exactly on the edge
+        /// read as text running out of card rather than fading away; stopping
+        /// just inside it reads as deliberate.
+        public static let marqueeRestingEdgeGapRatio: CGFloat = 0.45
+        /// How far a **focused** caption indents, as a multiple of the inset.
+        ///
+        /// Only the focused one moves. A resting caption keeps the exact position
+        /// it has always had, so nothing shifts in a grid you're scrolling past;
+        /// the focused card, which has grown around its caption, takes the extra
+        /// indent — and that indent is the room its leading dissolve needs.
+        public static let marqueeFocusedLeadRatio: CGFloat = 1.5
+
         /// How fast a focused card's caption walks its overflow into view.
         ///
         /// Reading pace, not scrolling pace — and unhurried, because the line is

@@ -2127,6 +2127,20 @@ extension PlexProvider: WatchlistProviding {
         var line = "watchlist provider=plex account=\(accountID) count=\(items.count) order=as-returned"
         for (position, item) in items.prefix(30).enumerated() {
             line += "\n  \(position). \"\(item.title)\"" + (item.productionYear.map { " (\($0))" } ?? "")
+            // The artwork each row will actually draw, host included.
+            //
+            // A whole watchlist wearing ONE show's poster while every caption
+            // stayed correct is a picture that cannot be reasoned about from the
+            // outside: the titles prove identity is fine, so the answer is in the
+            // URL, and the only question worth asking is whether two rows are
+            // asking for the same one. Printed as host + path so that is legible
+            // at a glance — a shared answer, a shared host that shouldn't be, or
+            // a path belonging to a server that has never heard of it.
+            if let poster = item.posterURL {
+                line += "\n      art=\(poster.host ?? "?")\(poster.path)"
+            } else {
+                line += "\n      art=none"
+            }
         }
         if items.count > 30 { line += "\n  … \(items.count - 30) more" }
         ContinueWatchingDiagnostics.emit(line)

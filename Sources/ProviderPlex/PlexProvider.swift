@@ -2090,14 +2090,33 @@ extension PlexProvider: WatchlistProviding {
     /// Reads the watchlist through a specific client, so the caller can supply
     /// one scoped to the plex.tv identity the active profile plays as.
     public func watchlist(using client: PlexClient) async throws -> [MediaItem] {
-        try await client.watchlist()
+        let items = try await client.watchlist()
             .map(map(metadata:))
-            .map {
-                var copy = $0
+            .map { item -> MediaItem in
+                var copy = item
                 copy.isFavorite = true
                 copy.locallyValidatedPlayableSource = false
                 return copy
             }
+        logWatchlistOrder(items)
+        return items
+    }
+
+    /// Records the order the service actually returned.
+    ///
+    /// Everything downstream preserves this order faithfully, so if the row looks
+    /// shuffled the question is whether it arrived shuffled — and that is only
+    /// answerable by writing down what arrived. Asking for an order is not the same
+    /// as getting one: these endpoints are undocumented, and a sort they do not
+    /// recognise can be ignored as easily as honoured. Gated; free when off.
+    private func logWatchlistOrder(_ items: [MediaItem]) {
+        guard ContinueWatchingDiagnostics.isEnabled else { return }
+        var line = "watchlist provider=plex account=\(accountID) count=\(items.count) order=as-returned"
+        for (position, item) in items.prefix(30).enumerated() {
+            line += "\n  \(position). \"\(item.title)\"" + (item.productionYear.map { " (\($0))" } ?? "")
+        }
+        if items.count > 30 { line += "\n  … \(items.count - 30) more" }
+        ContinueWatchingDiagnostics.emit(line)
     }
 }
 

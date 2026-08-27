@@ -126,6 +126,16 @@ struct SettingsSplitLayout: View {
     /// left-press out of a control has exactly one place to land (the row you
     /// came in from), with no geometrically-nearer row to steal it.
     @State private var focusInDetail = false
+    /// During a shell re-host, tvOS may focus the first master row before it
+    /// honours preferred focus. Without this gate that transient focus writes
+    /// "language" over the externally saved "navigation" selection.
+    @State private var isRestoringExternalFocus: Bool
+    /// Only the newest asynchronous restore may close the gate. A transient
+    /// wrong-row focus can schedule a replacement while the first task is yielded.
+    @State private var focusRestoreGeneration = 0
+    #if os(tvOS)
+    @Environment(\.resetFocus) private var resetFocus
+    #endif
 
     init(
         title: LocalizedStringResource,
@@ -140,6 +150,9 @@ struct SettingsSplitLayout: View {
         // selection change, rebuilding all of its row descriptors per keypress.
         // External mode never uses this fallback; local mode starts empty as before.
         self._localSelectedRowID = State(initialValue: nil)
+        // Binding presence is stable metadata and does not read its observable
+        // value, so this avoids the parent-observation bug fixed earlier.
+        self._isRestoringExternalFocus = State(initialValue: selection != nil)
     }
 
     private var selectedRowID: String? {
@@ -186,6 +199,7 @@ struct SettingsSplitLayout: View {
         .ignoresSafeArea(edges: .trailing)
         .onAppear {
             if selectedRowID == nil { selectedRowID = allRowIDs.first }
+            restoreExternalFocusIfNeeded()
         }
         // If the selected row vanished (a revealed sub-row was hidden again),
         // fall back to the first row so the pane keeps showing something valid.
@@ -225,8 +239,21 @@ struct SettingsSplitLayout: View {
         // list (so the only way back is the row we came from). When it returns,
         // unpark and resume the live preview.
         .onChange(of: focusedRow) { _, newID in
+            // A real master-row focus always means focus left the detail pane,
+            // including during restoration. Do this before the restoration gate:
+            // the gate suppresses only the transient selection write, not the
+            // focus-region state change.
+            if newID != nil { focusInDetail = false }
+            if isRestoringExternalFocus {
+                // Ignore the system's transient first-row landing while a
+                // persisted selection is being restored. Reassert below after the
+                // current focus transaction completes.
+                if newID != selectedRowID {
+                    restoreExternalFocusIfNeeded()
+                }
+                return
+            }
             if let newID {
-                focusInDetail = false
                 selectedRowID = newID
             } else {
                 focusInDetail = true
@@ -234,6 +261,40 @@ struct SettingsSplitLayout: View {
         }
         .tvOSFocusScope(masterScope)
         .tvOSFocusSection()
+    }
+
+    /// Forces tvOS to honour the externally persisted row after a shell swap.
+    private func restoreExternalFocusIfNeeded() {
+        guard externalSelectedRowID != nil,
+              let selectedRowID,
+              allRowIDs.contains(selectedRowID) else {
+            isRestoringExternalFocus = false
+            return
+        }
+        #if os(tvOS)
+        focusRestoreGeneration &+= 1
+        let generation = focusRestoreGeneration
+        isRestoringExternalFocus = true
+        Task { @MainActor in
+            await Task.yield()
+            guard generation == focusRestoreGeneration else { return }
+            focusedRow = selectedRowID
+            resetFocus(in: masterScope)
+            // UIKit's focus relocation arrives after the appearance transaction,
+            // not merely after another main-actor executor turn. Hold the gate
+            // across that window, then reassert once — same proven timing used by
+            // NowPlayingView when it must beat the focus engine's own relocation.
+            try? await Task.sleep(for: .milliseconds(60))
+            guard generation == focusRestoreGeneration else { return }
+            focusedRow = selectedRowID
+            resetFocus(in: masterScope)
+            await Task.yield()
+            guard generation == focusRestoreGeneration else { return }
+            isRestoringExternalFocus = false
+        }
+        #else
+        isRestoringExternalFocus = false
+        #endif
     }
 
     private func masterRow(_ row: SettingsSplitRow) -> some View {

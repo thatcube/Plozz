@@ -318,13 +318,31 @@ public final class WatchlistModel {
         capabilities: MediaCapabilities? = nil
     ) throws -> [WatchlistPresentationEntry] {
         try ensureHydrated(profileID)
-        return WatchlistPresentationResolver.resolve(
+        let entries = WatchlistPresentationResolver.resolve(
             union: union,
             aliasSnapshot: aliasSnapshot,
             currentItemsByAliasID: currentItemsByAliasID,
             indexedSources: indexedSources,
             capabilities: capabilities
         )
+        if ContinueWatchingDiagnostics.isEnabled {
+            var line = "watchlist presentation profile=\(profileID) count=\(entries.count)"
+            for (position, entry) in entries.prefix(30).enumerated() {
+                let item = entry.item
+                line += "\n  \(position). \"\(item.title)\""
+                if let poster = item.posterURL {
+                    line += "\n      art=\(poster.host ?? "?")\(poster.path)"
+                } else {
+                    line += "\n      art=none"
+                }
+                line += "\n      item=\(item.id)"
+                    + " validated=\(item.locallyValidatedPlayableSource)"
+                    + " availability=\(String(describing: item.availability))"
+                    + " alias=\(entry.aliasID)"
+            }
+            ContinueWatchingDiagnostics.emit(line)
+        }
+        return entries
     }
 
     /// The watchlist as the viewer sees it: durable intent, plus what the

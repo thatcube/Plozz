@@ -79,7 +79,8 @@ struct AppearanceDetailView: View {
                     description: "A slim left rail with your libraries, horizontal tabs across the top, or the system sidebar.",
                 ) {
                     CompactNavigationPicker(selection: $navigation.style)
-                },
+                }
+        ] + navigationLibraryRows + [
                 SettingsSplitRow(
                     id: "music-player",
                     title: "Music Player",
@@ -90,8 +91,7 @@ struct AppearanceDetailView: View {
                         showTrackDetails: $musicPlayer.showTrackDetails
                     )
                 }
-        ] + navigationLibraryRows
-            + CircadianRowsBuilder(model: nightShift).rows
+        ] + CircadianRowsBuilder(model: nightShift).rows
             + SpoilerRowsBuilder(spoilers: spoilers).rows
     }
 

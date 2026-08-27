@@ -23,12 +23,24 @@ public struct LiftableReorderList<Element: Hashable>: View {
         public var title: Text
         /// Optional leading SF Symbol, e.g. a library's content-kind glyph.
         public var symbolName: String?
+        /// Optional provider brand mark. Takes precedence over `symbolName`.
+        public var providerKind: ProviderKind?
+        /// Transport badge for a media-share provider mark.
+        public var mediaShareTransport: MediaShareTransportKind?
         /// Optional trailing detail line, e.g. the server a library came from.
         public var detail: Text?
 
-        public init(title: Text, symbolName: String? = nil, detail: Text? = nil) {
+        public init(
+            title: Text,
+            symbolName: String? = nil,
+            providerKind: ProviderKind? = nil,
+            mediaShareTransport: MediaShareTransportKind? = nil,
+            detail: Text? = nil
+        ) {
             self.title = title
             self.symbolName = symbolName
+            self.providerKind = providerKind
+            self.mediaShareTransport = mediaShareTransport
             self.detail = detail
         }
     }
@@ -109,10 +121,13 @@ public struct LiftableReorderList<Element: Hashable>: View {
             title: content.title,
             detail: content.detail,
             symbolName: content.symbolName,
+            providerKind: content.providerKind,
+            mediaShareTransport: content.mediaShareTransport,
             isEnabled: isEnabled,
             isLifted: liftedElement == element,
             isDimmed: lifting && liftedElement != element,
             rank: rank,
+            maximumRank: sections.enabled.count,
             onPrimary: { toggleLift(element) }
         )
         .focused($focusedElement, equals: element)
@@ -207,14 +222,25 @@ public struct LiftableReorderList<Element: Hashable>: View {
             let content = row(element)
             let isEnabled = sections.enabled.contains(element)
             HStack {
-                if let index = sections.enabled.firstIndex(of: element) {
-                    Text(index + 1, format: .number)
-                        .font(.caption.monospacedDigit())
-                        .plozzForeground(.secondary)
-                }
-                if let symbolName = content.symbolName {
+                ReorderRank(
+                    rank: sections.enabled.firstIndex(of: element).map { $0 + 1 },
+                    maximumRank: sections.enabled.count
+                )
+                .font(.caption)
+                .plozzForeground(.secondary)
+                if let providerKind = content.providerKind {
+                    ProviderBrandMark(
+                        provider: providerKind,
+                        size: 24,
+                        showsBackground: false,
+                        mediaShareTransport: content.mediaShareTransport
+                    )
+                    .frame(width: 30)
+                    .accessibilityHidden(true)
+                } else if let symbolName = content.symbolName {
                     Image(systemName: symbolName)
                         .font(.callout)
+                        .frame(width: 30)
                         .accessibilityHidden(true)
                 }
                 content.title
@@ -246,25 +272,36 @@ private struct LiftableRow: View {
     let title: Text
     let detail: Text?
     let symbolName: String?
+    let providerKind: ProviderKind?
+    let mediaShareTransport: MediaShareTransportKind?
     let isEnabled: Bool
     let isLifted: Bool
     let isDimmed: Bool
     /// 1-based priority rank when enabled; `nil` when disabled.
     let rank: Int?
+    /// Largest rank in the enabled section. Reserves one shared rank-column width
+    /// so crossing 9 → 10 never pushes logos and labels sideways.
+    let maximumRank: Int
     let onPrimary: () -> Void
 
     var body: some View {
         Button(action: onPrimary) {
             HStack(spacing: 14) {
-                if let rank {
-                    Text(rank, format: .number)
-                        .font(.callout.weight(.bold).monospacedDigit())
-                        .frame(minWidth: 26, alignment: .trailing)
-                }
-                if let symbolName {
+                ReorderRank(rank: rank, maximumRank: maximumRank)
+                    .font(.callout.weight(.bold))
+                if let providerKind {
+                    ProviderBrandMark(
+                        provider: providerKind,
+                        size: 32,
+                        showsBackground: false,
+                        mediaShareTransport: mediaShareTransport
+                    )
+                    .frame(width: 30)
+                    .accessibilityHidden(true)
+                } else if let symbolName {
                     Image(systemName: symbolName)
                         .font(.headline)
-                        .frame(minWidth: 30)
+                        .frame(width: 30)
                         .accessibilityHidden(true)
                 }
                 title
@@ -274,6 +311,7 @@ private struct LiftableRow: View {
                         .font(.caption)
                         .opacity(0.7)
                 }
+
                 Spacer(minLength: 12)
                 Image(systemName: "line.3.horizontal")
                     .font(.title3)
@@ -293,6 +331,27 @@ private struct LiftableRow: View {
         .scaleEffect(isLifted ? 1.04 : 1)
         .shadow(color: .black.opacity(isLifted ? 0.5 : 0), radius: isLifted ? 18 : 0, y: isLifted ? 9 : 0)
         .zIndex(isLifted ? 1 : 0)
+    }
+}
+
+/// Fixed-width rank slot derived from the largest enabled rank.
+///
+/// Disabled rows still reserve the slot with no visible number, keeping every
+/// provider mark and title on the same axis above and below the divider.
+private struct ReorderRank: View {
+    let rank: Int?
+    let maximumRank: Int
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Text(max(1, maximumRank), format: .number)
+                .hidden()
+            if let rank {
+                Text(rank, format: .number)
+            }
+        }
+        .monospacedDigit()
+        .frame(minWidth: 26, alignment: .trailing)
     }
 }
 
@@ -325,6 +384,12 @@ private struct LiftableRowButtonStyle: ButtonStyle {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .foregroundStyle(foreground)
+            // ProviderBrandMark and other settings-row descendants use these
+            // values to choose focus-safe contrast. `inverted` includes a lifted
+            // row, which uses the same inverted card even when native focus is
+            // briefly visiting its neighbour during a reorder.
+            .environment(\.settingsRowIsFocused, inverted)
+            .environment(\.settingsRowFocusForeground, invertedText)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill)
             )

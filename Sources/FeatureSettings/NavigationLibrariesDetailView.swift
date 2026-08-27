@@ -74,9 +74,8 @@ struct NavigationLibrariesDetailView: View {
         }
     }
 
-    /// One row descriptor per arrangeable key: the library's own name and content
-    /// glyph, plus the server it came from so two same-named libraries on different
-    /// servers are told apart.
+    /// One row descriptor per arrangeable key: library name, provider brand mark,
+    /// and server name so same-named libraries on different servers are distinct.
     private static func rowsByKey(
         visible: [AggregatedLibrary]
     ) -> [String: LiftableReorderList<String>.Row] {
@@ -89,7 +88,8 @@ struct NavigationLibrariesDetailView: View {
         for aggregated in NavigationRailPlan.browsableLibraries(visible) {
             rows[aggregated.key] = LiftableReorderList<String>.Row(
                 title: aggregated.library.displayName,
-                symbolName: aggregated.library.navigationSymbolName,
+                providerKind: aggregated.providerKind,
+                mediaShareTransport: aggregated.transportKind,
                 detail: Text(verbatim: aggregated.serverName)
             )
         }

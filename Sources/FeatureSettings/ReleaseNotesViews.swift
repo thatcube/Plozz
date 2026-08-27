@@ -64,7 +64,7 @@ public struct ReleaseNotesStartupView: View {
 
             VStack(alignment: .leading, spacing: 28) {
                 Text("What’s New in Plozz")
-                    .font(.largeTitle.bold())
+                    .font(.title.bold())
 
                 FadingScrollView(maxHeight: 560) {
                     ReleaseNotesVersionList(groups: model.pendingVersionGroups)
@@ -118,9 +118,17 @@ public struct ReleaseNotesStartupView: View {
         #else
         NavigationStack {
             ScrollView {
-                ReleaseNotesVersionList(groups: model.pendingVersionGroups)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 24)
+                VStack(spacing: 32) {
+                    ReleaseNotesVersionList(groups: model.pendingVersionGroups)
+
+                    Button("Don’t Show Again", role: .destructive) {
+                        confirmsDisable = true
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.bottom, 24)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
             }
             .navigationTitle("What’s New in Plozz")
             .toolbar {
@@ -129,13 +137,6 @@ public struct ReleaseNotesStartupView: View {
                         model.dismissStartupNotes()
                     }
                 }
-            }
-            .safeAreaInset(edge: .bottom) {
-                Button("Don’t Show Again", role: .destructive) {
-                    confirmsDisable = true
-                }
-                .buttonStyle(.bordered)
-                .padding(.vertical, 12)
             }
         }
         .alert("Don’t show release notes again?", isPresented: $confirmsDisable) {
@@ -197,19 +198,11 @@ private struct ReleaseNotesVersionCard: View {
     let group: ReleaseNotesVersionGroup
 
     var body: some View {
-        #if os(tvOS)
-        ReleaseNotesVersionContent(group: group)
-            .plozzFocusableCard(
-                cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius
-            )
-            .accessibilityElement(children: .combine)
-        #else
         ReleaseNotesVersionContent(group: group)
             .plozzSurface(
                 .raised,
                 cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius
             )
-        #endif
     }
 }
 
@@ -244,6 +237,13 @@ private struct ReleaseNotesSectionsView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .plozzForeground(.secondary)
+                        #if os(tvOS)
+                        // tvOS scrolls by moving focus. One stop per note lets a
+                        // release taller than the dialog scroll continuously
+                        // without turning the whole card into one trapped stop.
+                        .focusable()
+                        .focusEffectDisabled()
+                        #endif
                     }
                 }
             }

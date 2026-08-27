@@ -2091,11 +2091,24 @@ extension PlexProvider: WatchlistProviding {
     /// one scoped to the plex.tv identity the active profile plays as.
     public func watchlist(using client: PlexClient) async throws -> [MediaItem] {
         let items = try await client.watchlist()
-            .map(map(metadata:))
-            .map { item -> MediaItem in
-                var copy = item
+            .map { dto -> MediaItem in
+                var copy = map(metadata: dto)
                 copy.isFavorite = true
                 copy.locallyValidatedPlayableSource = false
+                // Re-point the artwork at the host it actually lives on.
+                //
+                // `map(metadata:)` builds image URLs for THIS server, which is
+                // right for everything that came from it and wrong for a
+                // watchlist: these rows were read from plex.tv Discover and their
+                // art is Discover's. Asked for a path it has never heard of, a
+                // Plex server answers with a placeholder instead of an error —
+                // the same placeholder every time — so half a watchlist row drew
+                // one show's poster under everybody else's title, captions
+                // perfectly correct, which is what made it read as an artwork bug
+                // rather than a URL one.
+                copy.posterURL = client.discoverImageURL(path: dto.thumb)
+                copy.backdropURL = client.discoverImageURL(path: dto.art)
+                copy.heroBackdropURL = copy.backdropURL
                 return copy
             }
         logWatchlistOrder(items)

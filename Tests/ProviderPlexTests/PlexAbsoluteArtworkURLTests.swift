@@ -70,6 +70,40 @@ final class PlexAbsoluteArtworkURLTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, discover)
     }
 
+    // MARK: Discover artwork
+
+    /// A watchlist row's art is a path on plex.tv Discover, and must resolve
+    /// there — not against the viewer's own server, which has never heard of it.
+    func testDiscoverArtworkResolvesAgainstTheDiscoverHost() throws {
+        let url = try XCTUnwrap(
+            makeClient().discoverImageURL(path: "/library/metadata/5d9c08/thumb/1700000000")
+        )
+        XCTAssertEqual(url.host, "discover.provider.plex.tv")
+        XCTAssertEqual(url.path, "/library/metadata/5d9c08/thumb/1700000000")
+        XCTAssertFalse(url.absoluteString.contains("/photo/:/transcode"))
+    }
+
+    /// Two different Discover art paths must stay two different URLs — the
+    /// property whose absence put one poster on a whole row.
+    func testTwoDiscoverArtworkPathsStayDistinct() throws {
+        let client = makeClient()
+        let first = try XCTUnwrap(client.discoverImageURL(path: "/library/metadata/aaa/thumb/1"))
+        let second = try XCTUnwrap(client.discoverImageURL(path: "/library/metadata/bbb/thumb/1"))
+        XCTAssertNotEqual(first, second)
+    }
+
+    /// Discover occasionally answers with a fully-qualified URL of its own.
+    func testAbsoluteDiscoverArtworkIsLeftAlone() throws {
+        let absolute = "https://metadata-static.plex.tv/9/gracenote/9abc.jpg"
+        let url = try XCTUnwrap(makeClient().discoverImageURL(path: absolute))
+        XCTAssertEqual(url.absoluteString, absolute)
+    }
+
+    func testEmptyDiscoverPathIsNil() {
+        XCTAssertNil(makeClient().discoverImageURL(path: ""))
+        XCTAssertNil(makeClient().discoverImageURL(path: nil))
+    }
+
     func testEmptyPathIsStillNil() {
         XCTAssertNil(makeClient().imageURL(path: "", maxWidth: 500))
         XCTAssertNil(makeClient().imageURL(path: nil, maxWidth: 500))

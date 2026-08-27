@@ -724,6 +724,34 @@ public struct PlexClient: Sendable {
 
     private static let watchlistBase = URL(string: "https://discover.provider.plex.tv")!
 
+    /// An absolute artwork URL on the plex.tv Discover host.
+    ///
+    /// Watchlist entries are Discover rows: their `thumb`/`art` are paths on
+    /// `discover.provider.plex.tv`, which is where this read asked for them (see
+    /// `includeFields` on `watchlistPage`). They are NOT paths on the viewer's
+    /// server, and handing them to ``imageURL(path:maxWidth:)`` asked that server
+    /// to fetch something it has never heard of — which it answered with a
+    /// placeholder rather than an error, the same placeholder every time, so a
+    /// row of different titles all wore one picture.
+    ///
+    /// Served directly rather than through a photo transcoder: the transcoder is
+    /// a per-server facility and this is not that server. `ArtworkImageVariant`
+    /// already caps what a card decodes, so an untranscoded poster costs a little
+    /// bandwidth and nothing else — and a poster that is merely larger than it
+    /// needs to be is still the right poster.
+    func discoverImageURL(path: String?) -> URL? {
+        guard let path, !path.isEmpty else { return nil }
+        // Discover sometimes answers with a fully-qualified URL of its own.
+        if let absolute = URL(string: path), absolute.scheme != nil { return absolute }
+        guard var components = URLComponents(
+            url: Self.watchlistBase,
+            resolvingAgainstBaseURL: false
+        ) else { return nil }
+        components.path = path.hasPrefix("/") ? path : "/" + path
+        components.queryItems = [URLQueryItem(name: "X-Plex-Token", value: plexTVToken)]
+        return components.url
+    }
+
     /// The Discover metadata id for a `plex://<type>/<id>` guid — the trailing
     /// path component the watchlist endpoints key on. `nil` for a non-`plex://`
     /// guid or one missing its `<id>` tail (e.g. `plex://movie/`), so a bare type

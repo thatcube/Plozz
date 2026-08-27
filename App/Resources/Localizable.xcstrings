@@ -23585,6 +23585,7 @@
       }
     },
     "A slim left rail with your libraries, horizontal tabs across the top, or the system sidebar." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -365859,12 +365860,6 @@
       "comment" : "Guidance under the empty state of the combined All Libraries grid.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Turn on a server or a library in Settings to see everything here."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -365905,6 +365900,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ενεργοποιήστε έναν διακομιστή ή μια βιβλιοθήκη στις Ρυθμίσεις για να τα δείτε όλα εδώ."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn on a server or a library in Settings to see everything here."
           }
         },
         "es" : {
@@ -366087,12 +366088,6 @@
       "comment" : "Shown when the combined All Libraries grid has no libraries to page.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Nothing to browse"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -366133,6 +366128,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν υπάρχει τίποτα για περιήγηση"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Nothing to browse"
           }
         },
         "es" : {
@@ -366315,12 +366316,6 @@
       "comment" : "Title of the grid that browses every library at once.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "All Libraries"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -366361,6 +366356,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όλες οι βιβλιοθήκες"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "All Libraries"
           }
         },
         "es" : {
@@ -387418,12 +387419,6 @@
       "comment" : "Divider in the metadata-providers list; providers below it are turned off.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Disabled"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -387464,6 +387459,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Απενεργοποιημένα"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Disabled"
           }
         },
         "es" : {
@@ -387646,12 +387647,6 @@
       "comment" : "Empty-state drop target shown under the Disabled divider on iPhone/iPad.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Drag a provider here to turn it off"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -387692,6 +387687,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Σύρετε μια πηγή εδώ για να την απενεργοποιήσετε"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Drag a provider here to turn it off"
           }
         },
         "es" : {
@@ -387874,12 +387875,6 @@
       "comment" : "Empty-state drop target shown under the Disabled divider on Apple TV.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Move a provider here to stop using it."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -387920,6 +387915,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Μετακινήστε μια πηγή εδώ για να σταματήσετε να τη χρησιμοποιείτε."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Move a provider here to stop using it."
           }
         },
         "es" : {
@@ -390154,12 +390155,6 @@
       "comment" : "Explains that hiding a library from the navigation is not the same as turning it off.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Hiding a library here only removes it from the navigation. It stays on Home and in Search. To turn a library off everywhere, use Your Libraries."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390200,6 +390195,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Η απόκρυψη μιας βιβλιοθήκης εδώ την αφαιρεί μόνο από την πλοήγηση. Παραμένει στην Αρχική και στην Αναζήτηση. Για να απενεργοποιήσετε μια βιβλιοθήκη παντού, χρησιμοποιήστε τις Βιβλιοθήκες σας."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hiding a library here only removes it from the navigation. It stays on Home and in Search. To turn a library off everywhere, use Your Libraries."
           }
         },
         "es" : {
@@ -390382,12 +390383,6 @@
       "comment" : "Divider in the navigation-libraries list; libraries below it are not shown in the navigation.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Hidden"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390428,6 +390423,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Κρυφές"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hidden"
           }
         },
         "es" : {
@@ -390610,12 +390611,6 @@
       "comment" : "Empty-state drop target under the Hidden divider.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Move a library here to keep it out of the navigation."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390656,6 +390651,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Μετακινήστε μια βιβλιοθήκη εδώ για να μην εμφανίζεται στην πλοήγηση."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Move a library here to keep it out of the navigation."
           }
         },
         "es" : {
@@ -390838,12 +390839,6 @@
       "comment" : "Shown when the household has no libraries to arrange.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "No libraries yet. Add a server to see them here."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390884,6 +390879,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν υπάρχουν ακόμη βιβλιοθήκες. Προσθέστε έναν διακομιστή για να τις δείτε εδώ."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No libraries yet. Add a server to see them here."
           }
         },
         "es" : {
@@ -391066,12 +391067,6 @@
       "comment" : "Button that restores the default navigation arrangement.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Show Every Library"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391112,6 +391107,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εμφάνιση όλων των βιβλιοθηκών"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show Every Library"
           }
         },
         "es" : {
@@ -391294,12 +391295,6 @@
       "comment" : "Shown when library discovery failed while arranging the navigation.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Couldn't reach your servers. Your arrangement is safe — try again in a moment."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391340,6 +391335,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν ήταν δυνατή η σύνδεση με τους διακομιστές σας. Η διάταξή σας είναι ασφαλής — δοκιμάστε ξανά σε λίγο."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn't reach your servers. Your arrangement is safe — try again in a moment."
           }
         },
         "es" : {
@@ -391522,12 +391523,6 @@
       "comment" : "VoiceOver label for the app's left navigation rail.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Navigation"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391568,6 +391563,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Πλοήγηση"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Navigation"
           }
         },
         "es" : {
@@ -391750,12 +391751,6 @@
       "comment" : "Navigation destination that browses every library at once.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "All Libraries"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391796,6 +391791,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όλες οι βιβλιοθήκες"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "All Libraries"
           }
         },
         "es" : {
@@ -391978,12 +391979,6 @@
       "comment" : "Navigation rail destination.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Home"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392024,6 +392019,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αρχική"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Home"
           }
         },
         "es" : {
@@ -392206,12 +392207,6 @@
       "comment" : "Heading above the list of libraries in the navigation rail.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Libraries"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392252,6 +392247,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Βιβλιοθήκες"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Libraries"
           }
         },
         "es" : {
@@ -392434,12 +392435,6 @@
       "comment" : "Navigation rail destination.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Music"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392480,6 +392475,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Μουσική"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Music"
           }
         },
         "es" : {
@@ -392662,12 +392663,6 @@
       "comment" : "Navigation rail destination.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Search"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392708,6 +392703,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αναζήτηση"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Search"
           }
         },
         "es" : {
@@ -392890,12 +392891,6 @@
       "comment" : "Navigation rail destination.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Settings"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392936,6 +392931,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ρυθμίσεις"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Settings"
           }
         },
         "es" : {
@@ -393118,12 +393119,6 @@
       "comment" : "Subtitle under the profile name in the navigation rail.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Switch profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -393164,6 +393159,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αλλαγή προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Switch profile"
           }
         },
         "es" : {
@@ -393346,226 +393347,226 @@
       "comment" : "One-line explanation shown under the navigation-style picker.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Your libraries in a slim left rail that expands on focus and steps aside on a title page."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "مكتباتك في شريط رفيع على اليسار يتوسّع عند التركيز عليه ويتنحّى في صفحة العمل."
+            "value" : "قائمة أيقونات مثبَّتة تتوسّع لإظهار الأسماء والمكتبات."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Медиатеките ви в тънка лента вляво, която се разгъва при фокус и се скрива на страницата на заглавие."
+            "value" : "Закачен списък с икони, който се разгъва и показва имената и медиатеките."
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Les teves biblioteques en una barra estreta a l'esquerra que s'expandeix en enfocar-la i s'aparta a la pàgina d'un títol."
+            "value" : "Una llista d'icones fixada s'expandeix per mostrar etiquetes i biblioteques."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Vaše knihovny v úzkém panelu vlevo, který se po zaměření rozbalí a na stránce titulu ustoupí."
+            "value" : "Připnutý pruh ikon se rozbalí a zobrazí názvy a knihovny."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Dine biblioteker i en smal bjælke i venstre side, der folder sig ud, når den er i fokus, og træder til side på en titelside."
+            "value" : "En fastgjort ikonliste udvides og viser navne og biblioteker."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Deine Medienbibliotheken in einer schmalen Leiste links, die sich beim Fokussieren ausklappt und auf einer Titelseite verschwindet."
+            "value" : "Eine fixierte Symbolliste klappt auf und zeigt Bezeichnungen und Medienbibliotheken."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Οι βιβλιοθήκες σας σε μια λεπτή στήλη στα αριστερά, που ανοίγει με την εστίαση και αποσύρεται στη σελίδα ενός τίτλου."
+            "value" : "Μια καρφιτσωμένη λίστα εικονιδίων επεκτείνεται και εμφανίζει ετικέτες και βιβλιοθήκες."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "A pinned icon list expands to show labels and libraries."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tus bibliotecas multimedia en una barra estrecha a la izquierda que se expande al enfocarla y se aparta en la página de un título."
+            "value" : "Una lista de iconos fija se expande para mostrar etiquetas y bibliotecas."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "کتابخانه‌های شما در نوار باریک سمت چپ که با تمرکز باز می‌شود و در صفحهٔ هر عنوان کنار می‌رود."
+            "value" : "فهرست نمادهای سنجاق‌شده باز می‌شود و عنوان‌ها و کتابخانه‌ها را نشان می‌دهد."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kirjastosi kapeassa vasemmassa palkissa, joka laajenee kohdistettaessa ja väistyy nimikkeen sivulla."
+            "value" : "Kiinnitetty kuvakeluettelo laajenee ja näyttää nimet ja kirjastot."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Vos bibliothèques dans une barre étroite à gauche, qui se déploie lorsqu’elle reçoit le focus et s’efface sur la page d’un titre."
+            "value" : "Une liste d’icônes épinglée se déploie pour afficher les libellés et les bibliothèques."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "הספריות שלך בפס צר בצד שמאל, שנפתח בעת מיקוד ומתפנה בדף פרטי הכותר."
+            "value" : "רשימת סמלים מוצמדת שנפתחת ומציגה שמות וספריות."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "आपकी लाइब्रेरी एक पतली बाईं रेल में दिखाई देती है, जो फ़ोकस करने पर खुलती है और टाइटल पेज पर हट जाती है।"
+            "value" : "पिन की गई आइकन सूची खुलकर नाम और लाइब्रेरी दिखाती है."
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Vaše knjižnice u uskoj lijevoj traci koja se proširuje pri fokusu i sklanja se na stranici naslova."
+            "value" : "Prikvačeni popis ikona proširuje se i prikazuje nazive i knjižnice."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "A könyvtárai keskeny bal oldali sávban, amely fókuszban kinyílik, a részletek oldalán pedig félreáll."
+            "value" : "A rögzített ikonsáv kinyílva megjeleníti a neveket és a könyvtárakat."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pustaka Anda dalam bilah ramping di kiri yang melebar saat difokuskan dan menyingkir di halaman judul."
+            "value" : "Daftar ikon tersemat meluas untuk menampilkan label dan pustaka."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Le tue librerie in una barra sottile a sinistra che si espande quando riceve il focus e scompare nella pagina di dettaglio di un titolo."
+            "value" : "Un elenco di icone fisso si espande per mostrare etichette e librerie."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "細い左側のレールにライブラリを表示します。フォーカスすると広がり、作品の詳細ページでは非表示になります。"
+            "value" : "常時表示のアイコン列が展開し、名称とライブラリを表示します。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "왼쪽의 좁은 레일에 미디어 보관함을 표시하며, 포커스를 옮기면 펼쳐지고 상세 화면에서는 사라집니다."
+            "value" : "고정된 아이콘 목록이 펼쳐지며 이름과 미디어 보관함을 표시합니다."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pustaka anda dalam bar ramping di sebelah kiri yang mengembang apabila menerima fokus dan menghilang pada halaman butiran tajuk."
+            "value" : "Senarai ikon tersemat berkembang untuk menunjukkan label dan pustaka."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bibliotekene dine i en smal meny til venstre som utvides ved fokus og forsvinner på detaljsiden til en tittel."
+            "value" : "En festet ikonliste utvides og viser navn og biblioteker."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Je bibliotheken in een smalle balk links die uitklapt bij focus en verdwijnt op de detailpagina van een titel."
+            "value" : "Een vastgezette lijst met symbolen klapt uit en toont labels en bibliotheken."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Twoje biblioteki na wąskim pasku po lewej, który rozwija się po uzyskaniu fokusu i znika na stronie szczegółów tytułu."
+            "value" : "Przypięta lista ikon rozwija się, pokazując nazwy i biblioteki."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Suas bibliotecas em uma barra estreita à esquerda que se expande ao receber foco e sai de cena na página de um título."
+            "value" : "Uma lista de ícones fixa se expande para mostrar rótulos e bibliotecas."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bibliotecile tale într-o bară îngustă în stânga, care se extinde la focalizare și se retrage pe pagina unui titlu."
+            "value" : "Lista fixată de pictograme se extinde și afișează denumirile și bibliotecile."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Ваши медиатеки в узкой панели слева: она раскрывается при фокусе и скрывается на странице с подробностями."
+            "value" : "Закреплённый ряд значков разворачивается и показывает названия и медиатеки."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Vaše knižnice v úzkom paneli vľavo, ktorý sa po zameraní rozbalí a na stránke podrobností o titule ustúpi."
+            "value" : "Pripnutý zoznam ikon sa rozbalí a zobrazí názvy a knižnice."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Vaše knjižnice v ozki vrstici na levi, ki se ob fokusu razširi in se umakne na strani s podrobnostmi o naslovu."
+            "value" : "Pripeti seznam ikon se razširi in prikaže oznake ter knjižnice."
           }
         },
         "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Vaše biblioteke u uskoj traci sa leve strane koja se širi kada dobije fokus i sklanja se na stranici sa detaljima."
+            "value" : "Prikačena lista ikona se širi i prikazuje nazive i biblioteke."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Dina bibliotek i en smal meny till vänster som fälls ut vid fokus och träder åt sidan på detaljsidan för en titel."
+            "value" : "En fäst ikonlista fälls ut och visar namn och bibliotek."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ไลบรารีของคุณในแถบด้านซ้ายแบบบาง ที่ขยายเมื่อโฟกัสและหลบไปเมื่อเปิดหน้ารายละเอียด"
+            "value" : "รายการไอคอนที่ปักหมุดไว้จะขยายเพื่อแสดงชื่อและไลบรารี"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kitaplıklarınız, odaklanınca genişleyen ve başlık sayfasında kenara çekilen ince bir sol şeritte."
+            "value" : "Sabit simge listesi genişleyerek etiketleri ve kitaplıkları gösterir."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Ваші медіатеки у вузькій панелі ліворуч, яка розгортається у фокусі й ховається на сторінці твору."
+            "value" : "Закріплений список піктограм розгортається й показує назви та медіатеки."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Thư viện của bạn trong thanh dọc mảnh bên trái, mở rộng khi nhận tiêu điểm và ẩn đi khi mở trang chi tiết."
+            "value" : "Danh sách biểu tượng cố định mở rộng để hiện nhãn và thư viện."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "媒体库显示在左侧细长导航栏中，聚焦时展开，进入详情页时自动隐藏。"
+            "value" : "常驻图标列表展开后显示名称和媒体库。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "媒體庫顯示在左側細長導覽列中，聚焦時展開，進入詳細資訊頁時自動隱藏。"
+            "value" : "常駐圖示列表展開後會顯示名稱與媒體庫。"
           }
         }
       }
@@ -393577,223 +393578,223 @@
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "شريط جانبي أيسر قابل للطي يتمدد عند التركيز عليه."
+            "value" : "زر واحد يفتح الشريط الجانبي للنظام."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Свиваема лява странична лента, която се разгъва при фокусиране."
+            "value" : "Един бутон отваря системната странична лента."
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Una barra lateral esquerra plegable que s’expandeix en rebre el focus."
+            "value" : "Un sol botó obre la barra lateral del sistema."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sbalitelný levý postranní panel, který se při zaměření rozbalí."
+            "value" : "Jedno tlačítko otevře systémový postranní panel."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "En sammenklappelig venstre sidebjælke, der udvides ved fokus."
+            "value" : "Én knap åbner systemets sidebjælke."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Eine einklappbare Seitenleiste links, die beim Fokussieren ausgeklappt wird."
+            "value" : "Eine Taste öffnet die Seitenleiste des Systems."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Μια αριστερή πλαϊνή στήλη που συμπτύσσεται και επεκτείνεται με την εστίαση."
+            "value" : "Ένα κουμπί ανοίγει την πλαϊνή στήλη του συστήματος."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "A collapsible left sidebar that expands on focus."
+            "value" : "One button opens the system sidebar."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Una barra lateral izquierda que se expande al enfocarla y se puede contraer."
+            "value" : "Un solo botón abre la barra lateral del sistema."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "نوار کناری چپ که با فوکوس گسترش پیدا می‌کند."
+            "value" : "یک دکمه نوار کناری سیستم را باز می‌کند."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kokoon painuva vasen sivupalkki, joka laajenee kohdistettaessa."
+            "value" : "Yksi painike avaa järjestelmän sivupalkin."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Une barre latérale gauche repliable qui se déploie lorsqu’elle est sélectionnée."
+            "value" : "Un seul bouton ouvre la barre latérale du système."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "סרגל צד שניתן לכווץ ומתרחב עם המיקוד."
+            "value" : "כפתור אחד פותח את סרגל הצד של המערכת."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "बाईं ओर का ऐसा साइडबार जो फ़ोकस पर फैल जाता है."
+            "value" : "एक बटन सिस्टम साइडबार खोलता है."
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sklopiva lijeva bočna traka koja se proširuje pri fokusu."
+            "value" : "Jedan gumb otvara sustavsku bočnu traku."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Összecsukható bal oldali oldalsáv, amely fókuszáláskor kinyílik."
+            "value" : "Egyetlen gomb nyitja meg a rendszer oldalsávját."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bar samping kiri yang dapat diciutkan dan meluas saat difokuskan."
+            "value" : "Satu tombol membuka bar samping sistem."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Una barra laterale richiudibile a sinistra che si espande quando riceve il focus."
+            "value" : "Un solo pulsante apre la barra laterale di sistema."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "フォーカス時に展開される左サイドバー。"
+            "value" : "ボタン1つでシステムのサイドバーを開きます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "초점을 맞추면 확장되는 왼쪽 사이드바입니다."
+            "value" : "버튼 하나로 시스템 사이드바를 엽니다."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bar sisi kiri yang boleh dikuncupkan dan berkembang apabila difokuskan."
+            "value" : "Satu butang membuka bar sisi sistem."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Et sammenleggbart venstre sidepanel som utvides når det får fokus."
+            "value" : "Én knapp åpner systemets sidepanel."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Een inklapbare zijbalk links die uitklapt bij focus."
+            "value" : "Eén knop opent de systeemzijbalk."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Zwijany lewy pasek boczny, który rozwija się po zaznaczeniu."
+            "value" : "Jeden przycisk otwiera systemowy pasek boczny."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Uma barra lateral à esquerda que pode ser recolhida e se expande ao ganhar foco."
+            "value" : "Um único botão abre a barra lateral do sistema."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "O bară laterală din stânga, pliabilă, care se extinde la focalizare."
+            "value" : "Un singur buton deschide bara laterală de sistem."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Сворачиваемая левая боковая панель, которая раскрывается при фокусе."
+            "value" : "Одна кнопка открывает системную боковую панель."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Zbaliteľný ľavý bočný panel, ktorý sa pri zameraní rozbalí."
+            "value" : "Jedno tlačidlo otvorí systémový bočný panel."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Zložljiva leva stranska vrstica, ki se ob fokusu razširi."
+            "value" : "En gumb odpre sistemsko stransko vrstico."
           }
         },
         "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sklopiva leva bočna traka koja se proširuje kada dobije fokus."
+            "value" : "Jedno dugme otvara sistemsku bočnu traku."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Ett hopfällbart sidofält till vänster som expanderar vid fokus."
+            "value" : "En knapp öppnar systemets sidofält."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "แถบด้านข้างซ้ายที่ยุบได้และจะขยายเมื่อโฟกัส"
+            "value" : "ปุ่มเดียวเปิดแถบด้านข้างของระบบ"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Odaklanınca genişleyen, daraltılabilir bir sol kenar çubuğu."
+            "value" : "Tek bir düğme sistem kenar çubuğunu açar."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Згортана ліва бічна панель, яка розгортається, коли на неї переходить фокус."
+            "value" : "Одна кнопка відкриває системну бічну панель."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Thanh bên trái có thể thu gọn, mở rộng khi được focus."
+            "value" : "Một nút mở thanh bên hệ thống."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "可折叠左侧边栏，聚焦时展开。"
+            "value" : "一个按钮即可打开系统边栏。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "可摺疊的左側邊欄，聚焦時會展開。"
+            "value" : "一個按鈕即可開啟系統側邊欄。"
           }
         }
       }
@@ -394030,226 +394031,226 @@
       "comment" : "Navigation layout option in Settings > Appearance.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Library Rail"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "شريط المكتبات"
+            "value" : "الشريط الجانبي المثبَّت"
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Лента с медиатеки"
+            "value" : "Закачена странична лента"
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Barra de biblioteques"
+            "value" : "Barra lateral fixada"
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Panel knihoven"
+            "value" : "Připnutý postranní panel"
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Biblioteksbjælke"
+            "value" : "Fastgjort sidebjælke"
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bibliotheksleiste"
+            "value" : "Fixierte Seitenleiste"
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Στήλη βιβλιοθηκών"
+            "value" : "Καρφιτσωμένη πλαϊνή στήλη"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Pinned Sidebar"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Barra de bibliotecas multimedia"
+            "value" : "Barra lateral fija"
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "نوار کتابخانه"
+            "value" : "نوار کناری سنجاق‌شده"
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kirjastopalkki"
+            "value" : "Kiinnitetty sivupalkki"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Barre de bibliothèques"
+            "value" : "Barre latérale épinglée"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "פס ספריות"
+            "value" : "סרגל צד מוצמד"
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "लाइब्रेरी रेल"
+            "value" : "पिन किया गया साइडबार"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Traka s knjižnicama"
+            "value" : "Prikvačena bočna traka"
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Könyvtársáv"
+            "value" : "Rögzített oldalsáv"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bilah Pustaka"
+            "value" : "Bar Samping Tersemat"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Barra librerie"
+            "value" : "Barra laterale fissa"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ライブラリレール"
+            "value" : "固定サイドバー"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "미디어 보관함 레일"
+            "value" : "고정 사이드바"
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bar Pustaka"
+            "value" : "Bar Sisi Tersemat"
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bibliotekmeny"
+            "value" : "Festet sidepanel"
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bibliotheekbalk"
+            "value" : "Vastgezette zijbalk"
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pasek bibliotek"
+            "value" : "Przypięty pasek boczny"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Barra de bibliotecas"
+            "value" : "Barra lateral fixa"
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Bară cu biblioteci"
+            "value" : "Bară laterală fixată"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Панель медиатек"
+            "value" : "Закреплённая боковая панель"
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Panel knižníc"
+            "value" : "Pripnutý bočný panel"
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Vrstica knjižnic"
+            "value" : "Pripeta stranska vrstica"
           }
         },
         "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Traka biblioteka"
+            "value" : "Prikačena bočna traka"
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Biblioteksmeny"
+            "value" : "Fäst sidofält"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "แถบไลบรารี"
+            "value" : "แถบด้านข้างแบบปักหมุด"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kitaplık Şeridi"
+            "value" : "Sabit Kenar Çubuğu"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Панель медіатек"
+            "value" : "Закріплена бічна панель"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Thanh thư viện"
+            "value" : "Thanh bên cố định"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "媒体库导航栏"
+            "value" : "固定边栏"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "媒體庫導覽列"
+            "value" : "固定側邊欄"
           }
         }
       }

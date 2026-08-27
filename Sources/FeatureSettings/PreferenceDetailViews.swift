@@ -75,8 +75,7 @@ struct AppearanceDetailView: View {
                 },
                 SettingsSplitRow(
                     id: "navigation",
-                    title: "Navigation",
-                    description: "A slim left rail with your libraries, horizontal tabs across the top, or the system sidebar.",
+                    title: "Navigation"
                 ) {
                     NavigationAppearanceDetail(
                         navigation: navigation,

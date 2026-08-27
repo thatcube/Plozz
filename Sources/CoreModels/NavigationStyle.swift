@@ -48,7 +48,7 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
         case .rail:
             return LocalizedStringResource(
                 "navigationStyle.rail",
-                defaultValue: "Library Rail",
+                defaultValue: "Pinned Sidebar",
                 comment: "Navigation layout option in Settings > Appearance."
             )
         }
@@ -76,13 +76,13 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
         case .sidebar:
             return LocalizedStringResource(
                 "navigationStyle.detail.sidebar",
-                defaultValue: "A collapsible left sidebar that expands on focus.",
+                defaultValue: "One button opens the system sidebar.",
                 comment: "One-line explanation shown under the navigation-style picker."
             )
         case .rail:
             return LocalizedStringResource(
                 "navigationStyle.detail.rail",
-                defaultValue: "Your libraries in a slim left rail that expands on focus and steps aside on a title page.",
+                defaultValue: "A pinned icon list expands to show labels and libraries.",
                 comment: "One-line explanation shown under the navigation-style picker."
             )
         }

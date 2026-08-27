@@ -122,6 +122,8 @@ public final class AppState {
     public var universalWatchlistNativeViewStore:
         (any NativeWatchlistViewStoring)?
     @ObservationIgnored
+    public var universalWatchlistNativeViewLoaded = false
+    @ObservationIgnored
     public var universalWatchlistDestinationIDs:
         Set<WatchlistDestinationID> = []
     @ObservationIgnored
@@ -256,10 +258,7 @@ public final class AppState {
                 self.resolvedUniversalWatchlistItems(candidates: items)
             },
             durableWatchlistPresentationReady: { [unowned self] in
-                // The store is installed in the same operation that restores
-                // `universalWatchlistNativeView`; nil means the runtime has not
-                // opened its cache yet, not that the cached watchlist was empty.
-                self.universalWatchlistNativeViewStore != nil
+                self.universalWatchlistNativeViewLoaded
             },
             seedLegacyUniversalWatchlist: { [weak self] _ in
                 try? await self?.seedLegacyUniversalWatchlist()

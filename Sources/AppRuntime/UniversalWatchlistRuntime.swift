@@ -168,6 +168,13 @@ public protocol UniversalWatchlistHost: AnyObject {
     var universalWatchlistAnimeBridge: AnimeIDBridgeStore { get }
     var universalWatchlistNativeViewStore:
         (any NativeWatchlistViewStoring)? { get set }
+    /// True only after the native view for the CURRENT profile/identity/server
+    /// scope has been decoded, scoped and installed.
+    ///
+    /// `store != nil` is not equivalent: while a new scope is being prepared the
+    /// old store object still exists, and Home used that to resolve against the
+    /// new scope's still-empty in-memory view.
+    var universalWatchlistNativeViewLoaded: Bool { get set }
     var universalWatchlistDestinationIDs:
         Set<WatchlistDestinationID> { get set }
     /// Identity of the built reconciler: profile + Plex identity generation, so a
@@ -857,6 +864,7 @@ public extension UniversalWatchlistHost {
         var view = ((try? store?.load()) ?? .empty).scoped(to: scope)
         view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
         universalWatchlistNativeView = view
+        universalWatchlistNativeViewLoaded = true
         if FanoutDiagnostics.isEnabled {
             let entries = view.bucketsByDestinationID.values
                 .reduce(0) { $0 + $1.entries.count }
@@ -1088,6 +1096,7 @@ public extension UniversalWatchlistHost {
                 self.universalWatchlistReconciler = nil
                 self.universalWatchlistMutationStore = nil
                 self.universalWatchlistNativeViewStore = nil
+                self.universalWatchlistNativeViewLoaded = false
                 self.universalWatchlistNativeView = .empty
                 self.universalWatchlistDestinationIDs = []
             }
@@ -1118,6 +1127,9 @@ public extension UniversalWatchlistHost {
             accountsKey: accountsKey
         )
         guard universalWatchlistProfileID != reconcilerKey else { return }
+        // From here until `loadUniversalWatchlistNativeView` completes, any
+        // durable resolution would be against an empty or previous-scope view.
+        universalWatchlistNativeViewLoaded = false
         universalWatchlistIdentityUpdateTask?.cancel()
         universalWatchlistIdentityUpdateTask = nil
         await universalWatchlistRetryScheduler?.cancel()

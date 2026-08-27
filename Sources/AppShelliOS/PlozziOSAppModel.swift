@@ -360,9 +360,7 @@ final class PlozziOSAppModel {
                 self.resolvedUniversalWatchlistItems(candidates: items)
             },
             durableWatchlistPresentationReady: { [unowned self] in
-                // Installed at the same time as the cached native view. Until
-                // then Home's own snapshot is the more complete answer.
-                self.universalWatchlistNativeViewStore != nil
+                self.universalWatchlistNativeViewLoaded
             },
             seedLegacyUniversalWatchlist: { [weak self] _ in
                 try? await self?.seedLegacyUniversalWatchlist()
@@ -408,6 +406,7 @@ final class PlozziOSAppModel {
         (any NativeWatchlistViewStoring)?
     @ObservationIgnored var universalWatchlistDestinationIDs:
         Set<WatchlistDestinationID> = []
+    @ObservationIgnored var universalWatchlistNativeViewLoaded = false
     @ObservationIgnored var universalWatchlistProfileID: String?
     @ObservationIgnored var universalWatchlistRetryScheduler:
         WatchlistRetryScheduler?

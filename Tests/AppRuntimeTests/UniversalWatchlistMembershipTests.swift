@@ -112,6 +112,7 @@ final class UniversalWatchlistHostDouble: UniversalWatchlistHost {
     var universalWatchlistNativeView = NativeWatchlistView()
     let universalWatchlistAnimeBridge = AnimeIDBridgeStore(directoryURL: nil)
     var universalWatchlistNativeViewStore: (any NativeWatchlistViewStoring)?
+    var universalWatchlistNativeViewLoaded = false
     var universalWatchlistDestinationIDs: Set<WatchlistDestinationID> = []
     var universalWatchlistProfileID: String?
     let plexWatchlistIdentityGeneration = 0

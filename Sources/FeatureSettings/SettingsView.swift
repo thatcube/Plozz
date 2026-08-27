@@ -39,7 +39,9 @@ public struct SettingsView: View {
     /// NavigationStack on tvOS — the closure-based form sometimes hosts the
     /// destination *outside* the stack, so the Menu/Back button quits the app
     /// instead of popping back.
-    @State private var path: [SettingsRoute] = []
+    /// Stable navigation identity owned by MainTabView. The model survives shell
+    /// swaps, while only this view observes its path mutations.
+    private let navigation: SettingsNavigationModel
     /// The shell's chrome model, present only under the custom navigation rail.
     @Environment(NavigationChromeModel.self) private var navigationChrome: NavigationChromeModel?
     @State private var confirmSignOutAll = false
@@ -270,7 +272,8 @@ public struct SettingsView: View {
         pendingSyncedServers: [SyncedAccountDescriptor] = [],
         onIgnorePendingServer: @escaping (String) -> Void = { _ in },
         onSetUpFromAnotherDevice: (() -> Void)? = nil,
-        metadataSettings: MetadataSettingsDependencies? = nil
+        metadataSettings: MetadataSettingsDependencies? = nil,
+        navigation: SettingsNavigationModel
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -336,6 +339,7 @@ public struct SettingsView: View {
         self.onIgnorePendingServer = onIgnorePendingServer
         self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
         self.metadataSettings = metadataSettings
+        self.navigation = navigation
     }
 
     /// Whether the active profile includes at least one server that can download
@@ -372,7 +376,7 @@ public struct SettingsView: View {
             onCreateProfile: onCreateProfile,
             onUpdateProfileCosmetics: onUpdateProfileCosmetics,
             onDeleteProfile: onDeleteProfile,
-            pushRoute: { path.append($0) },
+            pushRoute: { navigation.path.append($0) },
             onAddAccount: onAddAccount,
             hasParentalPIN: hasParentalPIN,
             isParentalUnlocked: isParentalUnlocked,
@@ -397,7 +401,8 @@ public struct SettingsView: View {
 
 
     public var body: some View {
-        NavigationStack(path: $path) {
+        @Bindable var navigation = navigation
+        NavigationStack(path: $navigation.path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
                     // Live media-share scan/enrich progress, when any share is
@@ -486,7 +491,7 @@ public struct SettingsView: View {
         // page: report the depth so the rail steps aside rather than overlaying it
         // and competing for a Left press. A no-op under the two native tab styles,
         // which install no chrome model.
-        .reportsNavigationDepth(path.count, to: navigationChrome)
+        .reportsNavigationDepth(navigation.path.count, to: navigationChrome)
     }
 
     // MARK: - Profile container (header + all settings this profile owns)

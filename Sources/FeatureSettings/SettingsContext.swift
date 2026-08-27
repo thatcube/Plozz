@@ -94,7 +94,7 @@ struct SettingsContext {
 /// destinations onto the same stack — `ServersAndLibrariesDetailView` uses
 /// this to drill from a server summary row into `ServerDetailView`, and a
 /// future per-account flow can do the same without re-plumbing closures.
-enum SettingsRoute: Hashable {
+public enum SettingsRoute: Hashable {
     case profile
     /// Per-profile settings page (Everyone › Profiles › <name>).
     case profileSettings(profileID: String)
@@ -133,6 +133,20 @@ enum SettingsRoute: Hashable {
     /// Jellyfin/Emby "Watching as" — the server's sign-ins, plus adding one.
     case serverUser(serverKey: String)
     case server(key: String)
+}
+
+/// Settings navigation state that survives a top-bar/sidebar/rail shell swap.
+///
+/// MainTabView owns this model's identity but never reads `path`. SettingsView is
+/// the only observer, so a push/pop invalidates the Settings stack alone instead
+/// of re-running the app's large root tab body. This mirrors NavigationChromeModel:
+/// shared identity, narrow observation.
+@MainActor
+@Observable
+public final class SettingsNavigationModel {
+    var path: [SettingsRoute] = []
+
+    public init() {}
 }
 
 extension EdgeInsets {

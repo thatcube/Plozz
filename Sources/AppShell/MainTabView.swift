@@ -390,6 +390,10 @@ struct MainTabView: View {
     /// A title the in-player Cast card asked for, waiting to be pushed once the
     /// player has closed. Same hand-off as `pendingPersonRoute`.
     @State private var pendingTitleRoute: MediaItem?
+    /// Settings navigation identity owned above all three navigation shells.
+    /// MainTabView passes the reference but never reads its path, so Settings
+    /// pushes do not invalidate this large shell body.
+    @State private var settingsNavigation = SettingsNavigationModel()
 
     private var selectedTab: Binding<MainTab> {
         Binding(
@@ -684,7 +688,8 @@ struct MainTabView: View {
                 pendingSyncedServers: pendingSyncedServers,
                 onIgnorePendingServer: onIgnorePendingServer,
                 onSetUpFromAnotherDevice: onSetUpFromAnotherDevice,
-                metadataSettings: metadataSettings
+                metadataSettings: metadataSettings,
+                navigation: settingsNavigation
             )
             .background { SettingsPageBackground() }
     }

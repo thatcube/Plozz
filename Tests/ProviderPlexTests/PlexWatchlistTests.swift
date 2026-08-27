@@ -462,3 +462,115 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertFalse(item.hasPlayableLibraryTarget())
     }
 }
+
+/// Covers the order the watchlist is asked for.
+///
+/// The row was arriving in an order that matched neither when titles were added
+/// nor one read to the next — "seemingly random when I open the app". Nothing
+/// downstream shuffles it: the union preserves each destination's own list
+/// position, and that position is the order this read returned. So an unordered
+/// read is an unordered row, and asking for no order was the whole of it.
+final class PlexWatchlistOrderTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "srv", name: "Home", baseURL: URL(string: "https://plex.host:32400")!, provider: .plex),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    private func sortValue(_ stub: StubHTTPClient) -> String? {
+        stub.queryItems(forPathSuffix: "/library/sections/watchlist/all")?
+            .first { $0.name == "sort" }?
+            .value
+    }
+
+    func testTheReadAsksForWatchlistOrderNewestFirst() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(
+            pathSuffix: "/library/sections/watchlist/all",
+            json: #"{"MediaContainer":{"size":1,"totalSize":1,"Metadata":[{"ratingKey":"k1","type":"movie","title":"A","year":2020}]}}"#
+        )
+
+        _ = try await PlexProvider(session: makeSession(), http: stub).watchlist()
+
+        XCTAssertEqual(
+            sortValue(stub),
+            "watchlistedAt:desc",
+            "watchlistedAt is when the title was watchlisted; addedAt answers a different question — when it reached a library"
+        )
+    }
+
+    /// The order returned is the order presented, so it must survive the read
+    /// exactly rather than being re-sorted on some other key.
+    func testTheReturnedOrderIsPreserved() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(
+            pathSuffix: "/library/sections/watchlist/all",
+            json: """
+            {"MediaContainer":{"size":3,"totalSize":3,"Metadata":[
+              {"ratingKey":"k1","type":"movie","title":"Newest","year":2024},
+              {"ratingKey":"k2","type":"movie","title":"Middle","year":2022},
+              {"ratingKey":"k3","type":"movie","title":"Oldest","year":2020}
+            ]}}
+            """
+        )
+
+        let items = try await PlexProvider(session: makeSession(), http: stub).watchlist()
+
+        XCTAssertEqual(items.map(\.title), ["Newest", "Middle", "Oldest"])
+    }
+
+    /// These endpoints are undocumented and change without notice. A sort the
+    /// service refuses must cost the ordering, never the watchlist.
+    func testARefusedSortFallsBackToAnUnorderedReadRatherThanFailing() async throws {
+        let stub = StubHTTPClient()
+        // First attempt (with the sort) fails; the retry without it succeeds.
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            "{}",
+            #"{"MediaContainer":{"size":1,"totalSize":1,"Metadata":[{"ratingKey":"k1","type":"movie","title":"Kept","year":2020}]}}"#
+        ])
+
+        let items = try await PlexProvider(session: makeSession(), http: stub).watchlist()
+
+        XCTAssertEqual(items.map(\.title), ["Kept"], "An unordered watchlist beats no watchlist")
+        XCTAssertNil(sortValue(stub), "The retry drops the sort rather than sending an empty one")
+    }
+}
+
+/// A paged watchlist read must not splice two orderings together.
+///
+/// An offset only means anything within one ordering, so continuing unsorted from
+/// where a sorted read left off repeats some titles and silently loses others.
+final class PlexWatchlistSortFallbackPagingTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "srv", name: "Home", baseURL: URL(string: "https://plex.host:32400")!, provider: .plex),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testARefusedSortRestartsTheReadRatherThanResumingIt() async throws {
+        let stub = StubHTTPClient()
+        let firstPage = (0..<100).map {
+            #"{"ratingKey":"k\#($0)","type":"movie","title":"Film \#($0)","year":2020}"#
+        }.joined(separator: ",")
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            // Page 1 sorted, then the service refuses page 2's sort.
+            "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}",
+            "{}",
+            // The restart: both pages again, unsorted.
+            "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}",
+            #"""
+            {"MediaContainer":{"size":2,"totalSize":102,"Metadata":[
+              {"ratingKey":"k100","type":"movie","title":"Film 100","year":2020},
+              {"ratingKey":"k101","type":"movie","title":"Film 101","year":2020}
+            ]}}
+            """#
+        ])
+
+        let items = try await PlexProvider(session: makeSession(), http: stub).watchlist()
+
+        XCTAssertEqual(items.count, 102, "Every title exactly once — no page banked under the old ordering")
+        XCTAssertEqual(Set(items.map(\.id)).count, 102, "and none of them duplicated")
+    }
+}

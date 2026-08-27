@@ -74,6 +74,29 @@ public enum TopShelfPublisher {
         TopShelfStore.save(TopShelfSnapshot(sections: sections))
     }
 
+    /// What a half-watched card says beside its progress bar: which episode, and
+    /// how much is left — `S1 · E1 · 21m left`.
+    ///
+    /// A shelf of part-watched titles otherwise shows a name and a picture and
+    /// leaves the viewer to remember the rest. Both halves come straight from the
+    /// same values the in-app card uses, so the two cannot drift into describing
+    /// the same title differently.
+    ///
+    /// Either half may be missing — a movie has no episode numbering, and a title
+    /// whose runtime the server never reported has no remaining time — so this
+    /// joins whatever is available and returns `nil` rather than an empty chip.
+    static func resumeChipText(for item: MediaItem) -> String? {  // l10n:content — composed from server metadata + a formatted duration
+        var parts: [String] = []
+        if item.kind == .episode, let episodeLabel = item.subtitle {
+            parts.append(episodeLabel)
+        }
+        if let remaining = item.resumeRemainingText {
+            parts.append(remaining)
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " · ")
+    }
+
     /// Maps domain items onto snapshot items. When `compositeProgress` is set, a
     /// mid-playback item's poster is replaced by a locally composited poster that
     /// has the progress bar burned in; on any failure it falls back to the plain
@@ -102,7 +125,10 @@ public enum TopShelfPublisher {
             if let poster = posterURL {
                 if let progress,
                    let composited = await TopShelfPosterComposer.compositedPosterURL(
-                       id: artworkID, posterURL: poster, progress: progress
+                       id: artworkID,
+                       posterURL: poster,
+                       progress: progress,
+                       chip: resumeChipText(for: item)
                    ) {
                     imageURL = composited
                 } else {

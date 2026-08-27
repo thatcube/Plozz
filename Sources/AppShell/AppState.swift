@@ -1331,8 +1331,12 @@ public final class AppState {
         // first because it shares the scheme; outside DEBUG this always
         // declines, so a shipped build falls straight through to Top Shelf.
         if screenshotDirector.handle(url: url) { return }
-        if let id = TopShelf.itemID(from: url) {
-            pendingPlay.itemID = id
+        if let reference = TopShelf.itemReference(from: url) {
+            pendingPlay.itemID = reference.id
+            // Kept rather than discarded: the link knows which server the title
+            // came from, and throwing that away leaves the router guessing across
+            // every signed-in account for an id that is only unique within one.
+            pendingPlay.accountID = reference.accountID
         }
     }
 

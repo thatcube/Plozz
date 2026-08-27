@@ -471,7 +471,23 @@ struct HomeTab: View {
             DeepLinkPlayRouter(
                 pendingPlay: runtime.pendingPlay,
                 accounts: accounts,
-                onResolved: { requestPlay($0) }
+                // Open the title's page, then start it. Playing straight from the
+                // shelf left the viewer on Home the moment they backed out — the
+                // title they had just been watching nowhere in sight, and no way
+                // to reach its episodes or its description without finding it
+                // again. Pushing first means Back lands somewhere that makes
+                // sense, and costs nothing on the way in: the player is presented
+                // over the stack, so the page is simply already there underneath.
+                onResolved: { item in
+                    navigate(item)
+                    // Next runloop turn, so the push is committed before the
+                    // player is presented over it. Presenting into a navigation
+                    // change that is still settling drops the cover on tvOS.
+                    Task { @MainActor in
+                        await Task.yield()
+                        requestPlay(item)
+                    }
+                }
             )
             ScreenshotRouter(
                 director: runtime.screenshotDirector,
@@ -753,18 +769,67 @@ struct HomeTab: View {
             Color.clear
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
-                .task(id: pendingPlay.itemID) { await route() }
+                // Keyed on the accounts as well as the id. A launch straight from a
+                // Top Shelf card delivers the link before any provider exists, so a
+                // task watching only the id runs once, against nothing, and never
+                // again — the app opens and sits there, which is exactly what the
+                // shelf looked like from the sofa.
+                .task(id: RouteRequest(
+                    itemID: pendingPlay.itemID,
+                    accountID: pendingPlay.accountID,
+                    accountIDs: accounts.map(\.account.id)
+                )) { await route() }
+        }
+
+        /// What a routing attempt depends on. Any change re-runs it.
+        private struct RouteRequest: Equatable {
+            let itemID: String?
+            let accountID: String?
+            let accountIDs: [String]
         }
 
         private func route() async {
             guard let id = pendingPlay.itemID else { return }
-            pendingPlay.itemID = nil
-            for resolved in accounts {
+            // Nothing to ask yet. Deliberately keeps the request pending: accounts
+            // arriving is a change this task is watching, so it will run again with
+            // something to resolve against.
+            guard !accounts.isEmpty else { return }
+
+            // The link's own account first, when it named one — it is the server the
+            // card was built from, so it is both the fastest answer and the only one
+            // guaranteed to mean the same title.
+            let ordered: [ResolvedAccount]
+            if let owner = pendingPlay.accountID,
+               let match = accounts.first(where: { $0.account.id == owner }) {
+                ordered = [match] + accounts.filter { $0.account.id != owner }
+            } else {
+                ordered = accounts
+            }
+
+            for resolved in ordered {
                 if let item = try? await resolved.provider.item(id: id) {
+                    // Another run may have resolved it while this one was waiting:
+                    // the task restarts whenever the accounts change, and a request
+                    // already in flight is not stopped by that. Acting twice pushes
+                    // the page twice and presents the player over itself.
+                    guard pendingPlay.itemID == id else { return }
+                    pendingPlay.itemID = nil
+                    pendingPlay.accountID = nil
                     onResolved(item.taggingSource(resolved.account.id))
                     return
                 }
             }
+            // Only an uninterrupted sweep may declare the title gone. A cancelled
+            // one asked nobody: the fetch above cannot tell being cancelled apart
+            // from a server saying no, so a task restarted mid-flight would fall
+            // through here and discard a request that no server ever answered —
+            // landing the viewer on Home, which is the whole thing this fixes.
+            guard !Task.isCancelled else { return }
+            // Asked every signed-in server and none of them knows it. Clearing stops
+            // a title that has genuinely gone from re-asking on every account change
+            // for the rest of the session.
+            pendingPlay.itemID = nil
+            pendingPlay.accountID = nil
         }
     }
 

@@ -739,7 +739,8 @@ final class PlozziOSAppModel {
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.thatcube.Plozz",
             version: version,
             build: build,
-            providers: providers
+            providers: providers,
+            isMaintainerDevice: crashReporting.settings.isMaintainerDevice
         )
     }
 

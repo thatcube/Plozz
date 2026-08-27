@@ -74,8 +74,34 @@ public struct CrashReportingSettings: Codable, Equatable, Sendable {
     /// Whether the user has opted in to sending crash reports.
     public var isEnabled: Bool
 
-    public init(isEnabled: Bool = false) {
+    /// Whether this device belongs to the maintainer, so its crashes are the
+    /// maintainer's own testing rather than a real person hitting a bug.
+    ///
+    /// A Debug build already reports as `environment: debug`, but the maintainer
+    /// also installs the **TestFlight** build on their own Apple TV to check a
+    /// beta — and that crash is byte-for-byte indistinguishable from an external
+    /// tester's. TestFlight exposes nothing at runtime that separates internal
+    /// from external testers, so this cannot be detected; it has to be declared.
+    ///
+    /// Off by default and per-device on purpose: it is a statement about the
+    /// hardware in the room, not about the account, so it must not sync.
+    public var isMaintainerDevice: Bool
+
+    public init(isEnabled: Bool = false, isMaintainerDevice: Bool = false) {
         self.isEnabled = isEnabled
+        self.isMaintainerDevice = isMaintainerDevice
+    }
+
+    /// Hand-written so adding a field can never invalidate a stored choice. With
+    /// the synthesized decoder, a payload written before `isMaintainerDevice`
+    /// existed throws `keyNotFound` — and `CrashReportingSettingsStore.loadStored`
+    /// maps a decode failure to `nil`, i.e. "never chose", which would silently
+    /// re-apply the channel default and flip an explicit opt-OUT back on.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
+        isMaintainerDevice =
+            try container.decodeIfPresent(Bool.self, forKey: .isMaintainerDevice) ?? false
     }
 
     public static let `default` = CrashReportingSettings()

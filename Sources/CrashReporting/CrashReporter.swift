@@ -20,6 +20,10 @@ public struct CrashReportContext: Sendable {
     /// Which media backends are configured, e.g. `["Jellyfin", "Plex"]`. Names
     /// of the *provider kinds*, never server names/URLs.
     public var providers: [String]
+    /// `maintainer` when this device is flagged as the maintainer's own, else
+    /// `user`. Sent as a tag so a crash the maintainer caused while testing can
+    /// be told apart from one a real person hit.
+    public var deviceRole: String
 
     public init(
         releaseName: String,
@@ -28,7 +32,8 @@ public struct CrashReportContext: Sendable {
         environment: String,
         systemVersion: String,
         deviceModel: String,
-        providers: [String]
+        providers: [String],
+        deviceRole: String = "user"
     ) {
         self.releaseName = releaseName
         self.version = version
@@ -37,25 +42,51 @@ public struct CrashReportContext: Sendable {
         self.systemVersion = systemVersion
         self.deviceModel = deviceModel
         self.providers = providers
+        self.deviceRole = deviceRole
     }
 
     /// Builds a context from the running process. Callers supply the non-derivable
     /// bits (version/build/bundleID/providers); the rest is read from the device.
+    ///
+    /// - Parameter isMaintainerDevice: when true the environment is suffixed
+    ///   `-dev`, so the maintainer's own testing drops out of the plain
+    ///   `testflight` / `production` filter instead of masquerading as a real
+    ///   person's crash.
     public static func make(
         bundleIdentifier: String,
         version: String,
         build: String,
-        providers: [String]
+        providers: [String],
+        isMaintainerDevice: Bool = false
     ) -> CrashReportContext {
         CrashReportContext(
             releaseName: "\(bundleIdentifier)@\(version)+\(build)",
             version: version,
             build: build,
-            environment: detectEnvironment(),
+            environment: environmentName(isMaintainerDevice: isMaintainerDevice),
             systemVersion: currentSystemVersion(),
             deviceModel: deviceModelIdentifier(),
-            providers: providers
+            providers: providers,
+            deviceRole: isMaintainerDevice ? "maintainer" : "user"
         )
+    }
+
+    /// The release channel, narrowed to a separate environment when the device is
+    /// the maintainer's.
+    ///
+    /// `debug` is deliberately left alone: a Debug build is already only ever the
+    /// maintainer's, so `debug-dev` would add a second name for one thing and
+    /// split its history in two.
+    static func environmentName(isMaintainerDevice: Bool) -> String {
+        environmentName(base: detectEnvironment(), isMaintainerDevice: isMaintainerDevice)
+    }
+
+    /// The pure rule, split out so it is testable. `detectEnvironment()` always
+    /// answers `debug` under a test run, which would leave the interesting cases
+    /// (`testflight` → `testflight-dev`) impossible to assert.
+    static func environmentName(base: String, isMaintainerDevice: Bool) -> String {
+        guard isMaintainerDevice, base != "debug" else { return base }
+        return "\(base)-dev"
     }
 
     static func detectEnvironment() -> String {
@@ -130,6 +161,12 @@ public final class NoopCrashReporter: CrashReporter {
 @MainActor
 public final class CrashReportingController {
     private let reporter: CrashReporter
+    /// The environment the live reporter was STARTED with. Sentry reads
+    /// `options.environment` once, at `start`, and never again — so re-tagging the
+    /// scope cannot move an already-running reporter between `testflight` and
+    /// `testflight-dev`. Toggling the maintainer marker has to restart it, and
+    /// this is how we notice it changed.
+    private var activeEnvironment: String?
 
     /// True when this build shipped with a crash-reporting endpoint (a non-empty
     /// DSN was baked into Info.plist). When false the opt-in UI is shown disabled
@@ -154,6 +191,14 @@ public final class CrashReportingController {
         #endif
     }
 
+    /// Test seam: inject a reporter directly. The DSN-based initializer decides
+    /// *which* reporter to build; the lifecycle rules below (start/stop/restart on
+    /// an environment change) are independent of that choice and need asserting.
+    init(reporter: CrashReporter, isConfigured: Bool) {
+        self.reporter = reporter
+        self.isConfigured = isConfigured
+    }
+
     /// Reconcile the live reporter with the user's current consent. Starts on the
     /// first opt-in, stops on opt-out, and is a no-op when nothing changed or when
     /// the build has no DSN.
@@ -161,12 +206,21 @@ public final class CrashReportingController {
         guard isConfigured else { return }
         if enabled {
             if reporter.isActive {
-                reporter.update(context: context)
+                if activeEnvironment != context.environment {
+                    // Environment is start-time only — restart to move channels.
+                    reporter.stop()
+                    reporter.start(context: context)
+                    activeEnvironment = context.environment
+                } else {
+                    reporter.update(context: context)
+                }
             } else {
                 reporter.start(context: context)
+                activeEnvironment = context.environment
             }
         } else if reporter.isActive {
             reporter.stop()
+            activeEnvironment = nil
         }
     }
 

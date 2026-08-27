@@ -310,6 +310,7 @@ final class PlexWatchlistTests: XCTestCase {
         let entry = try XCTUnwrap(imported.first)
         let evidence = try XCTUnwrap(entry.mediaAliasEvidence)
 
+        XCTAssertEqual(entry.presentationAccountID, "plex-account")
         XCTAssertEqual(evidence.strong.first?.value, "tt1160419")
         XCTAssertEqual(
             evidence.locallyValidatedBindings.first?.providerItemID,

@@ -26,6 +26,8 @@ public struct WatchlistIntentStoreState: Codable, Hashable, Sendable {
         }
         self.migration = WatchlistMigrationMetadata(
             legacyHomeSeedCompletedAt: migration.legacyHomeSeedCompletedAt,
+            legacyPresentationArtworkScrubbedAt:
+                migration.legacyPresentationArtworkScrubbedAt,
             nativeImportRetiredAt: migration.nativeImportRetiredAt
         )
     }
@@ -89,7 +91,7 @@ public final class AtomicWatchlistIntentStore: WatchlistIntentStoring, @unchecke
 
     private let fileManager: FileManager
     public let fileURL: URL
-    private let lock = NSLock()
+    private let operationLock: NSLock
     private var loadedRevision: UInt64?
     private var loadFailed = false
 
@@ -110,25 +112,63 @@ public final class AtomicWatchlistIntentStore: WatchlistIntentStoring, @unchecke
             .appendingPathComponent("v1", isDirectory: true)
             .appendingPathComponent(encoded, isDirectory: true)
             .appendingPathComponent("state.json")
+        operationLock = WatchlistIntentFileCoordination.shared.lock(
+            for: fileURL.standardizedFileURL.path
+        )
     }
 
     public func load() throws -> WatchlistIntentStoreState {
-        lock.lock()
-        defer { lock.unlock() }
+        operationLock.lock()
+        defer { operationLock.unlock() }
         guard fileManager.fileExists(atPath: fileURL.path) else {
             loadedRevision = nil
             loadFailed = false
             return .empty
         }
         do {
+            let data = try Data(
+                contentsOf: fileURL,
+                options: [.mappedIfSafe]
+            )
             let envelope = try JSONDecoder().decode(
                 Envelope.self,
-                from: Data(contentsOf: fileURL, options: [.mappedIfSafe])
+                from: data
             )
-            try Self.validate(envelope.state)
+            let state = envelope.state
+            try Self.validate(state)
             loadedRevision = envelope.revision
+            let canonicalEnvelope = Envelope(
+                version: state.version,
+                revision: envelope.revision,
+                nextRank: state.nextRank,
+                intents: state.intents,
+                migration: state.migration
+            )
+            guard let canonicalData = CanonicalJSON.encode(canonicalEnvelope)
+            else { throw DurableLocalStateError.malformedPayload }
+            if data != canonicalData {
+                let current = try Data(
+                    contentsOf: fileURL,
+                    options: [.mappedIfSafe]
+                )
+                guard current == data else {
+                    throw DurableLocalStateError.writeConflict
+                }
+                let nextRevision = envelope.revision &+ 1
+                let rewritten = Envelope(
+                    version: state.version,
+                    revision: nextRevision,
+                    nextRank: state.nextRank,
+                    intents: state.intents,
+                    migration: state.migration
+                )
+                guard let rewrittenData = CanonicalJSON.encode(rewritten)
+                else { throw DurableLocalStateError.malformedPayload }
+                try rewrittenData.write(to: fileURL, options: [.atomic])
+                loadedRevision = nextRevision
+            }
             loadFailed = false
-            return envelope.state
+            return state
         } catch let error as DurableLocalStateError {
             loadFailed = true
             throw error
@@ -139,8 +179,8 @@ public final class AtomicWatchlistIntentStore: WatchlistIntentStoring, @unchecke
     }
 
     public func save(_ state: WatchlistIntentStoreState) throws {
-        lock.lock()
-        defer { lock.unlock() }
+        operationLock.lock()
+        defer { operationLock.unlock() }
         guard !loadFailed else { throw DurableLocalStateError.malformedPayload }
         try Self.validate(state)
         let diskRevision = try currentDiskRevision()
@@ -173,11 +213,12 @@ public final class AtomicWatchlistIntentStore: WatchlistIntentStoring, @unchecke
     }
 
     public func destructiveRemove() throws {
-        lock.lock()
-        defer { lock.unlock() }
+        operationLock.lock()
+        defer { operationLock.unlock() }
         if fileManager.fileExists(atPath: fileURL.path) {
             try fileManager.removeItem(at: fileURL)
         }
+
         loadedRevision = nil
         loadFailed = false
     }
@@ -191,6 +232,22 @@ public final class AtomicWatchlistIntentStore: WatchlistIntentStoring, @unchecke
             ).revision
         } catch {
             throw DurableLocalStateError.malformedPayload
+        }
+    }
+
+    private final class WatchlistIntentFileCoordination: @unchecked Sendable {
+        static let shared = WatchlistIntentFileCoordination()
+
+        private let lock = NSLock()
+        private var locksByPath: [String: NSLock] = [:]
+
+        func lock(for path: String) -> NSLock {
+            lock.lock()
+            defer { lock.unlock() }
+            if let existing = locksByPath[path] { return existing }
+            let created = NSLock()
+            locksByPath[path] = created
+            return created
         }
     }
 

@@ -4,6 +4,37 @@ import XCTest
 
 @MainActor
 final class UniversalWatchlistActionTests: XCTestCase {
+    func testPersistedArtworkRehydratesEvenWhenUniversalWatchlistIsOff() {
+        let signed = URL(
+            string: "https://plex.example/poster?token=current"
+        )!
+        let coordinator = MediaItemActionCoordinator(
+            providerResolver: { _ in nil },
+            primaryAccountID: { nil },
+            crossServerWatchSyncEnabled: { false },
+            enqueueWatchMutation: { _ in },
+            universalWatchlistEnabled: { false },
+            rehydratePersistedArtworkItems: { items in
+                items.map { item in
+                    var item = item
+                    item.posterURL = signed
+                    return item
+                }
+            }
+        )
+        let item = MediaItem(
+            id: "item",
+            title: "Item",
+            kind: .movie
+        )
+
+        XCTAssertEqual(
+            coordinator.rehydratePersistedArtwork([item])
+                .first?.posterURL,
+            signed
+        )
+    }
+
     func testExternalDiscoveryGetsLocalWatchlistWithoutProviderActions() {
         var providerResolutions = 0
         let coordinator = MediaItemActionCoordinator(

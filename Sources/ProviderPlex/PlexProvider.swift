@@ -14,6 +14,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     public let credentialRevision: CredentialRevision
     let client: PlexClient
     let themeArchiveResolver: @Sendable (String?) async -> URL?
+    private let artworkOriginHistoryKey: String
 
     public var authenticatedHTTPOrigin: URL { client.baseURL }
 
@@ -45,6 +46,9 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         // server resolves on the first probe next launch instead of re-discovering
         // through stale/dead addresses (Docker bridges, old relay IPs).
         let reachableKey = "plex.reachable.\(session.server.id)"
+        let artworkOriginHistoryKey =
+            "plex.artwork-origins.\(session.server.id)"
+        self.artworkOriginHistoryKey = artworkOriginHistoryKey
         let reachableSeed = UserDefaults.standard.string(forKey: reachableKey).flatMap(URL.init(string:))
         let resolver = PlexConnectionResolver(
             candidates: candidates,
@@ -55,6 +59,16 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             reachableSeed: reachableSeed,
             onReachable: { url in
                 UserDefaults.standard.set(url.absoluteString, forKey: reachableKey)
+                var origins = UserDefaults.standard.stringArray(
+                    forKey: artworkOriginHistoryKey
+                ) ?? []
+                if !origins.contains(url.absoluteString) {
+                    origins.append(url.absoluteString)
+                    UserDefaults.standard.set(
+                        origins,
+                        forKey: artworkOriginHistoryKey
+                    )
+                }
             }
         )
         self.client = PlexClient(
@@ -1202,9 +1216,176 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     }
 
     public func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {
-        // Plex serves art by URL path, not by item id alone, so a standalone
-        // lookup isn't possible here — artwork URLs are resolved during mapping.
-        nil
+        // Plex accepts its canonical unversioned image endpoints; the timestamp
+        // suffix it reports in list payloads is a cache-busting revision, not a
+        // requirement. Building from `(item id, kind)` matters for durable
+        // presentation: saved URLs must not carry credentials, and on the next
+        // launch this recreates a valid URL with the CURRENT token without a
+        // metadata request.
+        // Plex logos are provider-supplied `clearLogo` paths, not an item-id
+        // endpoint. Without that metadata path there is nothing honest to build.
+        let segment: String
+        switch kind {
+        case .primary, .thumb: segment = "thumb"
+        case .backdrop: segment = "art"
+        case .logo: return nil
+        }
+        return client.imageURL(
+            path: "/library/metadata/\(itemID)/\(segment)",
+            maxWidth: maxWidth
+        )
+    }
+
+    public func reauthenticatedImageURL(
+        _ persistedURL: URL,
+        maxWidth: Int?
+    ) -> URL? {
+        guard let components = URLComponents(
+            url: persistedURL,
+            resolvingAgainstBaseURL: false
+        ), let resource = persistedArtworkResource(for: persistedURL)
+        else { return nil }
+
+        let storedWidth = components.queryItems?
+            .first { $0.name.lowercased() == "width" }?
+            .value.flatMap(Int.init)
+        let width = maxWidth ?? storedWidth
+
+        if resource.path.hasPrefix("/photo/:/transcode"),
+           let nested = components.queryItems?
+               .first(where: { $0.name.lowercased() == "url" })?
+               .value,
+           let nestedComponents = URLComponents(string: nested),
+           let nestedPath = localArtworkPath(
+               from: nestedComponents,
+               sourceBaseURL: resource.baseURL
+           ) {
+            // The nested path includes Plex's artwork revision suffix, which is
+            // the cache-busting identity we want to preserve. The sanitizer has
+            // removed its old token; `imageURL` attaches the current one at both
+            // levels.
+            return client.imageURL(
+               path: nestedPath,
+                maxWidth: width
+            )
+        }
+
+        if isLocalArtworkPath(resource.path) {
+            return client.imageURL(
+               path: resource.path,
+               maxWidth: width
+            )
+        }
+        return nil
+    }
+
+    public func ownsPersistedImageURL(_ persistedURL: URL) -> Bool {
+        guard let resource = persistedArtworkResource(for: persistedURL)
+        else { return false }
+        guard resource.path.hasPrefix("/photo/:/transcode") else {
+            return true
+        }
+        guard let components = URLComponents(
+            url: persistedURL,
+            resolvingAgainstBaseURL: false
+        ), let nested = components.queryItems?
+            .first(where: { $0.name.lowercased() == "url" })?
+            .value,
+           let nestedComponents = URLComponents(string: nested)
+        else { return false }
+        return localArtworkPath(
+            from: nestedComponents,
+            sourceBaseURL: resource.baseURL
+        ) != nil
+    }
+
+    /// Re-signs artwork hosted by plex.tv Discover with the active profile's
+    /// account-level token. Server artwork uses ``reauthenticatedImageURL``.
+    public func reauthenticatedDiscoverImageURL(
+        _ persistedURL: URL,
+        discoverToken: String?
+    ) -> URL? {
+        client.withDiscoverToken(discoverToken)
+            .reauthenticatedDiscoverImageURL(persistedURL)
+    }
+
+    /// Returns a provider-relative local path, stripping a reverse proxy's base
+    /// prefix when an older nested transcode URL retained it.
+    private func localArtworkPath(
+        from components: URLComponents,
+        sourceBaseURL: URL
+    ) -> String? {
+        let path: String?
+        if components.scheme != nil || components.host != nil {
+            path = components.url.flatMap { nestedURL in
+                knownImageBaseURLs.lazy.compactMap { baseURL in
+                    MediaProviderURLIdentity.relativeResourcePath(
+                        of: nestedURL,
+                        under: baseURL
+                    )
+                }.first(where: isLocalArtworkPath)
+            }
+        } else {
+            var candidate = components.path
+            if !isLocalArtworkPath(candidate) {
+               var basePath = sourceBaseURL.path
+               while basePath.count > 1, basePath.hasSuffix("/") {
+                   basePath.removeLast()
+               }
+               if basePath != "/", !basePath.isEmpty,
+                  candidate == basePath
+                   || candidate.hasPrefix(basePath + "/") {
+                   candidate = String(candidate.dropFirst(basePath.count))
+               }
+            }
+            path = candidate
+        }
+        guard let path, isLocalArtworkPath(path) else { return nil }
+        return path
+    }
+
+    private struct PersistedArtworkResource {
+        let path: String
+        let baseURL: URL
+    }
+
+    private var knownImageBaseURLs: [URL] {
+        var seen = Set<String>()
+        return (
+            client.knownBaseURLs
+            + (UserDefaults.standard.stringArray(
+                forKey: artworkOriginHistoryKey
+            ) ?? []).compactMap(URL.init(string:))
+            + [client.baseURL]
+            + (session.server.connectionURLs ?? [])
+            + [session.server.baseURL]
+        ).filter {
+            seen.insert($0.absoluteString).inserted
+        }
+    }
+
+    private func persistedArtworkResource(
+        for url: URL
+    ) -> PersistedArtworkResource? {
+        for baseURL in knownImageBaseURLs {
+            guard let path =
+                    MediaProviderURLIdentity.relativeResourcePath(
+                        of: url,
+                        under: baseURL
+                    ),
+                  path.hasPrefix("/photo/:/transcode")
+                    || isLocalArtworkPath(path)
+            else { continue }
+            return PersistedArtworkResource(
+                path: path,
+                baseURL: baseURL
+            )
+        }
+        return nil
+    }
+
+    private func isLocalArtworkPath(_ path: String) -> Bool {
+        MediaProviderURLIdentity.isPlexArtworkResourcePath(path)
     }
 
     // MARK: Remote subtitles

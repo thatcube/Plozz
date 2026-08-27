@@ -32,11 +32,69 @@ final class JellyfinTicksTests: XCTestCase {
 }
 
 final class JellyfinProviderMappingTests: XCTestCase {
-    private func makeSession() -> UserSession {
+    private func makeSession(
+        baseURL: URL = URL(string: "http://host:8096")!,
+        token: String = "TOKEN"
+    ) -> UserSession {
         UserSession(
-            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
-            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+            server: MediaServer(
+                id: "s",
+                name: "Home",
+                baseURL: baseURL,
+                provider: .jellyfin
+            ),
+            userID: "u1",
+            userName: "Alice",
+            deviceID: "d1",
+            accessToken: token
         )
+    }
+
+    func testImageReauthenticationRejectsDescendantProxyPath() {
+        let provider = JellyfinProvider(
+            session: makeSession(
+                baseURL: URL(string: "https://host")!,
+                token: "ROOT-TOKEN"
+            )
+        )
+        let otherServerImage = URL(
+            string:
+                "https://host/jellyfin"
+                + "/Items/42/Images/Primary"
+        )!
+
+        XCTAssertNil(
+            provider.reauthenticatedImageURL(
+                otherServerImage,
+                maxWidth: 500
+            )
+        )
+    }
+
+    func testImageReauthenticationAcceptsItsOwnProxyBasePath() throws {
+        let provider = JellyfinProvider(
+            session: makeSession(
+                baseURL: URL(string: "https://host/jellyfin")!,
+                token: "JELLYFIN-TOKEN"
+            )
+        )
+        let persisted = URL(
+            string:
+                "https://host/jellyfin"
+                + "/Items/42/Images/Primary?maxWidth=400"
+        )!
+        let signed = try XCTUnwrap(
+            provider.reauthenticatedImageURL(
+                persisted,
+                maxWidth: 500
+            )
+        )
+
+        XCTAssertEqual(
+            signed.path,
+            "/jellyfin/Items/42/Images/Primary"
+        )
+        XCTAssertTrue(signed.absoluteString.contains("JELLYFIN-TOKEN"))
     }
 
     func testContinueWatchingMapsResumeFields() async throws {

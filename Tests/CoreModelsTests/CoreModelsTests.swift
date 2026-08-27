@@ -477,6 +477,83 @@ final class MediaItemReleaseDateTests: XCTestCase {
         survivor.fillingMissingPresentation(from: donor)
         XCTAssertEqual(survivor.releaseDate, utcDay(2019, 4, 14))
     }
+
+    func testArtworkDonationTransfersProvenanceFromDonor() {
+        var survivor = MediaItem(
+            id: "a",
+            title: "Film",
+            kind: .movie
+        ).taggingSource("artless-account")
+        let donor = MediaItem(
+            id: "b",
+            title: "Film",
+            kind: .movie,
+            posterURL: URL(string: "https://media.example/poster.jpg")
+        ).taggingSource("artwork-account")
+
+        XCTAssertNil(survivor.artworkSourceAccountID)
+        survivor.fillingMissingPresentation(from: donor)
+
+        XCTAssertEqual(survivor.posterURL, donor.posterURL)
+        XCTAssertEqual(
+            survivor.artworkSourceAccountID,
+            "artwork-account"
+        )
+    }
+
+    func testPartialArtworkDonationKeepsPerURLProvenance() throws {
+        let poster = URL(string: "https://one.example/poster.jpg")!
+        let backdrop = URL(string: "https://two.example/backdrop.jpg")!
+        var survivor = MediaItem(
+            id: "a",
+            title: "Film",
+            kind: .movie,
+            posterURL: poster
+        ).taggingSource("poster-account")
+        let donor = MediaItem(
+            id: "b",
+            title: "Film",
+            kind: .movie,
+            backdropURL: backdrop
+        ).taggingSource("backdrop-account")
+
+        survivor.fillingMissingPresentation(from: donor)
+
+        XCTAssertEqual(
+            survivor.artworkSourceAccountID(for: poster),
+            "poster-account"
+        )
+        XCTAssertEqual(
+            survivor.artworkSourceAccountID(for: backdrop),
+            "backdrop-account"
+        )
+        XCTAssertNil(survivor.artworkSourceAccountID)
+    }
+
+    func testDonorFallbackDoesNotClaimPreexistingLegacyArtwork() {
+        let poster = URL(string: "https://legacy.example/poster.jpg")!
+        let backdrop = URL(string: "https://donor.example/backdrop.jpg")!
+        var survivor = MediaItem(
+            id: "a",
+            title: "Film",
+            kind: .movie,
+            posterURL: poster
+        )
+        let donor = MediaItem(
+            id: "b",
+            title: "Film",
+            kind: .movie,
+            backdropURL: backdrop
+        ).taggingSource("donor-account")
+
+        survivor.fillingMissingPresentation(from: donor)
+
+        XCTAssertNil(survivor.artworkSourceAccountID(for: poster))
+        XCTAssertEqual(
+            survivor.artworkSourceAccountID(for: backdrop),
+            "donor-account"
+        )
+    }
 }
 
 /// `MediaItem.seasonEpisodeLabel` — the spaced designation Continue Watching

@@ -186,6 +186,22 @@ public protocol MediaProvider: Sendable {
     /// Absolute URL for an item's artwork, or `nil` if unavailable.
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL?
 
+    /// Reattaches this provider's current credential to a persisted,
+    /// credential-free image resource URL.
+    ///
+    /// Persistence strips secrets but preserves host/path/non-sensitive query
+    /// identity. Providers with signed image URLs override this to rebuild a
+    /// request for the same resource; public-image providers inherit passthrough.
+    func reauthenticatedImageURL(
+        _ persistedURL: URL,
+        maxWidth: Int?
+    ) -> URL?
+
+    /// Whether `persistedURL` identifies an image resource belonging to this
+    /// provider/account. Implementations must validate origin and provider path
+    /// before returning true; callers use this before attaching credentials.
+    func ownsPersistedImageURL(_ persistedURL: URL) -> Bool
+
     // MARK: People
 
     /// Items in the viewer's **own library** featuring `personID`, newest first.
@@ -254,12 +270,86 @@ public protocol InteractiveBrowseActivityReporting: Sendable {
     func noteInteractiveBrowseActivity() async
 }
 
+// MARK: - Persisted provider URLs
+
+/// Exact URL identity used before a provider reattaches credentials to a saved
+/// image resource.
+///
+/// The returned path is relative to the provider's configured base path. Scheme,
+/// host, and effective port must all match, so a path that merely resembles a
+/// provider endpoint on Plex Discover or a CDN is never adopted as local art.
+public enum MediaProviderURLIdentity {
+    public static func relativeResourcePath(
+        of url: URL,
+        under baseURL: URL
+    ) -> String? {
+        guard url.user == nil, url.password == nil,
+              baseURL.user == nil, baseURL.password == nil,
+              let urlScheme = url.scheme,
+              let urlHost = url.host,
+              let baseScheme = baseURL.scheme,
+              let baseHost = baseURL.host,
+              let urlOrigin = try? NetworkOrigin(
+                  scheme: urlScheme,
+                  host: urlHost,
+                  port: url.port
+              ),
+              let baseOrigin = try? NetworkOrigin(
+                  scheme: baseScheme,
+                  host: baseHost,
+                  port: baseURL.port
+              ),
+              urlOrigin == baseOrigin
+        else { return nil }
+
+        var basePath = baseURL.path
+        while basePath.count > 1, basePath.hasSuffix("/") {
+            basePath.removeLast()
+        }
+        if basePath == "/" { basePath = "" }
+
+        let path = url.path
+        guard path.hasPrefix("/") else { return nil }
+        guard !basePath.isEmpty else { return path }
+        guard path == basePath || path.hasPrefix(basePath + "/") else {
+            return nil
+        }
+        let relative = String(path.dropFirst(basePath.count))
+        return relative.isEmpty ? "/" : relative
+    }
+
+    public static func isPlexArtworkResourcePath(_ path: String) -> Bool {
+        path.hasPrefix("/library/metadata/")
+            || path.hasPrefix("/library/sections/")
+    }
+
+    public static func isJellyfinArtworkResourcePath(_ path: String) -> Bool {
+        let segments = path.split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.lowercased() }
+        guard segments.count >= 4,
+              segments[0] == "items" || segments[0] == "users"
+        else { return false }
+        return segments[2] == "images"
+    }
+}
+
 // MARK: - Optional subtitle capability defaults
-//
+
 // Providers that don't support remote subtitle search/download (or test
 // doubles) inherit safe no-ops, so adding the capability never forces every
 // conformer to implement it.
 public extension MediaProvider {
+    func reauthenticatedImageURL(
+        _ persistedURL: URL,
+        maxWidth: Int?
+    ) -> URL? {
+        persistedURL
+    }
+
+    func ownsPersistedImageURL(_ persistedURL: URL) -> Bool {
+        false
+    }
+
     /// Default: no alphabet index (the A–Z rail stays hidden). Providers that
     /// can cheaply resolve per-letter offsets for a name-sorted library
     /// (Jellyfin via `NameLessThan` counts, Plex via the `firstCharacter`

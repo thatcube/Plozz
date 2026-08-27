@@ -44,10 +44,41 @@ public enum SyncURLSanitizer {
         }
 
         if let items = comps.queryItems, !items.isEmpty {
-            let kept = items.filter { !sensitiveQueryKeys.contains($0.name.lowercased()) }
-            if kept.count != items.count {
+            var kept: [URLQueryItem] = []
+            kept.reserveCapacity(items.count)
+            for item in items {
+                if sensitiveQueryKeys.contains(item.name.lowercased()) {
+                    changed = true
+                    continue
+                }
+
+                // Plex's photo transcoder carries the resource it will fetch in
+                // a `url=` query item, and that inner URL has its OWN
+                // `X-Plex-Token`. Filtering only the outer query persisted a live
+                // credential inside an apparently harmless value:
+                //
+                //   /photo/:/transcode?url=/library/…?X-Plex-Token=SECRET
+                //
+                // It also left the saved URL unusable — the outer request had no
+                // token — which is why a relaunch fell through to external art.
+                // Sanitize that nested URL exactly like a top-level one.
+                if item.name.lowercased() == "url",
+                   let value = item.value,
+                   let nestedURL = URL(string: value) {
+                    let cleaned = sanitize(nestedURL)
+                    if cleaned != nestedURL {
+                        kept.append(URLQueryItem(
+                            name: item.name,
+                            value: cleaned.absoluteString
+                        ))
+                        changed = true
+                        continue
+                    }
+                }
+                kept.append(item)
+            }
+            if changed {
                 comps.queryItems = kept.isEmpty ? nil : kept
-                changed = true
             }
         }
 
@@ -76,5 +107,63 @@ public enum SyncURLSanitizer {
     /// and by apply-side "should I keep the local tokenized URL?" comparisons.
     public static func containsCredential(_ url: URL) -> Bool {
         sanitize(url) != url
+    }
+}
+
+public extension MediaItem {
+    /// A copy safe for durable presentation caches.
+    ///
+    /// Provider URLs are request capabilities: Plex/Jellyfin put credentials in
+    /// their query strings, and Plex's transcoder puts another token inside its
+    /// nested `url=` value. Home snapshots need the resource identity but must
+    /// never become a second credential store. The active provider re-signs owned
+    /// watchlist art from `(account, item id)` before render.
+    func sanitizingArtworkCredentials() -> Self {
+        var copy = self
+        let sanitizedProvenance: [String: String] = Dictionary(
+            artworkSourceAccountIDsByURL.compactMap {
+                key, accountID -> (String, String)? in
+                guard let url = URL(string: key) else { return nil }
+                return (
+                    SyncURLSanitizer.sanitize(url).absoluteString,
+                    accountID
+                )
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        copy.posterURL = SyncURLSanitizer.sanitize(posterURL)
+        copy.seriesPosterURL = SyncURLSanitizer.sanitize(seriesPosterURL)
+        copy.backdropURL = SyncURLSanitizer.sanitize(backdropURL)
+        copy.heroBackdropURL = SyncURLSanitizer.sanitize(heroBackdropURL)
+        copy.fallbackArtworkURL =
+            SyncURLSanitizer.sanitize(fallbackArtworkURL)
+        copy.logoURL = SyncURLSanitizer.sanitize(logoURL)
+        copy.people = people.map { person in
+            var person = person
+            person.imageURL = SyncURLSanitizer.sanitize(person.imageURL)
+            return person
+        }
+        copy.artworkSelections = artworkSelections.map { selection in
+            ArtworkSelection(
+                placement: selection.placement,
+                references: selection.references.map { reference in
+                    switch reference {
+                    case .remote(let url):
+                        return .remote(SyncURLSanitizer.sanitize(url))
+                    case .networkFile:
+                        return reference
+                    }
+                }
+            )
+        }
+        copy.artworkSourceAccountIDsByURL = Dictionary(
+            copy.remoteArtworkURLs.compactMap {
+                url -> (String, String)? in
+                let key = SyncURLSanitizer.sanitize(url).absoluteString
+                return sanitizedProvenance[key].map { (key, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return copy
     }
 }

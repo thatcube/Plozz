@@ -98,7 +98,10 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
         self.orderingRank = orderingRank
         self.origin = origin
         self.changedAt = changedAt
-        self.presentation = presentation?.sanitizedForSync()
+        self.presentation = Self.canonicalPresentation(
+            presentation,
+            origin: origin
+        )
         self.metadata = metadata
     }
 
@@ -110,13 +113,28 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
 
     public func canonicalized() -> Self {
         var value = self
-        value.presentation = presentation?.sanitizedForSync()
+        value.presentation = Self.canonicalPresentation(
+            presentation,
+            origin: origin
+        )
         value.metadata = WatchlistIntentMetadata(
             sourceDestinationIDs: metadata.sourceDestinationIDs,
             lastExplicitRemovalAt: metadata.lastExplicitRemovalAt,
             lastReconciledAt: metadata.lastReconciledAt,
             removalSupersededAt: metadata.removalSupersededAt
         )
+        return value
+    }
+
+    private static func canonicalPresentation(
+        _ presentation: MediaAliasPresentation?,
+        origin: WatchlistIntentOrigin
+    ) -> MediaAliasPresentation? {
+        var value = presentation?.sanitizedForSync()
+        if origin == .legacyHomeSeed {
+            value?.artworkURL = nil
+            value?.backdropURL = nil
+        }
         return value
     }
 
@@ -176,6 +194,9 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
 
 public struct WatchlistMigrationMetadata: Codable, Hashable, Sendable {
     public var legacyHomeSeedCompletedAt: Date?
+    /// One-time scrub of artwork copied into alias/intent presentation by builds
+    /// predating credential-safe artwork persistence.
+    public var legacyPresentationArtworkScrubbedAt: Date?
     /// When this profile's imported native entries were retired from the ledger.
     ///
     /// The import used to write every native entry as a durable `.present`
@@ -187,9 +208,12 @@ public struct WatchlistMigrationMetadata: Codable, Hashable, Sendable {
 
     public init(
         legacyHomeSeedCompletedAt: Date? = nil,
+        legacyPresentationArtworkScrubbedAt: Date? = nil,
         nativeImportRetiredAt: Date? = nil
     ) {
         self.legacyHomeSeedCompletedAt = legacyHomeSeedCompletedAt
+        self.legacyPresentationArtworkScrubbedAt =
+            legacyPresentationArtworkScrubbedAt
         self.nativeImportRetiredAt = nativeImportRetiredAt
     }
 }

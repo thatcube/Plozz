@@ -243,6 +243,10 @@ final class PlexConnectionResolverTests: XCTestCase {
         )
         let resolved = await resolver.resolved()
         XCTAssertEqual(resolved.absoluteString, "https://moved.host:32400")
+        XCTAssertEqual(
+            Set(resolver.knownBaseURLs.map(\.host)),
+            ["old-dead.host", "moved.host"]
+        )
     }
 
     func testReportFailureReProbesAndHeals() async {

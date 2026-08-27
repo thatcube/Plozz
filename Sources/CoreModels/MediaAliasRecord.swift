@@ -37,6 +37,84 @@ public struct MediaAliasConflict: Codable, Hashable, Sendable, Comparable {
     }
 }
 
+/// Exact repairs for strong anime ids persisted before fuzzy-search validation
+/// shipped.
+///
+/// Mainstream ids are used as the anchors because all three came directly from
+/// server metadata and mutually identify one work. Requiring the full triple
+/// makes this a deterministic data migration rather than another title guess.
+enum LegacyAnimeIdentityRepair {
+    struct Anchor: Hashable {
+        let imdb: String
+        let tmdb: String
+        let tvdb: String
+    }
+
+    static let expectedYears: [Anchor: Int] = [
+        Anchor(imdb: "tt9253284", tmdb: "83867", tvdb: "393189"): 2022,
+        Anchor(imdb: "tt11126994", tmdb: "94605", tvdb: "371028"): 2021,
+        Anchor(imdb: "tt10986410", tmdb: "97546", tvdb: "383203"): 2020,
+        Anchor(imdb: "tt0232500", tmdb: "9799", tvdb: "41146"): 2001,
+        Anchor(imdb: "tt11198330", tmdb: "94997", tvdb: "371572"): 2022,
+        Anchor(imdb: "tt0052357", tmdb: "426", tvdb: "1385"): 1958,
+        Anchor(imdb: "tt11655566", tmdb: "552524", tvdb: "345428"): 2025
+    ]
+
+    static let animeNamespaces: Set<ProviderIDNamespace> = [
+        .aniDB, .seriesAniDB,
+        .aniList, .seriesAniList,
+        .myAnimeList, .seriesMal
+    ]
+
+    static func containsAnimeIDs(
+        in providerIDs: [String: String]
+    ) -> Bool {
+        animeNamespaces.contains {
+            providerIDs.providerID($0) != nil
+        }
+    }
+
+    static func expectedYear(
+        imdb: String?,
+        tmdb: String?,
+        tvdb: String?
+    ) -> Int? {
+        guard let imdb, let tmdb, let tvdb else { return nil }
+        return expectedYears[
+            Anchor(
+                imdb: imdb.lowercased(),
+                tmdb: tmdb.lowercased(),
+                tvdb: tvdb.lowercased()
+            )
+        ]
+    }
+
+    /// Resolves only complete triples from one identity scope. A child can carry
+    /// both its own base ids and its show's series ids; mixing fields across those
+    /// scopes can accidentally manufacture a known triple that identifies neither.
+    static func expectedYear(
+        providerIDs: [String: String],
+        kind: MediaItemKind
+    ) -> Int? {
+        let base = expectedYear(
+            imdb: providerIDs.providerID(.imdb),
+            tmdb: providerIDs.providerID(.tmdb),
+            tvdb: providerIDs.providerID(.tvdb)
+        )
+        let series = expectedYear(
+            imdb: providerIDs.providerID(.seriesImdb),
+            tmdb: providerIDs.providerID(.seriesTmdb),
+            tvdb: providerIDs.providerID(.seriesTvdb)
+        )
+        switch kind {
+        case .episode, .season:
+            return series ?? base
+        default:
+            return base ?? series
+        }
+    }
+}
+
 /// Durable identity only. Consumer state such as watchlist membership, ratings,
 /// notes, or recommendations belongs in separate records keyed by ``id``.
 public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
@@ -97,6 +175,7 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
                 value: evidence.value
             )
         })).sorted()
+        repairKnownLegacyAnimeContamination()
         weakEvidence = Array(Set(weakEvidence.compactMap {
             evidence -> MediaAliasWeakEvidence? in
             guard evidence.kind == kind else { return nil }
@@ -131,6 +210,50 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
         locallyValidatedBindings.formIntersection(Set(bindingHints.map(\.binding)))
         conflicts = Array(Set(conflicts)).sorted()
         presentation = presentation?.sanitizedForSync()
+    }
+
+    /// Repairs records poisoned before anime title-search validation shipped.
+    ///
+    /// Older `KeylessIDResolver` builds accepted AniList's nearest result without
+    /// checking that it named the requested title. Those ids are durable strong
+    /// evidence, so the later validation fix correctly stops NEW contamination
+    /// but can never remove what was already written:
+    ///
+    /// - Andor → AniList's "Ando of the Woods" (plus an unrelated AniDB id)
+    /// - Arcane → AniList's "a_caFe" (2002)
+    /// - House of the Dragon → "Dragon Goes House-Hunting"
+    /// - Ted Lasso, The Fast and the Furious, Vertigo, and the 2025
+    ///   Lilo & Stitch → unrelated nearest anime results
+    ///
+    /// Every repaired record still carries three mutually-corroborating
+    /// mainstream ids from the viewer's own server metadata. Requiring all three
+    /// makes this repair
+    /// exact rather than title-based; it cannot touch a remake, another work with
+    /// the same name, or a legitimate anime record. These are data migrations,
+    /// not a blacklist of the anime ids themselves — those ids remain valid on
+    /// the works they actually identify.
+    private mutating func repairKnownLegacyAnimeContamination() {
+        var providerIDs: [String: String] = [:]
+        for evidence in strongEvidence
+        where providerIDs[evidence.namespace.canonicalKey] == nil {
+            providerIDs[evidence.namespace.canonicalKey] = evidence.value
+        }
+        guard LegacyAnimeIdentityRepair.containsAnimeIDs(in: providerIDs),
+              let year = LegacyAnimeIdentityRepair.expectedYear(
+            providerIDs: providerIDs,
+            kind: kind
+        ) else { return }
+        strongEvidence.removeAll {
+            LegacyAnimeIdentityRepair.animeNamespaces.contains($0.namespace)
+        }
+        weakEvidence.removeAll {
+            $0.year != nil && $0.year != year
+        }
+        if presentation?.year != year {
+            presentation?.year = year
+        }
+        presentation?.artworkURL = nil
+        presentation?.backdropURL = nil
     }
 
     public func canonicalized() -> Self {

@@ -51,6 +51,7 @@ public final class PlexConnectionResolver: Sendable {
     /// below `Sendable` (or provably value-copied out) by hand.
     private struct State {
         var candidates: [URL]
+        var knownBaseURLs: [URL]
         var cached: URL?
         var inFlight: Task<URL, Never>?
         /// Set once a reported failure clears the cache, or a full probe sweep
@@ -90,7 +91,11 @@ public final class PlexConnectionResolver: Sendable {
         // a previously-reachable server resolves on the first probe instead of
         // re-discovering through dead/stale addresses.
         let seeded = reachableSeed.map { [$0] + candidates } ?? candidates
-        state = Mutex(State(candidates: Self.prioritized(seeded)))
+        let prioritized = Self.prioritized(seeded)
+        state = Mutex(State(
+            candidates: prioritized,
+            knownBaseURLs: prioritized
+        ))
     }
 
     /// Best-known base URL available synchronously: the cached reachable URL, then
@@ -109,6 +114,12 @@ public final class PlexConnectionResolver: Sendable {
     /// last launch. The live probe still corrects both the moment it settles.
     public var current: URL {
         state.withLock { $0.cached ?? reachableSeed ?? $0.candidates[0] }
+    }
+
+    /// Every origin this resolver has received for this authenticated Plex
+    /// server, including connection-refresh results no longer current.
+    public var knownBaseURLs: [URL] {
+        state.withLock { $0.knownBaseURLs }
     }
 
     /// True when the resolver has a connection whose locality can be trusted: a
@@ -329,7 +340,13 @@ public final class PlexConnectionResolver: Sendable {
     }
 
     private func replaceCandidates(_ urls: [URL]) {
-        state.withLock { $0.candidates = urls }
+        state.withLock { state in
+            state.candidates = urls
+            var seen = Set(state.knownBaseURLs.map(\.absoluteString))
+            state.knownBaseURLs.append(contentsOf: urls.filter {
+                seen.insert($0.absoluteString).inserted
+            })
+        }
     }
 
     private func store(_ url: URL) {
@@ -339,6 +356,11 @@ public final class PlexConnectionResolver: Sendable {
         state.withLock { state in
             state.cached = url
             state.reachabilityInvalidated = false
+            if !state.knownBaseURLs.contains(where: {
+                $0.absoluteString == url.absoluteString
+            }) {
+                state.knownBaseURLs.append(url)
+            }
         }
         onReachable?(url)
     }

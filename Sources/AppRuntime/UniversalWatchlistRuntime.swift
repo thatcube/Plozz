@@ -462,6 +462,271 @@ public extension UniversalWatchlistHost {
         return resolved
     }
 
+    /// Re-signs last-known artwork for this process without a network lookup.
+    ///
+    /// Home/native-watchlist snapshots correctly strip credentials before they
+    /// hit disk. That leaves enough resource identity to sync and diagnose, but
+    /// not a URL Plex/Jellyfin can serve after relaunch. Owned server art is
+    /// reconstructed from its playback account; Plex Discover art keeps separate
+    /// artwork provenance because playback may have been retargeted to a Jellyfin
+    /// or share copy. This happens before Home publishes, so first paint uses the
+    /// intended poster instead of failing into an external fallback and changing
+    /// again later.
+    func rehydratedPersistedArtwork(
+        _ items: [MediaItem]
+    ) -> [MediaItem] {
+        let activeProfile = profiles.activeProfile
+        let activeProviders = accountsProviders.homeAccounts
+        let nativeAccounts = nativeWatchlistAccounts
+        let discoverSigners: [(
+            accountID: String,
+            provider: PlexProvider,
+            token: String?
+        )] = nativeAccounts.compactMap { resolved in
+            guard let provider = resolved.provider as? PlexProvider else {
+                return nil
+            }
+            let accountID = resolved.account.id
+            let token = plexDiscoverTokens.token(for: accountID)
+            let requiresHomeUserToken =
+                activeProfile.homeUserBinding(forPlexAccount: accountID) != nil
+            guard token != nil || !requiresHomeUserToken else { return nil }
+            return (accountID, provider, token)
+        }
+        var providersByAccountID: [String: any MediaProvider] = [:]
+        for resolved in activeProviders + nativeAccounts {
+            providersByAccountID[resolved.account.id] = resolved.provider
+        }
+        let referencedAccountIDs = Set(items.flatMap { item in
+            Array(item.artworkSourceAccountIDsByURL.values)
+                + [item.sourceAccountID, item.selectedSourceAccountID]
+                    .compactMap { $0 }
+        })
+        for accountID in referencedAccountIDs
+        where providersByAccountID[accountID] == nil {
+            providersByAccountID[accountID] =
+                accountsProviders.provider(forAccountID: accountID)
+        }
+
+        return items.map { persistedItem in
+            var item = persistedItem
+            var rehydratedArtworkSources: [(URL, String)] = []
+
+            func rehydratedDiscoverURL(_ url: URL?) -> URL? {
+                guard let url else { return nil }
+                let accountID =
+                    item.artworkSourceAccountID(for: url)
+                    ?? item.sourceAccountID
+                guard let accountID,
+                      let signer = discoverSigners.first(where: {
+                          $0.accountID == accountID
+                      })
+                else { return url }
+                guard let signed =
+                    signer.provider.reauthenticatedDiscoverImageURL(
+                    url,
+                    discoverToken: signer.token
+                ) else { return url }
+                rehydratedArtworkSources.append((signed, accountID))
+                return signed
+            }
+            item.posterURL = rehydratedDiscoverURL(item.posterURL)
+            item.seriesPosterURL = rehydratedDiscoverURL(item.seriesPosterURL)
+            item.backdropURL = rehydratedDiscoverURL(item.backdropURL)
+            item.heroBackdropURL = rehydratedDiscoverURL(item.heroBackdropURL)
+            item.fallbackArtworkURL = rehydratedDiscoverURL(
+                item.fallbackArtworkURL
+            )
+            item.logoURL = rehydratedDiscoverURL(item.logoURL)
+            item.artworkSelections = item.artworkSelections.map { selection in
+                ArtworkSelection(
+                    placement: selection.placement,
+                    references: selection.references.map { reference in
+                        guard case .remote(let url) = reference,
+                              let signed = rehydratedDiscoverURL(url)
+                        else { return reference }
+                        return .remote(signed)
+                    }
+                )
+            }
+            item.people = item.people.map { person in
+                guard let signed = rehydratedDiscoverURL(person.imageURL)
+                else { return person }
+                var person = person
+                person.imageURL = signed
+                return person
+            }
+
+            func finalizedItem() -> MediaItem {
+                var result = item
+                for (url, accountID) in rehydratedArtworkSources {
+                    result.recordArtworkSource(
+                        accountID: accountID,
+                        for: [url]
+                    )
+                }
+                return result
+            }
+
+            guard item.locallyValidatedPlayableSource else {
+                return finalizedItem()
+            }
+            let playbackAccountID =
+                item.selectedSourceAccountID ?? item.sourceAccountID
+            let playbackProvider = playbackAccountID.flatMap {
+                providersByAccountID[$0]
+            }
+
+            func reauthenticatedLocalURL(
+                _ url: URL?,
+                maxWidth: Int?
+            ) -> URL? {
+                guard let url else { return nil }
+                if let accountID = item.artworkSourceAccountID(for: url) {
+                    guard let provider = providersByAccountID[accountID],
+                          provider.ownsPersistedImageURL(url)
+                    else { return nil }
+                    guard let signed = provider.reauthenticatedImageURL(
+                        url,
+                        maxWidth: maxWidth
+                    ) else { return nil }
+                    rehydratedArtworkSources.append((signed, accountID))
+                    return signed
+                }
+                var candidates: [(
+                    accountID: String,
+                    provider: any MediaProvider
+                )] = []
+                var seen = Set<String>()
+                if let playbackAccountID, let playbackProvider {
+                    seen.insert(playbackAccountID)
+                    candidates.append((
+                        playbackAccountID,
+                        playbackProvider
+                    ))
+                }
+                for resolved in activeProviders
+                where seen.insert(resolved.account.id).inserted {
+                    candidates.append((
+                        resolved.account.id,
+                        resolved.provider
+                    ))
+                }
+                let owners = candidates.filter {
+                    $0.provider.ownsPersistedImageURL(url)
+                }
+                guard owners.count == 1 else { return nil }
+                guard let signed =
+                    owners[0].provider.reauthenticatedImageURL(
+                    url,
+                    maxWidth: maxWidth
+                ) else { return nil }
+                rehydratedArtworkSources.append((
+                    signed,
+                    owners[0].accountID
+                ))
+                return signed
+            }
+
+            func playbackFallback(
+                for url: URL?,
+                kind: ImageKind,
+                maxWidth: Int
+            ) -> URL? {
+                guard let playbackProvider,
+                      let url,
+                      playbackProvider.ownsPersistedImageURL(url)
+                else { return nil }
+                guard let signed = playbackProvider.imageURL(
+                    itemID: item.id,
+                    kind: kind,
+                    maxWidth: maxWidth
+                ) else { return nil }
+                if let playbackAccountID {
+                    rehydratedArtworkSources.append((
+                        signed,
+                        playbackAccountID
+                    ))
+                }
+                return signed
+            }
+
+            if let poster =
+                reauthenticatedLocalURL(item.posterURL, maxWidth: 500)
+                ?? playbackFallback(
+                    for: item.posterURL,
+                    kind: .primary,
+                    maxWidth: 500
+                ) {
+                item.posterURL = poster
+            }
+            if let seriesPoster = reauthenticatedLocalURL(
+                item.seriesPosterURL,
+                maxWidth: 500
+            ) {
+                item.seriesPosterURL = seriesPoster
+            }
+            if let backdrop =
+                reauthenticatedLocalURL(item.backdropURL, maxWidth: 1280)
+                ?? playbackFallback(
+                    for: item.backdropURL,
+                    kind: .backdrop,
+                    maxWidth: 1280
+                ) {
+                item.backdropURL = backdrop
+            }
+            if let hero =
+                reauthenticatedLocalURL(
+                    item.heroBackdropURL,
+                    maxWidth: 3840
+                )
+                ?? playbackFallback(
+                    for: item.heroBackdropURL,
+                    kind: .backdrop,
+                    maxWidth: 3840
+                ) {
+                item.heroBackdropURL = hero
+            }
+            if let fallback = reauthenticatedLocalURL(
+                item.fallbackArtworkURL,
+                maxWidth: 1280
+            ) {
+                item.fallbackArtworkURL = fallback
+            }
+            if let logo = reauthenticatedLocalURL(
+                item.logoURL,
+                maxWidth: nil
+            ) {
+                item.logoURL = logo
+            }
+            item.artworkSelections = item.artworkSelections.map { selection in
+                ArtworkSelection(
+                    placement: selection.placement,
+                    references: selection.references.map { reference in
+                        guard case .remote(let url) = reference,
+                              let signed = reauthenticatedLocalURL(
+                                  url,
+                                  maxWidth: nil
+                              )
+                        else { return reference }
+                        return .remote(signed)
+                    }
+                )
+            }
+            item.people = item.people.map { person in
+                guard let signed = reauthenticatedLocalURL(
+                          person.imageURL,
+                          maxWidth: 500
+                      )
+                else { return person }
+                var person = person
+                person.imageURL = signed
+                return person
+            }
+            return finalizedItem()
+        }
+    }
+
     func performUniversalWatchlist(
         adding: Bool,
         item: MediaItem
@@ -538,25 +803,70 @@ public extension UniversalWatchlistHost {
 
     func seedLegacyUniversalWatchlist() async throws {
         let profileID = profiles.activeProfileID
-        guard try universalWatchlist.migrationMetadata(
-            profileID: profileID
-        ).legacyHomeSeedCompletedAt == nil else { return }
-        let cached = HomeContentStore(
+        let contentStore = HomeContentStore(
             namespace: profiles.activeNamespace
-        ).load()?.watchlist ?? []
+        )
+        let migration = try universalWatchlist.migrationMetadata(
+            profileID: profileID
+        )
+        let legacyAliasIDs = Set(
+            universalWatchlist.activeSnapshot.intentsByAliasID.values
+                .filter { $0.origin == .legacyHomeSeed }
+                .map(\.aliasID)
+        )
+        if migration.legacyHomeSeedCompletedAt != nil {
+            if migration.legacyPresentationArtworkScrubbedAt == nil {
+                if try await mediaAliasLedger.clearPresentationArtwork(
+                    profileID: profileID,
+                    aliasIDs: legacyAliasIDs
+                ) > 0 {
+                    scheduleCloudPublish()
+                }
+                try universalWatchlist
+                    .markLegacyPresentationArtworkScrubbed(
+                        profileID: profileID
+                    )
+            }
+            contentStore.clearLegacyWatchlistSeed()
+            return
+        }
+        let legacySeed = contentStore.loadLegacyWatchlistSeed()
+        guard legacySeed != nil
+                || !contentStore.hasPendingLegacyWatchlistSeed
+        else { return }
+        let cached =
+            (legacySeed ?? [])
+            + (contentStore.load()?.watchlist ?? [])
         var entries: [(MediaAliasID, MediaItemKind, MediaAliasPresentation?)] = []
+        var resolvedLegacyAliasIDs = Set<MediaAliasID>()
         for item in cached where item.kind == .movie || item.kind == .series {
-            guard let evidence = universalWatchlistEvidence(for: item) else { continue }
+            guard var evidence = universalWatchlistEvidence(for: item)
+            else { continue }
+            evidence.presentation?.artworkURL = nil
+            evidence.presentation?.backdropURL = nil
             let aliasID = try await mediaAliasLedger.resolveOrCreate(
                 profileID: profileID,
                 evidence: evidence
             )
+            resolvedLegacyAliasIDs.insert(aliasID)
             entries.append((aliasID, item.kind, evidence.presentation))
+        }
+        let aliasesToScrub =
+            legacyAliasIDs.union(resolvedLegacyAliasIDs)
+        if try await mediaAliasLedger.clearPresentationArtwork(
+            profileID: profileID,
+            aliasIDs: aliasesToScrub
+        ) > 0 {
+            scheduleCloudPublish()
         }
         try universalWatchlist.seedLegacyIfNeeded(
             profileID: profileID,
             entries: entries
         )
+        try universalWatchlist.markLegacyPresentationArtworkScrubbed(
+            profileID: profileID
+        )
+        contentStore.clearLegacyWatchlistSeed()
         PlozzLog.app.info("Watchlist legacy seed count=\(entries.count)")
     }
 
@@ -709,6 +1019,7 @@ public extension UniversalWatchlistHost {
                     aliasID: aliasID,
                     kind: entry.kind,
                     presentation: entry.presentation,
+                    presentationAccountID: entry.presentationAccountID,
                     index: offset,
                     ownedSource: owned?.source,
                     // Once the server has proved its own copy, its presentation

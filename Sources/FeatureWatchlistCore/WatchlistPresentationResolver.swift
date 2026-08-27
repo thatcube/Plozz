@@ -57,6 +57,10 @@ public enum WatchlistPresentationResolver {
                 // refuses to act without a strong external id, so this widens
                 // what gets ASKED, never what gets matched.
                 var candidate = item
+                if candidate.artworkSourceAccountIDsByURL.isEmpty,
+                   let accountID = entry.artworkSourceAccountID {
+                    candidate = candidate.taggingArtworkSource(accountID)
+                }
                 if !candidate.locallyValidatedPlayableSource,
                    candidate.availability == nil {
                     candidate.availability = .unknown
@@ -71,6 +75,8 @@ public enum WatchlistPresentationResolver {
                     var resolved = candidate.selectingSource(owned)
                     resolved = applyingOwnedPresentation(
                         entry.presentation,
+                        artworkSourceAccountID:
+                            entry.artworkSourceAccountID,
                         to: resolved
                     )
                     resolved.availability = nil
@@ -122,7 +128,8 @@ public enum WatchlistPresentationResolver {
                 // and it is also what makes the badge correct if the search below
                 // finds nothing.
                 availability: .unknown,
-                locallyValidatedPlayableSource: false
+                locallyValidatedPlayableSource: false,
+                artworkSourceAccountID: entry.artworkSourceAccountID
             )
             let resolved = indexedSources.flatMap {
                 placeholder.retargetedToOwnedLibraryCopy(
@@ -136,6 +143,8 @@ public enum WatchlistPresentationResolver {
                 var owned = placeholder.selectingSource($0)
                 owned = applyingOwnedPresentation(
                     entry.presentation,
+                    artworkSourceAccountID:
+                        entry.artworkSourceAccountID,
                     to: owned
                 )
                 owned.availability = nil
@@ -157,16 +166,26 @@ public enum WatchlistPresentationResolver {
     /// already gone.
     private static func applyingOwnedPresentation(
         _ presentation: MediaAliasPresentation?,
+        artworkSourceAccountID: String?,
         to item: MediaItem
     ) -> MediaItem {
         guard let presentation else { return item }
         var item = item
+        var adoptedArtwork: [URL] = []
         if let artwork = presentation.artworkURL.flatMap(URL.init(string:)) {
             item.posterURL = artwork
+            adoptedArtwork.append(artwork)
         }
         if let backdrop = presentation.backdropURL.flatMap(URL.init(string:)) {
             item.backdropURL = backdrop
             item.heroBackdropURL = backdrop
+            adoptedArtwork.append(backdrop)
+        }
+        if let accountID = artworkSourceAccountID {
+            item.recordArtworkSource(
+                accountID: accountID,
+                for: adoptedArtwork
+            )
         }
         return item
     }

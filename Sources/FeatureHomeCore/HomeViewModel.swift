@@ -83,6 +83,40 @@ public final class HomeViewModel {
                 }
             )
         }
+
+        /// Removes credentials from every URL that crosses the Home-snapshot
+        /// persistence boundary.
+        func sanitizedForPersistence() -> Content {
+            var libraries = libraries
+            for index in libraries.indices {
+                libraries[index].library.imageURL = SyncURLSanitizer.sanitize(
+                    libraries[index].library.imageURL
+                )
+            }
+            return Content(
+                continueWatching:
+                    continueWatching.map {
+                        $0.sanitizingArtworkCredentials()
+                    },
+                latest:
+                    latest.map { $0.sanitizingArtworkCredentials() },
+                watchlist:
+                    watchlist.map { $0.sanitizingArtworkCredentials() },
+                libraries: libraries,
+                mergeLibraries: mergeLibraries,
+                librarySections: librarySections.map { group in
+                    var group = group
+                    group.sections = group.sections.map { section in
+                        var section = section
+                        section.items = section.items.map {
+                            $0.sanitizingArtworkCredentials()
+                        }
+                        return section
+                    }
+                    return group
+                }
+            )
+        }
     }
 
     public private(set) var state: LoadState<Content> = .idle
@@ -232,6 +266,36 @@ public final class HomeViewModel {
         // snapshot is used; anything else leaves
         // `state == .idle` so a genuine first launch shows the normal loading state.
         if var cached = contentStore.load() {
+            cached.libraries = Self.rehydratedLibraries(
+                cached.libraries,
+                accounts: accounts
+            )
+            if let mediaItemActionHandler {
+                // Every managed-server URL was stripped before persistence. Put
+                // current credentials back before any cached row is visible —
+                // not just Watchlist. The operation is synchronous URL building;
+                // no server is contacted.
+                cached.continueWatching =
+                    mediaItemActionHandler.rehydratePersistedArtwork(
+                        cached.continueWatching
+                    )
+                cached.latest =
+                    mediaItemActionHandler.rehydratePersistedArtwork(
+                        cached.latest
+                    )
+                cached.librarySections = cached.librarySections.map { group in
+                    var group = group
+                    group.sections = group.sections.map { section in
+                        var section = section
+                        section.items =
+                            mediaItemActionHandler.rehydratePersistedArtwork(
+                                section.items
+                            )
+                        return section
+                    }
+                    return group
+                }
+            }
             cached.watchlist = Self.resolvedWatchlist(
                 candidates: cached.watchlist + cached.latest,
                 fetched: cached.watchlist,
@@ -757,11 +821,43 @@ public final class HomeViewModel {
     ) -> [MediaItem] {
         guard let handler else { return fetched }
         guard handler.isDurableWatchlistPresentationReady() else {
-            return lastKnown.isEmpty ? fetched : lastKnown
+            return handler.rehydratePersistedArtwork(
+                lastKnown.isEmpty ? fetched : lastKnown
+            )
         }
         let resolved = handler.durableWatchlistItems(from: candidates)
-        if resolved.isEmpty, !lastKnown.isEmpty { return lastKnown }
-        return resolved
+        let selected = resolved.isEmpty && !lastKnown.isEmpty
+            ? lastKnown
+            : resolved
+        return handler.rehydratePersistedArtwork(selected)
+    }
+
+    /// Restores credentials on cached library-tile art before first paint.
+    ///
+    /// Libraries carry the account that supplied them and the provider is already
+    /// alive in `accounts`; this is URL reconstruction only, never a metadata
+    /// request. A provider that does not recognise the saved URL leaves it alone.
+    private static func rehydratedLibraries(
+        _ libraries: [AggregatedLibrary],
+        accounts: [ResolvedAccount]
+    ) -> [AggregatedLibrary] {
+        let providers = Dictionary(
+            uniqueKeysWithValues: accounts.map {
+                ($0.account.id, $0.provider)
+            }
+        )
+        return libraries.map { library in
+            guard let provider = providers[library.accountID],
+                  let current = library.library.imageURL,
+                  let signed = provider.reauthenticatedImageURL(
+                      current,
+                      maxWidth: 400
+                  )
+            else { return library }
+            var library = library
+            library.library.imageURL = signed
+            return library
+        }
     }
 
     /// Persists Home's snapshot after a watchlist change, off the press.
@@ -797,7 +893,9 @@ public final class HomeViewModel {
             for: HeroConfigurationKey(settings: settings)
         ) else { return nil }
         let durable = HeroDurableSnapshot.filter(stored)
-        return durable.isEmpty ? nil : durable
+        let rehydrated = mediaItemActionHandler?
+            .rehydratePersistedArtwork(durable) ?? durable
+        return rehydrated.isEmpty ? nil : rehydrated
     }
 
     public func cacheHeroItems(_ items: [MediaItem], for settings: HeroSettings) {

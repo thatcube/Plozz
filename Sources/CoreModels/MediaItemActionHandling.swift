@@ -43,6 +43,15 @@ public protocol MediaItemActionHandling: AnyObject {
     /// this turns true, last session's Home snapshot is the more complete truth.
     func isDurableWatchlistPresentationReady() -> Bool
 
+    /// Rebuilds authenticated artwork URLs for owned watchlist items.
+    ///
+    /// Persisted Home/native-watchlist state must not contain credentials, so a
+    /// Plex/Jellyfin URL read from disk is resource identity, not a request that
+    /// can succeed. The item already knows its owned `(account, item ID)`;
+    /// composition uses that to ask the active provider for a current signed URL
+    /// synchronously, before the first frame.
+    func rehydratePersistedArtwork(_ items: [MediaItem]) -> [MediaItem]
+
     /// One-time bounded Home-cache migration before native imports.
     func seedLegacyWatchlist(_ items: [MediaItem]) async
 
@@ -55,6 +64,9 @@ public extension MediaItemActionHandling {
         candidates.filter(\.isFavorite)
     }
     func isDurableWatchlistPresentationReady() -> Bool { true }
+    func rehydratePersistedArtwork(_ items: [MediaItem]) -> [MediaItem] {
+        items
+    }
     func seedLegacyWatchlist(_ items: [MediaItem]) async {}
 }
 

@@ -37,6 +37,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         @MainActor (Bool, MediaItem) -> Void
     private let resolveDurableWatchlist: ([MediaItem]) -> [MediaItem]
     private let durableWatchlistPresentationReady: () -> Bool
+    private let rehydratePersistedArtworkItems:
+        ([MediaItem]) -> [MediaItem]
     private let seedLegacyUniversalWatchlist: ([MediaItem]) async -> Void
     /// Current offline state for an item, or `nil` on a surface without download
     /// capability. Injected as a closure so AppRuntime needn't depend on
@@ -156,6 +158,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             $0.filter(\.isFavorite)
         },
         durableWatchlistPresentationReady: @escaping () -> Bool = { true },
+        rehydratePersistedArtworkItems:
+            @escaping ([MediaItem]) -> [MediaItem] = { $0 },
         seedLegacyUniversalWatchlist: @escaping ([MediaItem]) async -> Void = { _ in },
         downloadState: @escaping (MediaItem) -> MediaItemDownloadState?? = { _ in nil },
         performDownloadAction: @escaping (MediaItemAction, MediaItem) -> Void = { _, _ in }
@@ -176,6 +180,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         self.resolveDurableWatchlist = resolveDurableWatchlist
         self.durableWatchlistPresentationReady =
             durableWatchlistPresentationReady
+        self.rehydratePersistedArtworkItems =
+            rehydratePersistedArtworkItems
         self.seedLegacyUniversalWatchlist = seedLegacyUniversalWatchlist
         self.downloadState = downloadState
         self.performDownloadAction = performDownloadAction
@@ -708,6 +714,12 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
 
     public func isDurableWatchlistPresentationReady() -> Bool {
         !universalWatchlistEnabled() || durableWatchlistPresentationReady()
+    }
+
+    public func rehydratePersistedArtwork(
+        _ items: [MediaItem]
+    ) -> [MediaItem] {
+        rehydratePersistedArtworkItems(items)
     }
 
     public func seedLegacyWatchlist(_ items: [MediaItem]) async {

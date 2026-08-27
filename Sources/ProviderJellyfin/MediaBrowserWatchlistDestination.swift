@@ -81,7 +81,8 @@ public struct MediaBrowserWatchlistDestination: WatchlistLibraryResolving {
                     year: item.productionYear,
                     artworkURL: item.posterURL?.absoluteString,
                     backdropURL: item.backdropURL?.absoluteString
-                )
+                ),
+                presentationAccountID: provider.accountID
             )
         }
     }

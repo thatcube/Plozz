@@ -370,6 +370,7 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
             "https://library.example/your-honor.jpg",
             "The badge and owned artwork must upgrade in the same publication"
         )
+        XCTAssertEqual(item.artworkSourceAccountID, "plex-account")
     }
 
     /// And with no live candidate either — a watchlisted title that appears in
@@ -430,6 +431,7 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
             item.heroBackdropURL?.absoluteString,
             "https://library.example/coco-backdrop.jpg"
         )
+        XCTAssertEqual(item.artworkSourceAccountID, "plex-account")
     }
 
     /// The upgrade must never invent a match. Retargeting on title+year alone
@@ -511,6 +513,159 @@ final class WatchlistPresentationRetargetTests: XCTestCase {
         XCTAssertEqual(
             decoded.presentation?.artworkURL,
             "https://discover.example/poster.jpg"
+        )
+        var nativeView = NativeWatchlistView()
+        let destination = WatchlistDestinationID(rawValue: "plex.plex")!
+        nativeView.applySuccess(
+            destinationID: destination,
+            entries: [decoded]
+        )
+        let union = WatchlistUnion(
+            snapshot: .empty,
+            nativeView: nativeView,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [destination]
+        )
+        XCTAssertEqual(
+            union.orderedEntries.first?.artworkSourceAccountID,
+            "plex"
+        )
+    }
+
+    func testExplicitFallbackPresentationIsNotClaimedByOwnedSource() throws {
+        let aliasID = MediaAliasID()
+        let destination = WatchlistDestinationID(
+            rawValue: "plex.owned-account"
+        )!
+        let intent = WatchlistIntent(
+            aliasID: aliasID,
+            kind: .movie,
+            desiredState: .present,
+            rank: 0,
+            origin: .local,
+            presentation: MediaAliasPresentation(
+                title: "Fallback",
+                year: 2024,
+                artworkURL:
+                    "https://discover.provider.plex.tv"
+                    + "/library/metadata/fallback/thumb/1"
+            )
+        )!
+        var nativeView = NativeWatchlistView()
+        nativeView.applySuccess(
+            destinationID: destination,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: aliasID,
+                    kind: .movie,
+                    presentation: MediaAliasPresentation(
+                        title: "Fallback",
+                        year: 2024
+                    ),
+                    index: 0,
+                    ownedSource: MediaSourceRef(
+                        accountID: "owned-account",
+                        itemID: "library-id",
+                        kind: .movie,
+                        providerKind: .plex
+                    )
+                )!
+            ]
+        )
+        let union = WatchlistUnion(
+            snapshot: WatchlistSnapshot(intents: [intent]),
+            nativeView: nativeView,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [destination]
+        )
+        let resolved = WatchlistPresentationResolver.resolve(
+            union: union,
+            aliasSnapshot: .empty,
+            currentItemsByAliasID: [:]
+        )
+        let item = try XCTUnwrap(resolved.first?.item)
+        let poster = try XCTUnwrap(item.posterURL)
+
+        XCTAssertNil(item.artworkSourceAccountID(for: poster))
+    }
+
+    func testNativeStoreRewritesNestedPlexCredentialOnLoad() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = WatchlistDestinationID(rawValue: "plex")!
+        var view = NativeWatchlistView(identityScope: "scope")
+        view.applySuccess(
+            destinationID: destination,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: MediaAliasID(),
+                    kind: .series,
+                    presentation: MediaAliasPresentation(
+                        title: "Arcane",
+                        year: 2021
+                    ),
+                    index: 0,
+                    ownedSource: MediaSourceRef(
+                        accountID: "plex",
+                        itemID: "4407",
+                        kind: .series,
+                        providerKind: .plex
+                    ),
+                    ownedPresentation: MediaAliasPresentation(
+                        title: "Arcane",
+                        year: 2021,
+                        artworkURL: "https://plex.example/clean"
+                    )
+                )!
+            ]
+        )
+        let store = try AtomicNativeWatchlistViewStore(
+            directoryURL: directory,
+            profileID: "profile"
+        )
+        try store.save(view)
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: store.fileURL)
+            ) as? [String: Any]
+        )
+        var buckets = try XCTUnwrap(
+            object["bucketsByDestinationID"] as? [String: Any]
+        )
+        var bucket = try XCTUnwrap(
+            buckets[destination.rawValue] as? [String: Any]
+        )
+        var entries = try XCTUnwrap(bucket["entries"] as? [[String: Any]])
+        var entry = entries[0]
+        var owned = try XCTUnwrap(
+            entry["ownedPresentation"] as? [String: Any]
+        )
+        owned["artworkURL"] =
+            "https://plex.example/photo/:/transcode"
+            + "?url=/library/metadata/4407/thumb"
+            + "?X-Plex-Token=NESTED-SECRET"
+            + "&X-Plex-Token=OUTER-SECRET"
+        entry["ownedPresentation"] = owned
+        entries[0] = entry
+        bucket["entries"] = entries
+        buckets[destination.rawValue] = bucket
+        object["bucketsByDestinationID"] = buckets
+        try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        ).write(to: store.fileURL, options: [.atomic])
+
+        _ = try store.load()
+        let rewritten = String(
+            decoding: try Data(contentsOf: store.fileURL),
+            as: UTF8.self
+        )
+        XCTAssertFalse(rewritten.contains("NESTED-SECRET"))
+        XCTAssertFalse(rewritten.contains("OUTER-SECRET"))
+        XCTAssertFalse(
+            rewritten.lowercased().contains("x-plex-token")
         )
     }
 }

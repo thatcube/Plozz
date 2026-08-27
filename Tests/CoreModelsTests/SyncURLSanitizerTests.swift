@@ -23,6 +23,40 @@ final class SyncURLSanitizerTests: XCTestCase {
         }
     }
 
+    func testStripsPlexTokenFromNestedTranscoderURL() throws {
+        var components = URLComponents(
+            string: "https://plex.example.com/photo/:/transcode"
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "width", value: "500"),
+            URLQueryItem(
+                name: "url",
+                value:
+                    "/library/metadata/4407/thumb"
+                    + "?X-Plex-Token=NESTED-SECRET"
+            ),
+            URLQueryItem(name: "X-Plex-Token", value: "OUTER-SECRET")
+        ]
+        let cleaned = SyncURLSanitizer.sanitize(try XCTUnwrap(components.url))
+        let text = cleaned.absoluteString
+
+        XCTAssertFalse(text.contains("NESTED-SECRET"))
+        XCTAssertFalse(text.contains("OUTER-SECRET"))
+        XCTAssertFalse(text.lowercased().contains("x-plex-token"))
+        XCTAssertTrue(text.contains("width=500"))
+
+        let cleanedComponents = try XCTUnwrap(
+            URLComponents(url: cleaned, resolvingAgainstBaseURL: false)
+        )
+        XCTAssertEqual(
+            cleanedComponents.queryItems?
+                .first(where: { $0.name == "url" })?.value,
+            "/library/metadata/4407/thumb"
+        )
+        XCTAssertTrue(SyncURLSanitizer.containsCredential(components.url!))
+        XCTAssertEqual(SyncURLSanitizer.sanitize(cleaned), cleaned)
+    }
+
     func testStripsUserInfoCredentials() {
         let url = URL(string: "https://user:password@example.com/path")!
         let cleaned = SyncURLSanitizer.sanitize(url)
@@ -63,5 +97,46 @@ final class SyncURLSanitizerTests: XCTestCase {
         let url = URL(string: "https://s.example.com/i?API_KEY=SECRET&Api_Key=SECRET2")!
         let cleaned = SyncURLSanitizer.sanitize(url)
         XCTAssertFalse(cleaned.absoluteString.contains("SECRET"))
+    }
+
+    func testMediaItemSanitizesPersonAndArtworkSelectionURLs() throws {
+        let person = MediaPerson(
+            id: "person",
+            name: "Person",
+            imageURL: URL(
+                string: "https://server/people/1?X-Plex-Token=PERSON"
+            )
+        )
+        let item = MediaItem(
+            id: "item",
+            title: "Title",
+            kind: .movie,
+            people: [person],
+            artworkSelections: [
+                ArtworkSelection(
+                    placement: .poster,
+                    references: [
+                        .remote(URL(
+                            string:
+                                "https://server/poster"
+                                + "?X-Plex-Token=ART"
+                        )!)
+                    ]
+                )
+            ]
+        )
+
+        let clean = item.sanitizingArtworkCredentials()
+        XCTAssertFalse(
+            try XCTUnwrap(clean.people.first?.imageURL)
+                .absoluteString.contains("PERSON")
+        )
+        let reference = try XCTUnwrap(
+            clean.artworkSelections.first?.references.first
+        )
+        guard case .remote(let url) = reference else {
+            return XCTFail("Expected remote artwork")
+        }
+        XCTAssertFalse(url.absoluteString.contains("ART"))
     }
 }

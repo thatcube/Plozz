@@ -171,6 +171,33 @@ public actor MediaAliasLedger: MediaAliasResolving {
             .map(MediaAliasSyncDTO.init(record:))
     }
 
+    /// Removes presentation art attached by the retired Home-watchlist seed.
+    /// Identity/title/year remain; current Home/native sources supply fresh art.
+    @discardableResult
+    public func clearPresentationArtwork(
+        aliasIDs: Set<MediaAliasID>
+    ) throws -> Int {
+        var candidate = records
+        var changed = 0
+        for aliasID in aliasIDs {
+            let resolved = currentSnapshot.resolvedAliasID(for: aliasID)
+                ?? aliasID
+            guard var record = candidate[resolved],
+                  record.presentation?.artworkURL != nil
+                    || record.presentation?.backdropURL != nil
+            else { continue }
+            record.presentation?.artworkURL = nil
+            record.presentation?.backdropURL = nil
+            record.updatedAt = Date()
+            record.canonicalize()
+            candidate[resolved] = record
+            changed += 1
+        }
+        guard changed > 0 else { return 0 }
+        try persistAndPublish(candidate)
+        return changed
+    }
+
     public func removeForProfileDeletion() throws {
         try store.destructiveRemove()
         records = [:]

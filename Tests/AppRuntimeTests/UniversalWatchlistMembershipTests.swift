@@ -4,7 +4,7 @@ import CoreSecureStore
 import FeatureAuthCore
 import FeatureWatchlistCore
 import Foundation
-import ProviderPlex
+@testable import ProviderPlex
 import XCTest
 
 /// The read and the write have to agree about which alias a title is watchlisted
@@ -84,6 +84,271 @@ final class UniversalWatchlistMembershipTests: XCTestCase {
         XCTAssertTrue(removed)
         XCTAssertFalse(host.universalWatchlistMembership(item))
     }
+
+    func testRehydratesEveryPersistedOwnedArtworkField() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        let oldClient = PlexClient(
+            baseURL: UniversalWatchlistHostDouble.baseURL,
+            deviceProfile: PlexDeviceProfile(clientIdentifier: "old"),
+            token: "OLD-TOKEN"
+        )
+        func saved(_ path: String, width: Int?) throws -> URL {
+            SyncURLSanitizer.sanitize(
+                try XCTUnwrap(
+                    oldClient.imageURL(path: path, maxWidth: width)
+                )
+            )
+        }
+        let network = try NetworkArtworkReference(
+            accountID: "share",
+            credentialRevision: CredentialRevision(),
+            catalogArtworkID: "network-art",
+            representation: RemoteFileRepresentation(
+                size: 100,
+                identity: RemoteFileIdentity(
+                    kind: .modificationTime,
+                    modifiedAt: Date(timeIntervalSince1970: 10)
+                ),
+                consistency: .changeDetecting
+            ),
+            sourceRevision: "network-revision"
+        )
+        let remoteSelection = try saved(
+            "/library/metadata/4407/art/selection",
+            width: 3840
+        )
+        let item = MediaItem(
+            id: "4407",
+            title: "Arcane",
+            kind: .episode,
+            posterURL: try saved(
+                "/library/metadata/4407/thumb/poster",
+                width: 500
+            ),
+            seriesPosterURL: try saved(
+                "/library/metadata/series/thumb/series",
+                width: 500
+            ),
+            backdropURL: try saved(
+                "/library/metadata/4407/art/backdrop",
+                width: 1280
+            ),
+            heroBackdropURL: try saved(
+                "/library/metadata/4407/art/hero",
+                width: 3840
+            ),
+            fallbackArtworkURL: try saved(
+                "/library/metadata/series/art/fallback",
+                width: 1280
+            ),
+            logoURL: try saved(
+                "/library/metadata/series/clearLogo/logo",
+                width: nil
+            ),
+            artworkSelections: [
+                ArtworkSelection(
+                    placement: .homeHero,
+                    references: [
+                        .remote(remoteSelection),
+                        .networkFile(network)
+                    ]
+                )
+            ],
+            locallyValidatedPlayableSource: true,
+            sourceAccountID: UniversalWatchlistHostDouble.accountID
+        )
+
+        let provider = try XCTUnwrap(
+            host.accountsProviders.provider(
+                forAccountID: UniversalWatchlistHostDouble.accountID
+            )
+        )
+        XCTAssertEqual(provider.session.accessToken, "CURRENT-TOKEN")
+        XCTAssertNotNil(
+            MediaProviderURLIdentity.relativeResourcePath(
+                of: try XCTUnwrap(item.posterURL),
+                under: UniversalWatchlistHostDouble.baseURL
+            )
+        )
+        XCTAssertNotNil(
+            provider.reauthenticatedImageURL(
+                try XCTUnwrap(item.posterURL),
+                maxWidth: 500
+            )
+        )
+
+        let result = try XCTUnwrap(
+            host.rehydratedPersistedArtwork([item]).first
+        )
+        let urls = [
+            result.posterURL,
+            result.seriesPosterURL,
+            result.backdropURL,
+            result.heroBackdropURL,
+            result.fallbackArtworkURL,
+            result.logoURL
+        ]
+        for url in urls {
+            let url = try XCTUnwrap(url)
+            XCTAssertTrue(url.absoluteString.contains("CURRENT-TOKEN"))
+            XCTAssertEqual(
+                result.artworkSourceAccountID(for: url),
+                UniversalWatchlistHostDouble.accountID
+            )
+        }
+        guard case .remote(let signedSelection) =
+                result.artworkSelections[0].references[0] else {
+            return XCTFail("Expected remote artwork selection")
+        }
+        XCTAssertTrue(
+            signedSelection.absoluteString.contains("CURRENT-TOKEN")
+        )
+        XCTAssertEqual(
+            result.artworkSourceAccountID(for: signedSelection),
+            UniversalWatchlistHostDouble.accountID
+        )
+        XCTAssertEqual(
+            result.artworkSelections[0].references[1],
+            .networkFile(network)
+        )
+    }
+
+    func testOwnedDiscoverArtworkIsSignedWithoutBecomingLocal() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        host.plexDiscoverTokens.setToken(
+            "DISCOVER-TOKEN",
+            for: UniversalWatchlistHostDouble.accountID
+        )
+        let discover = URL(
+            string:
+                "https://discover.provider.plex.tv"
+                + "/library/metadata/arcane/thumb/1"
+        )!
+        let item = MediaItem(
+            id: "4407",
+            title: "Arcane",
+            kind: .series,
+            posterURL: discover,
+            locallyValidatedPlayableSource: true,
+            sourceAccountID: UniversalWatchlistHostDouble.accountID
+        )
+
+        let result = try XCTUnwrap(
+            host.rehydratedPersistedArtwork([item]).first
+        )
+        let poster = try XCTUnwrap(result.posterURL)
+        XCTAssertEqual(poster.host, discover.host)
+        XCTAssertEqual(poster.path, discover.path)
+        XCTAssertFalse(poster.path.contains("/photo/:/transcode"))
+        XCTAssertTrue(poster.absoluteString.contains("DISCOVER-TOKEN"))
+    }
+
+    func testUnownedDiscoverArtworkIsReauthenticated() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        host.plexDiscoverTokens.setToken(
+            "DISCOVER-TOKEN",
+            for: UniversalWatchlistHostDouble.accountID
+        )
+        let item = MediaItem(
+            id: "discover-id",
+            title: "Discover title",
+            kind: .series,
+            posterURL: URL(
+                string:
+                    "https://discover.provider.plex.tv"
+                    + "/library/metadata/discover-id/thumb/1"
+            ),
+            locallyValidatedPlayableSource: false,
+            sourceAccountID: UniversalWatchlistHostDouble.accountID
+        )
+
+        let result = try XCTUnwrap(
+            host.rehydratedPersistedArtwork([item]).first
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(result.posterURL)
+                .absoluteString.contains("DISCOVER-TOKEN")
+        )
+    }
+
+    func testDiscoverSignerSurvivesPlaybackRetargetToAnotherProvider() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        host.plexDiscoverTokens.setToken(
+            "DISCOVER-TOKEN",
+            for: UniversalWatchlistHostDouble.accountID
+        )
+        let discoverItem = MediaItem(
+            id: "discover-id",
+            title: "Discover title",
+            kind: .movie,
+            posterURL: URL(
+                string:
+                    "https://discover.provider.plex.tv"
+                    + "/library/metadata/discover-id/thumb/1"
+            ),
+            locallyValidatedPlayableSource: false
+        ).taggingSource(UniversalWatchlistHostDouble.accountID)
+        let retargeted = discoverItem.selectingSource(
+            MediaSourceRef(
+                accountID: "jellyfin-account",
+                itemID: "local-id",
+                kind: .movie,
+                providerKind: .jellyfin
+            )
+        )
+
+        XCTAssertEqual(retargeted.sourceAccountID, "jellyfin-account")
+        XCTAssertEqual(
+            retargeted.artworkSourceAccountID,
+            UniversalWatchlistHostDouble.accountID
+        )
+        let result = try XCTUnwrap(
+            host.rehydratedPersistedArtwork([retargeted]).first
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(result.posterURL)
+                .absoluteString.contains("DISCOVER-TOKEN")
+        )
+    }
+
+    func testLocalArtworkSignerSurvivesPlaybackRetarget() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        let oldClient = PlexClient(
+            baseURL: UniversalWatchlistHostDouble.baseURL,
+            deviceProfile: PlexDeviceProfile(clientIdentifier: "old"),
+            token: "OLD-TOKEN"
+        )
+        let persisted = SyncURLSanitizer.sanitize(
+            try XCTUnwrap(
+                oldClient.imageURL(
+                    path: "/library/metadata/4407/thumb/1",
+                    maxWidth: 500
+                )
+            )
+        )
+        let plexItem = MediaItem(
+            id: "4407",
+            title: "Arcane",
+            kind: .series,
+            posterURL: persisted
+        ).taggingSource(UniversalWatchlistHostDouble.accountID)
+        let retargeted = plexItem.selectingSource(
+            MediaSourceRef(
+                accountID: "jellyfin-account",
+                itemID: "local-id",
+                kind: .series,
+                providerKind: .jellyfin
+            )
+        )
+
+        let result = try XCTUnwrap(
+            host.rehydratedPersistedArtwork([retargeted]).first
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(result.posterURL)
+                .absoluteString.contains("CURRENT-TOKEN")
+        )
+    }
 }
 
 /// The smallest object that can answer `UniversalWatchlistHost`.
@@ -125,6 +390,7 @@ final class UniversalWatchlistHostDouble: UniversalWatchlistHost {
     private(set) var cloudPublishCount = 0
 
     static let accountID = "acct"
+    static let baseURL = URL(string: "http://plex.local:32400")!
 
     init() async throws {
         mediaAliasLedger = await MediaAliasLedgerModel()
@@ -137,23 +403,32 @@ final class UniversalWatchlistHostDouble: UniversalWatchlistHost {
             Account(
                 id: Self.accountID,
                 server: MediaServer(
-                    id: "server",
+                    id: "universal-watchlist-\(UUID().uuidString)",
                     name: "Plex",
-                    baseURL: URL(string: "http://plex.local:32400")!,
+                    baseURL: Self.baseURL,
                     provider: .plex
                 ),
                 userID: "u",
                 userName: "Viewer",
                 deviceID: store.deviceID()
             ),
-            token: "t"
+            token: "CURRENT-TOKEN"
         )
         store.setActiveAccountIDs([Self.accountID])
+        let registry = ProviderRegistry()
+        registry.register(.plex) { context in
+            PlexProvider(
+                session: context.session,
+                accountID: context.accountID,
+                credentialRevision: context.credentialRevision
+            )
+        }
         accountsProviders = AccountsProvidersModel(
             accountStore: store,
-            registry: ProviderRegistry(),
+            registry: registry,
             profilesModel: profiles
         )
+        accountsProviders.tokenResolver = { store.token(for: $0) }
         accountsProviders.reloadAccounts()
         try universalWatchlist.activate(profileID: profiles.activeProfileID)
         try await mediaAliasLedger.activate(profileID: profiles.activeProfileID)

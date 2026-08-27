@@ -1,6 +1,7 @@
 import XCTest
 import CoreModels
 @testable import FeatureHome
+@testable import FeatureHomeCore
 
 /// Locks down `HomeContentStore` — the per-profile snapshot that lets Home paint
 /// the hero + Continue Watching instantly on the next launch. Covers round-trip,
@@ -60,6 +61,242 @@ final class HomeContentStoreTests: XCTestCase {
         let store = HomeContentStore(namespace: nil, directory: tempDir)
         store.save(content()) // all rows empty
         XCTAssertNil(store.load(), "An empty snapshot is treated as a miss, not painted")
+    }
+
+    func testV5CleanupPreservesSanitizedWatchlistMigrationSeed() throws {
+        struct LegacyStored: Codable {
+            var content: HomeViewModel.Content
+            var savedAt: Date
+        }
+
+        let namespace = "legacy-seed"
+        let name = SettingsKey.scoped(
+            "home-content",
+            namespace: namespace
+        )
+        let safe = Data(name.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        let v5 = tempDir.appendingPathComponent(
+            "plozz-home-content-v5",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: v5,
+            withIntermediateDirectories: true
+        )
+        let tokenized = URL(
+            string:
+                "https://discover.provider.plex.tv"
+                + "/library/metadata/arcane/thumb/1"
+                + "?X-Plex-Token=OLD-TOKEN"
+        )!
+        let item = MediaItem(
+            id: "arcane",
+            title: "Arcane",
+            kind: .series,
+            posterURL: tokenized
+        )
+        let legacy = LegacyStored(
+            content: HomeViewModel.Content(watchlist: [item]),
+            savedAt: Date()
+        )
+        let legacyFile = v5
+            .appendingPathComponent(safe)
+            .appendingPathExtension("json")
+        try JSONEncoder().encode(legacy).write(
+            to: legacyFile,
+            options: .atomic
+        )
+
+        HomeContentStore.cleanupSupersededCaches(
+            besideSchemaDirIn: tempDir
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: v5.path))
+        let store = HomeContentStore(
+            namespace: namespace,
+            directory: tempDir
+        )
+        let seed = try XCTUnwrap(store.loadLegacyWatchlistSeed())
+        XCTAssertEqual(seed.map(\.id), ["arcane"])
+        XCTAssertFalse(
+            try XCTUnwrap(seed.first?.posterURL)
+                .absoluteString.contains("OLD-TOKEN")
+        )
+        store.clearLegacyWatchlistSeed()
+        XCTAssertNil(store.loadLegacyWatchlistSeed())
+    }
+
+    func testFailedV5ExtractionRemainsPending() throws {
+        struct LegacyStored: Codable {
+            var content: HomeViewModel.Content
+            var savedAt: Date
+        }
+
+        let namespace = "pending-seed"
+        let name = SettingsKey.scoped(
+            "home-content",
+            namespace: namespace
+        )
+        let safe = Data(name.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        let v5 = tempDir.appendingPathComponent(
+            "plozz-home-content-v5",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: v5,
+            withIntermediateDirectories: true
+        )
+        let legacy = LegacyStored(
+            content: HomeViewModel.Content(
+                watchlist: makeItems(1)
+            ),
+            savedAt: Date()
+        )
+        try JSONEncoder().encode(legacy).write(
+            to: v5
+                .appendingPathComponent(safe)
+                .appendingPathExtension("json"),
+            options: .atomic
+        )
+        // A regular file at the destination directory path forces the sidecar
+        // write to fail without depending on filesystem permissions.
+        try Data("blocked".utf8).write(
+            to: tempDir.appendingPathComponent(
+                "plozz-home-content-v6"
+            )
+        )
+
+        HomeContentStore.cleanupSupersededCaches(
+            besideSchemaDirIn: tempDir
+        )
+
+        let store = HomeContentStore(
+            namespace: namespace,
+            directory: tempDir
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: v5.path))
+        XCTAssertNil(store.loadLegacyWatchlistSeed())
+        XCTAssertTrue(store.hasPendingLegacyWatchlistSeed)
+    }
+
+    func testCorruptSidecarIsReplacedBeforeV5Deletion() throws {
+        struct LegacyStored: Codable {
+            var content: HomeViewModel.Content
+            var savedAt: Date
+        }
+
+        let namespace = "corrupt-sidecar"
+        let name = SettingsKey.scoped(
+            "home-content",
+            namespace: namespace
+        )
+        let safe = Data(name.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        let v5 = tempDir.appendingPathComponent(
+            "plozz-home-content-v5",
+            isDirectory: true
+        )
+        let v6 = tempDir.appendingPathComponent(
+            "plozz-home-content-v6",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: v5,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: v6,
+            withIntermediateDirectories: true
+        )
+        let legacy = LegacyStored(
+            content: HomeViewModel.Content(
+                watchlist: makeItems(1)
+            ),
+            savedAt: Date()
+        )
+        try JSONEncoder().encode(legacy).write(
+            to: v5
+                .appendingPathComponent(safe)
+                .appendingPathExtension("json"),
+            options: .atomic
+        )
+        let sidecar = v6
+            .appendingPathComponent(
+                safe + "-legacy-watchlist-seed"
+            )
+            .appendingPathExtension("json")
+        try Data("not-json".utf8).write(to: sidecar)
+
+        HomeContentStore.cleanupSupersededCaches(
+            besideSchemaDirIn: tempDir
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: v5.path))
+        let store = HomeContentStore(
+            namespace: namespace,
+            directory: tempDir
+        )
+        XCTAssertEqual(
+            store.loadLegacyWatchlistSeed()?.map(\.id),
+            ["i0"]
+        )
+        XCTAssertFalse(store.hasPendingLegacyWatchlistSeed)
+    }
+
+    func testStaleV5WatchlistIsNotMadeDurable() throws {
+        struct LegacyStored: Codable {
+            var content: HomeViewModel.Content
+            var savedAt: Date
+        }
+
+        let namespace = "stale-seed"
+        let name = SettingsKey.scoped(
+            "home-content",
+            namespace: namespace
+        )
+        let safe = Data(name.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        let v5 = tempDir.appendingPathComponent(
+            "plozz-home-content-v5",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: v5,
+            withIntermediateDirectories: true
+        )
+        let legacy = LegacyStored(
+            content: HomeViewModel.Content(
+                watchlist: makeItems(1)
+            ),
+            savedAt: Date(timeIntervalSinceNow: -100)
+        )
+        try JSONEncoder().encode(legacy).write(
+            to: v5
+                .appendingPathComponent(safe)
+                .appendingPathExtension("json"),
+            options: .atomic
+        )
+        HomeContentStore.cleanupSupersededCaches(
+            besideSchemaDirIn: tempDir
+        )
+
+        let store = HomeContentStore(
+            namespace: namespace,
+            directory: tempDir,
+            maxAge: 10
+        )
+        XCTAssertEqual(store.loadLegacyWatchlistSeed(), [])
+        XCTAssertFalse(store.hasPendingLegacyWatchlistSeed)
     }
 
     func testStaleSnapshotIsDroppedAndDeleted() {
@@ -401,5 +638,103 @@ final class HomeContentStoreTests: XCTestCase {
         XCTAssertFalse(text.contains(path))
         XCTAssertFalse(text.contains("relativePath"))
         XCTAssertTrue(text.contains("catalogArtworkID"))
+    }
+
+    func testSerializedSnapshotNeverContainsNestedPlexToken() throws {
+        var components = URLComponents(
+            string: "https://plex.example/photo/:/transcode"
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "width", value: "500"),
+            URLQueryItem(
+                name: "url",
+                value:
+                    "/library/metadata/4407/thumb"
+                    + "?X-Plex-Token=NESTED-SECRET"
+            ),
+            URLQueryItem(
+                name: "X-Plex-Token",
+                value: "OUTER-SECRET"
+            )
+        ]
+        let item = MediaItem(
+            id: "4407",
+            title: "Arcane",
+            kind: .series,
+            posterURL: try XCTUnwrap(components.url)
+        )
+        let store = HomeContentStore(
+            namespace: "plex-token-privacy",
+            directory: tempDir
+        )
+        store.save(HomeViewModel.Content(watchlist: [item]))
+        let schemaDirectory = try XCTUnwrap(
+            try FileManager.default.contentsOfDirectory(
+                at: tempDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ).first {
+                $0.lastPathComponent.hasPrefix("plozz-home-content")
+            }
+        )
+        let snapshot = try XCTUnwrap(
+            try FileManager.default.contentsOfDirectory(
+                at: schemaDirectory,
+                includingPropertiesForKeys: nil
+            ).first {
+                $0.lastPathComponent.contains(
+                    Data("home-content.plex-token-privacy".utf8)
+                        .base64EncodedString()
+                        .replacingOccurrences(of: "/", with: "_")
+                        .replacingOccurrences(of: "+", with: "-")
+                        .replacingOccurrences(of: "=", with: "")
+                )
+            }
+        )
+        let text = String(
+            decoding: try Data(contentsOf: snapshot),
+            as: UTF8.self
+        )
+
+        XCTAssertFalse(text.contains("NESTED-SECRET"))
+        XCTAssertFalse(text.contains("OUTER-SECRET"))
+        XCTAssertFalse(text.lowercased().contains("x-plex-token"))
+        XCTAssertTrue(text.contains("library"))
+        XCTAssertTrue(text.contains("4407"))
+    }
+
+    func testSerializedHeroNeverContainsArtworkCredential() throws {
+        let settings = HeroSettings(
+            isEnabled: true,
+            sources: [.featured],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: false,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        let key = HeroConfigurationKey(settings: settings)
+        let item = MediaItem(
+            id: "hero",
+            title: "Hero",
+            kind: .movie,
+            heroBackdropURL: URL(
+                string:
+                    "https://plex.example/art"
+                    + "?X-Plex-Token=HERO-SECRET"
+            )
+        )
+        let store = HomeContentStore(
+            namespace: "hero-token-privacy",
+            directory: tempDir
+        )
+        store.saveHero([item], for: key)
+
+        let loaded = try XCTUnwrap(store.loadHero(for: key)?.first)
+        XCTAssertFalse(
+            try XCTUnwrap(loaded.heroBackdropURL)
+                .absoluteString.contains("HERO-SECRET")
+        )
     }
 }

@@ -16,10 +16,10 @@ import CoreModels
 /// Security: only already-displayed, non-secret metadata is stored — the same
 /// `MediaItem` / `AggregatedLibrary` values that `DetailSnapshotCache` and the
 /// artwork caches already write to the Caches directory. Access tokens continue to
-/// live only in the Keychain; any token embedded in a Plex *art URL* is already
-/// persisted on disk by those existing caches, so this adds no new exposure. A
-/// decode failure or a stale file is treated as a cache miss (Home just does a
-/// normal load), so a `MediaItem` coding change can never crash a launch.
+/// live only in the Keychain; every artwork URL is stripped of credentials before
+/// encoding and re-signed from the active provider at render time. A decode failure
+/// or stale file is treated as a cache miss (Home just does a normal load), so a
+/// `MediaItem` coding change can never crash a launch.
 public protocol HomeContentStoring: Sendable {
     /// The last persisted snapshot, or `nil` on a miss (no file / stale / decode
     /// failure / empty). Read **synchronously** so `HomeViewModel` can hydrate its
@@ -121,6 +121,8 @@ public struct HeroConfigurationKey: Codable, Hashable, Sendable {
 public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     private let fileURL: URL?
     private let heroFileURL: URL?
+    private let legacyWatchlistSeedFileURL: URL?
+    private let legacyWatchlistSourceFileURL: URL?
     private let maxItemsPerRow: Int
     private let maxAge: TimeInterval
     private let heroMaxAge: TimeInterval
@@ -134,6 +136,11 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
 
     private struct StoredHero: Codable {
         var key: HeroConfigurationKey
+        var items: [MediaItem]
+        var savedAt: Date
+    }
+
+    private struct StoredLegacyWatchlistSeed: Codable {
         var items: [MediaItem]
         var savedAt: Date
     }
@@ -154,8 +161,14 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     /// now, but a snapshot painted at launch cannot: it made the row flip between
     /// right and wrong depending on whether the network had answered yet, which
     /// reads as far more broken than being consistently wrong.
-    private static let schemaDirName = "plozz-home-content-v5"
+    /// v6 removes credentials from every persisted artwork URL (including Plex's
+    /// token nested inside a transcoder `url=` parameter). It also evicts Home
+    /// items carrying anime ids from the pre-validation fuzzy-search bug; those
+    /// snapshots could draw a random anime poster before live server data arrived.
+    private static let schemaDirName = "plozz-home-content-v6"
     private static let schemaDirPrefix = "plozz-home-content"
+    private static let legacySeedSourceSchemaDirName = "plozz-home-content-v5"
+    private static let legacyWatchlistSeedSuffix = "-legacy-watchlist-seed"
 
     /// Process-wide guards. `HomeContentStore` is (re)constructed inline in
     /// `RootView.body` and its `load()` re-run on every `HomeTab.body` pass (the
@@ -184,14 +197,11 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         guard let directory else {
             self.fileURL = nil
             self.heroFileURL = nil
+            self.legacyWatchlistSeedFileURL = nil
+            self.legacyWatchlistSourceFileURL = nil
             return
         }
         let dir = directory.appendingPathComponent(Self.schemaDirName, isDirectory: true)
-        // Run the superseded-schema cleanup at most once per process (it's a global
-        // one-time cleanup, not per-instance), so repeated construction never
-        // re-enumerates the Caches directory on the main thread. The live directory
-        // is created lazily in `save()` (a `load()` on a missing dir just misses).
-        Self.cleanupSupersededCachesOnce(besideSchemaDirIn: directory)
         // Per-profile filename: default profile keeps the un-suffixed base.
         let name = SettingsKey.scoped("home-content", namespace: namespace)
         let safe = Data(name.utf8).base64EncodedString()
@@ -202,6 +212,25 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         self.heroFileURL = dir
             .appendingPathComponent(safe + "-hero")
             .appendingPathExtension("json")
+        self.legacyWatchlistSeedFileURL = dir
+            .appendingPathComponent(
+                safe + Self.legacyWatchlistSeedSuffix
+            )
+            .appendingPathExtension("json")
+        self.legacyWatchlistSourceFileURL = directory
+            .appendingPathComponent(
+                Self.legacySeedSourceSchemaDirName,
+                isDirectory: true
+            )
+            .appendingPathComponent(safe)
+            .appendingPathExtension("json")
+        // Run the superseded-schema cleanup at most once per process (it's a global
+        // one-time cleanup, not per-instance), so repeated construction never
+        // re-enumerates the Caches directory on the main thread. Before deleting
+        // v5, it moves each profile's credential-free Watchlist into a small v6
+        // sidecar so the one-shot universal-watchlist migration can still consume
+        // it. The ordinary v6 Home directory otherwise remains lazy.
+        Self.cleanupSupersededCachesOnce(besideSchemaDirIn: directory)
     }
 
     public func load() -> HomeViewModel.Content? {
@@ -223,6 +252,47 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         Self.memo.updateValue(result, forKey: key)
         Self.lock.unlock()
         return result
+    }
+
+    /// The v5 Watchlist retained solely for the one-shot universal-watchlist
+    /// migration. It is never presented as v6 Home content.
+    public func loadLegacyWatchlistSeed() -> [MediaItem]? {
+        guard let legacyWatchlistSeedFileURL,
+              let data = try? Data(contentsOf: legacyWatchlistSeedFileURL),
+              let stored = try? JSONDecoder().decode(
+                  StoredLegacyWatchlistSeed.self,
+                  from: data
+              )
+        else { return nil }
+        guard Date().timeIntervalSince(stored.savedAt) < maxAge else {
+            try? FileManager.default.removeItem(
+                at: legacyWatchlistSeedFileURL
+            )
+            return []
+        }
+        return stored.items
+    }
+
+    /// Removes the migration sidecar only after the durable Watchlist accepted it.
+    public func clearLegacyWatchlistSeed() {
+        guard let legacyWatchlistSeedFileURL else { return }
+        try? FileManager.default.removeItem(at: legacyWatchlistSeedFileURL)
+    }
+
+    /// True when v5 still holds this profile's source snapshot, or a sidecar
+    /// exists but cannot be decoded. The universal migration must retry rather
+    /// than recording an empty migration as complete in either case.
+    public var hasPendingLegacyWatchlistSeed: Bool {
+        if let legacyWatchlistSeedFileURL,
+           FileManager.default.fileExists(
+               atPath: legacyWatchlistSeedFileURL.path
+           ) {
+            return loadLegacyWatchlistSeed() == nil
+        }
+        guard let legacyWatchlistSourceFileURL else { return false }
+        return FileManager.default.fileExists(
+            atPath: legacyWatchlistSourceFileURL.path
+        )
     }
 
     /// The one genuine disk read+decode for `load()`. Honors `maxAge` (deleting a
@@ -249,7 +319,12 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
 
     public func save(_ content: HomeViewModel.Content) {
         guard let fileURL else { return }
-        let stored = Stored(content: content.bounded(perRow: maxItemsPerRow), savedAt: Date())
+        let stored = Stored(
+            content: content
+                .bounded(perRow: maxItemsPerRow)
+                .sanitizedForPersistence(),
+            savedAt: Date()
+        )
         guard let data = try? JSONEncoder().encode(stored) else { return }
         // Create the schema dir lazily here (not per-init), then write atomically.
         try? FileManager.default.createDirectory(
@@ -304,7 +379,9 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         guard let heroFileURL, !items.isEmpty else { return }
         let stored = StoredHero(
             key: key,
-            items: Array(items.prefix(max(key.maxItems, 1))),
+            items: Array(items.prefix(max(key.maxItems, 1))).map {
+                $0.sanitizingArtworkCredentials()
+            },
             savedAt: Date()
         )
         guard let data = try? JSONEncoder().encode(stored) else { return }
@@ -339,13 +416,109 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         if didCleanup { lock.unlock(); return }
         didCleanup = true
         lock.unlock()
+        cleanupSupersededCaches(besideSchemaDirIn: parent)
+    }
+
+    /// Performs the loss-safe v5 Watchlist extraction and schema cleanup. Internal
+    /// so the migration ordering can be exercised with an isolated test directory.
+    static func cleanupSupersededCaches(besideSchemaDirIn parent: URL) {
         guard let dirs = try? FileManager.default.contentsOfDirectory(
             at: parent, includingPropertiesForKeys: nil
         ) else { return }
         for dir in dirs where dir.lastPathComponent != schemaDirName
             && dir.lastPathComponent.hasPrefix(schemaDirPrefix) {
+            if dir.lastPathComponent == legacySeedSourceSchemaDirName {
+                let current = parent.appendingPathComponent(
+                    schemaDirName,
+                    isDirectory: true
+                )
+                guard migrateLegacyWatchlistSeeds(
+                    from: dir,
+                    to: current
+                ) else {
+                    continue
+                }
+            }
             try? FileManager.default.removeItem(at: dir)
         }
+    }
+
+    /// Copies every decodable profile Watchlist from v5 into a credential-free v6
+    /// sidecar before v5 is deleted. A failed write keeps the entire source
+    /// directory for a retry on the next launch.
+    private static func migrateLegacyWatchlistSeeds(
+        from legacyDirectory: URL,
+        to currentDirectory: URL
+    ) -> Bool {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: legacyDirectory,
+            includingPropertiesForKeys: nil
+        ) else { return false }
+
+        var succeeded = true
+        for file in files where file.pathExtension == "json" {
+            let stem = file.deletingPathExtension().lastPathComponent
+            if stem.hasSuffix("-hero") {
+                do {
+                    try FileManager.default.removeItem(at: file)
+                } catch {
+                    succeeded = false
+                }
+                continue
+            }
+            guard let data = try? Data(contentsOf: file),
+                  let stored = try? JSONDecoder().decode(Stored.self, from: data)
+            else {
+                succeeded = false
+                continue
+            }
+
+            let destination = currentDirectory
+                .appendingPathComponent(
+                    stem + legacyWatchlistSeedSuffix
+                )
+                .appendingPathExtension("json")
+            var sidecarIsValid = false
+            if FileManager.default.fileExists(atPath: destination.path) {
+                if let existing = try? Data(contentsOf: destination),
+                   (try? JSONDecoder().decode(
+                       StoredLegacyWatchlistSeed.self,
+                       from: existing
+                   )) != nil {
+                    sidecarIsValid = true
+                }
+            }
+            if !sidecarIsValid {
+                let seed = StoredLegacyWatchlistSeed(
+                    items: stored.content.watchlist
+                        .filter { $0.kind == .movie || $0.kind == .series }
+                        .map { $0.sanitizingArtworkCredentials() },
+                    savedAt: stored.savedAt
+                )
+                guard let encoded = try? JSONEncoder().encode(seed) else {
+                    succeeded = false
+                    continue
+                }
+                do {
+                    try FileManager.default.createDirectory(
+                        at: currentDirectory,
+                        withIntermediateDirectories: true
+                    )
+                    try encoded.write(to: destination, options: .atomic)
+                    sidecarIsValid = true
+                } catch {
+                    succeeded = false
+                }
+            }
+            if sidecarIsValid {
+                do {
+                    try FileManager.default.removeItem(at: file)
+                } catch {
+                    succeeded = false
+                }
+            }
+        }
+        return succeeded
     }
 
     public static func defaultDirectory() -> URL? {

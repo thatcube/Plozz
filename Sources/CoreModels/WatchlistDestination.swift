@@ -357,13 +357,17 @@ public struct WatchlistDestinationEntry: Codable, Hashable, Sendable {
     public let binding: WatchlistDestinationBinding
     public let corroboratedProviderBinding: MediaAliasProviderBindingKey?
     public let presentation: MediaAliasPresentation?
+    /// Account that supplied `presentation` artwork, when it came from a media
+    /// provider rather than a tracker.
+    public let presentationAccountID: String?
 
     public init?(
         kind: MediaItemKind,
         externalIDs: [WatchlistExternalID],
         binding: WatchlistDestinationBinding,
         corroboratedProviderBinding: MediaAliasProviderBindingKey? = nil,
-        presentation: MediaAliasPresentation? = nil
+        presentation: MediaAliasPresentation? = nil,
+        presentationAccountID: String? = nil
     ) {
         guard kind == .movie || kind == .series else { return nil }
         self.kind = kind
@@ -371,6 +375,7 @@ public struct WatchlistDestinationEntry: Codable, Hashable, Sendable {
         self.binding = binding
         self.corroboratedProviderBinding = corroboratedProviderBinding
         self.presentation = presentation?.sanitizedForSync()
+        self.presentationAccountID = presentationAccountID
     }
 
     /// Alias-ledger evidence produced by a successful destination read. Provider

@@ -10,6 +10,7 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
     public let aliasID: MediaAliasID
     public let kind: MediaItemKind
     public let presentation: MediaAliasPresentation?
+    public let presentationAccountID: String?
     /// Position in the destination's own list, preserved so the union can order
     /// entries the way the server does rather than by hash order.
     public let index: Int
@@ -35,6 +36,7 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
         aliasID: MediaAliasID,
         kind: MediaItemKind,
         presentation: MediaAliasPresentation? = nil,
+        presentationAccountID: String? = nil,
         index: Int,
         ownedSource: MediaSourceRef? = nil,
         ownedPresentation: MediaAliasPresentation? = nil
@@ -43,6 +45,7 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
         self.aliasID = aliasID
         self.kind = kind
         self.presentation = presentation?.sanitizedForSync()
+        self.presentationAccountID = presentationAccountID
         self.index = index
         self.ownedSource = ownedSource
         self.ownedPresentation = ownedPresentation?.sanitizedForSync()
@@ -57,6 +60,62 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
         ownedSource.map {
             WatchlistLibraryCopy(source: $0, presentation: ownedPresentation)
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case aliasID, kind, presentation, presentationAccountID
+        case index, ownedSource, ownedPresentation
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        aliasID = try container.decode(MediaAliasID.self, forKey: .aliasID)
+        kind = try container.decode(MediaItemKind.self, forKey: .kind)
+        guard kind == .movie || kind == .series else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription:
+                    "Native watchlists support movies and series only."
+            )
+        }
+        presentation = try container.decodeIfPresent(
+            MediaAliasPresentation.self,
+            forKey: .presentation
+        )?.sanitizedForSync()
+        presentationAccountID = try container.decodeIfPresent(
+            String.self,
+            forKey: .presentationAccountID
+        )
+        index = try container.decode(Int.self, forKey: .index)
+        ownedSource = try container.decodeIfPresent(
+            MediaSourceRef.self,
+            forKey: .ownedSource
+        )
+        ownedPresentation = try container.decodeIfPresent(
+            MediaAliasPresentation.self,
+            forKey: .ownedPresentation
+        )?.sanitizedForSync()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(aliasID, forKey: .aliasID)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(
+            presentation?.sanitizedForSync(),
+            forKey: .presentation
+        )
+        try container.encodeIfPresent(
+            presentationAccountID,
+            forKey: .presentationAccountID
+        )
+        try container.encode(index, forKey: .index)
+        try container.encodeIfPresent(ownedSource, forKey: .ownedSource)
+        try container.encodeIfPresent(
+            ownedPresentation?.sanitizedForSync(),
+            forKey: .ownedPresentation
+        )
     }
 }
 
@@ -261,7 +320,24 @@ public final class AtomicNativeWatchlistViewStore:
             NativeWatchlistView.self,
             from: data
         ), value.version == NativeWatchlistView.currentVersion else {
+            try fileManager.removeItem(at: fileURL)
             return .empty
+        }
+        // Decoding sanitizes every presentation URL, including credentials nested
+        // inside Plex's transcoder `url=` parameter. Rewrite once when an older
+        // cache differs so the secret is removed from disk immediately rather
+        // than waiting for a successful network refresh to happen to save later.
+        if let cleaned = CanonicalJSON.encode(value), cleaned != data {
+            do {
+                try fileManager.createDirectory(
+                    at: fileURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try cleaned.write(to: fileURL, options: [.atomic])
+            } catch {
+                try? fileManager.removeItem(at: fileURL)
+                throw error
+            }
         }
         return value
     }

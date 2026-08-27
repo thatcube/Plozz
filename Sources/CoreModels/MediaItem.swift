@@ -302,6 +302,19 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// owning provider. Once you drill into a single-provider subtree the field
     /// is irrelevant and may be `nil`.
     public var sourceAccountID: String?
+    /// Account provenance keyed by credential-free artwork URL identity.
+    ///
+    /// One item can legitimately combine a poster from one source with a
+    /// backdrop/logo donated by another. Keeping provenance per URL lets each
+    /// resource be re-signed by its actual account after persistence strips
+    /// credentials, even when playback has been retargeted elsewhere.
+    public var artworkSourceAccountIDsByURL: [String: String]
+
+    /// The sole artwork account when every known URL shares one, otherwise nil.
+    public var artworkSourceAccountID: String? {
+        let accounts = Set(artworkSourceAccountIDsByURL.values)
+        return accounts.count == 1 ? accounts.first : nil
+    }
 
     /// Other `Account.id`s that also hold this same title, populated when the
     /// Search aggregator de-duplicates a result that exists on several servers
@@ -435,6 +448,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         downloadProgress: Double? = nil,
         mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
+        artworkSourceAccountID: String? = nil,
+        artworkSourceAccountIDsByURL: [String: String] = [:],
         additionalSourceAccountIDs: [String] = [],
         libraryID: String? = nil,
         versions: [MediaVersion] = [],
@@ -490,6 +505,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.downloadProgress = downloadProgress
         self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
+        self.artworkSourceAccountIDsByURL = artworkSourceAccountIDsByURL
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
         self.libraryID = libraryID
         self.versions = versions
@@ -499,6 +515,17 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.lastPlayedAt = lastPlayedAt
         self.selectedSourceAccountID = selectedSourceAccountID
         self.explicitSourceSelection = explicitSourceSelection
+        if let artworkSourceAccountID {
+            recordArtworkSource(
+                accountID: artworkSourceAccountID,
+                for: remoteArtworkURLs
+            )
+        } else if let sourceAccountID {
+            recordArtworkSource(
+                accountID: sourceAccountID,
+                for: remoteArtworkURLs
+            )
+        }
     }
 
     /// Persisted keys. `selectedVersionID` is intentionally omitted so it is
@@ -515,7 +542,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case artworkSelections, mediaInfo
         case availability, locallyValidatedPlayableSource
         case downloadProgress
-        case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
+        case sourceAccountID, artworkSourceAccountIDsByURL
+        case additionalSourceAccountIDs, versions, isFavorite
         case sources, lastPlayedAt, libraryID
         case scheduledAirDate, scheduledAirDateHasTime, showsScheduledReleaseTime
     }
@@ -560,6 +588,29 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
         providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
+        // Home snapshots written before anime title-search validation may carry
+        // the same poisoned ids as the durable alias ledger. Repair both stores:
+        // cleaning only the ledger still leaves an offline/first-frame card able
+        // to classify itself as the wrong anime and ask for its poster.
+        let repairedLegacyAnimeContamination: Bool
+        if LegacyAnimeIdentityRepair.containsAnimeIDs(in: providerIDs),
+           let repairedYear = LegacyAnimeIdentityRepair.expectedYear(
+               providerIDs: providerIDs,
+               kind: kind
+           ) {
+            repairedLegacyAnimeContamination = true
+            providerIDs.removeProviderIDs(
+                in: LegacyAnimeIdentityRepair.animeNamespaces
+            )
+            // Episodes and seasons often carry their series' external ids, but
+            // their production date belongs to the child. Remove inherited bad
+            // anime ids there too; never turn a 2024 episode into a 2021 one.
+            if kind == .movie || kind == .series {
+                productionYear = repairedYear
+            }
+        } else {
+            repairedLegacyAnimeContamination = false
+        }
         metadataProvenance = (try? container.decodeIfPresent(
             MetadataProvenance.self,
             forKey: .metadataProvenance
@@ -588,6 +639,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         downloadProgress = try container.decodeIfPresent(Double.self, forKey: .downloadProgress)
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
+        artworkSourceAccountIDsByURL = try container.decodeIfPresent(
+            [String: String].self,
+            forKey: .artworkSourceAccountIDsByURL
+        ) ?? [:]
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
         scheduledAirDate = try container.decodeIfPresent(Date.self, forKey: .scheduledAirDate)
         scheduledAirDateHasTime = try container.decodeIfPresent(Bool.self, forKey: .scheduledAirDateHasTime) ?? false
@@ -601,6 +656,30 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         selectedVersionID = nil
         selectedSourceAccountID = nil
         explicitSourceSelection = false
+        if repairedLegacyAnimeContamination {
+            posterURL = nil
+            seriesPosterURL = nil
+            backdropURL = nil
+            heroBackdropURL = nil
+            fallbackArtworkURL = nil
+            logoURL = nil
+            artworkSelections = artworkSelections.compactMap { selection in
+                let local = selection.references.filter {
+                    if case .networkFile = $0 { return true }
+                    return false
+                }
+                guard !local.isEmpty else { return nil }
+                return ArtworkSelection(
+                    placement: selection.placement,
+                    references: local
+                )
+            }
+            ratings.removeAll { $0.source == .anilist }
+            if metadataProvenance[.ratings]?.source == .anilist {
+                metadataProvenance[.ratings] = nil
+            }
+            artworkSourceAccountIDsByURL.removeAll()
+        }
     }
 
     /// Ordered explicit candidates followed by source-compatible legacy URL
@@ -670,7 +749,54 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public func taggingSource(_ accountID: String) -> MediaItem {
         var copy = self
         copy.sourceAccountID = accountID
+        copy.recordArtworkSource(
+            accountID: accountID,
+            for: copy.remoteArtworkURLs
+        )
         return copy
+    }
+
+    public func artworkSourceAccountID(for url: URL) -> String? {
+        artworkSourceAccountIDsByURL[
+            SyncURLSanitizer.sanitize(url).absoluteString
+        ]
+    }
+
+    public mutating func recordArtworkSource(
+        accountID: String,
+        for urls: some Sequence<URL>
+    ) {
+        for url in urls {
+            artworkSourceAccountIDsByURL[
+                SyncURLSanitizer.sanitize(url).absoluteString
+            ] = accountID
+        }
+    }
+
+    public func taggingArtworkSource(_ accountID: String) -> MediaItem {
+        var copy = self
+        copy.recordArtworkSource(
+            accountID: accountID,
+            for: copy.remoteArtworkURLs
+        )
+        return copy
+    }
+
+    var remoteArtworkURLs: [URL] {
+        let direct = [
+            posterURL,
+            seriesPosterURL,
+            backdropURL,
+            heroBackdropURL,
+            fallbackArtworkURL,
+            logoURL
+        ].compactMap { $0 }
+        let selected = artworkSelections.flatMap(\.references).compactMap {
+            reference -> URL? in
+            guard case .remote(let url) = reference else { return nil }
+            return url
+        }
+        return direct + selected + people.compactMap(\.imageURL)
     }
 
     /// Returns a copy of this item stamped with the provider-local `libraryID`

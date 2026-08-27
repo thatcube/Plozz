@@ -286,6 +286,18 @@ public final class WatchlistModel {
         return statesByProfile[profileID]!.migration
     }
 
+    public func markLegacyPresentationArtworkScrubbed(
+        profileID: String,
+        at date: Date = Date()
+    ) throws {
+        try ensureHydrated(profileID)
+        var state = statesByProfile[profileID]!
+        guard state.migration.legacyPresentationArtworkScrubbedAt == nil
+        else { return }
+        state.migration.legacyPresentationArtworkScrubbedAt = date
+        try persist(state, profileID: profileID)
+    }
+
     /// Canonically rekeys redirected aliases. Duplicate intents merge with oldest
     /// rank retained and latest desired state winning.
     public func reconcileAliases(

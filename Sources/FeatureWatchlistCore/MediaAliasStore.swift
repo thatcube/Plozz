@@ -148,6 +148,22 @@ public final class AtomicFileMediaAliasStore: MediaAliasStoring, @unchecked Send
                 if fileManager.fileExists(atPath: fileURL.path) {
                     let loaded = try loadFile()
                     loadedRevision = loaded.revision
+                    let canonicalEnvelope = FileEnvelope(
+                        version: loaded.state.version,
+                        revision: loaded.revision,
+                        records: loaded.state.records
+                    )
+                    let canonicalData =
+                        try MediaAliasEncodingMetrics.canonicalData(
+                            canonicalEnvelope
+                        )
+                    let diskData = try Data(
+                        contentsOf: fileURL,
+                        options: [.mappedIfSafe]
+                    )
+                    if diskData != canonicalData {
+                        try saveFile(loaded.state)
+                    }
                     try cleanupLegacyStoreIfNeeded()
                     return loaded.state
                 }

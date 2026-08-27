@@ -42,6 +42,31 @@ final class AnimeTitleMatchTests: XCTestCase {
         )
     }
 
+    func testRejectsAndoOfTheWoodsForAndor() {
+        XCTAssertFalse(
+            AnimeTitleMatch.names(
+                query(title: "Andor"),
+                among: [
+                    "Mori no Andou",
+                    "Ando of the Woods",
+                    "Ando of the Forest",
+                    "森の安藤"
+                ]
+            ),
+            "a near-spelling search hit must never become durable identity"
+        )
+    }
+
+    func testRejectsACaFeForArcane() {
+        XCTAssertFalse(
+            AnimeTitleMatch.names(
+                query(title: "Arcane: League of Legends"),
+                among: ["a_caFe"]
+            ),
+            "AniList's nearest result is not evidence that the work is anime"
+        )
+    }
+
     func testAcceptsAnExactMatchOnAnyListedTitle() {
         XCTAssertTrue(
             AnimeTitleMatch.names(

@@ -7,6 +7,7 @@ public struct WatchlistUnionEntry: Identifiable, Hashable, Sendable {
     public let aliasID: MediaAliasID
     public let kind: MediaItemKind
     public let presentation: MediaAliasPresentation?
+    public let artworkSourceAccountID: String?
     /// True when a durable intent puts this here — the viewer asked for it.
     /// False when it is here only because an enabled server's own list holds it.
     public let isExplicit: Bool
@@ -19,11 +20,13 @@ public struct WatchlistUnionEntry: Identifiable, Hashable, Sendable {
         kind: MediaItemKind,
         presentation: MediaAliasPresentation?,
         isExplicit: Bool,
-        ownedSource: MediaSourceRef? = nil
+        ownedSource: MediaSourceRef? = nil,
+        artworkSourceAccountID: String? = nil
     ) {
         self.aliasID = aliasID
         self.kind = kind
         self.presentation = presentation
+        self.artworkSourceAccountID = artworkSourceAccountID
         self.isExplicit = isExplicit
         self.ownedSource = ownedSource
     }
@@ -88,6 +91,7 @@ public struct WatchlistUnion: Sendable, Equatable {
         var ownedByAlias: [MediaAliasID: MediaSourceRef] = [:]
         var ownedPresentationByAlias:
             [MediaAliasID: MediaAliasPresentation] = [:]
+        var ownedArtworkAccountByAlias: [MediaAliasID: String] = [:]
         var ownedTitleKeys: Set<String> = []
         for (rawID, bucket) in nativeView.bucketsByDestinationID {
             guard let destinationID = WatchlistDestinationID(rawValue: rawID),
@@ -99,6 +103,10 @@ public struct WatchlistUnion: Sendable, Equatable {
                     ownedByAlias[aliasID] = entry.ownedSource
                     ownedPresentationByAlias[aliasID] =
                         entry.ownedPresentation
+                    if entry.ownedPresentation != nil {
+                        ownedArtworkAccountByAlias[aliasID] =
+                            entry.ownedSource?.accountID
+                    }
                 }
                 if let key = Self.titleKey(
                     kind: entry.kind,
@@ -123,7 +131,9 @@ public struct WatchlistUnion: Sendable, Equatable {
                 presentation:
                     ownedPresentationByAlias[aliasID] ?? intent.presentation,
                 isExplicit: true,
-                ownedSource: ownedByAlias[aliasID]
+                ownedSource: ownedByAlias[aliasID],
+                artworkSourceAccountID:
+                    ownedArtworkAccountByAlias[aliasID]
             ))
         }
 
@@ -158,7 +168,7 @@ public struct WatchlistUnion: Sendable, Equatable {
             return $0.1.aliasID < $1.1.aliasID
         }
 
-        for (_, entry) in native {
+        for (destinationID, entry) in native {
             let aliasID = aliasSnapshot.resolvedAliasID(for: entry.aliasID)
                 ?? snapshot.resolvedAliasID(for: entry.aliasID)
             guard seen.insert(aliasID).inserted else { continue }
@@ -193,13 +203,30 @@ public struct WatchlistUnion: Sendable, Equatable {
                 presentation:
                     entry.ownedPresentation ?? entry.presentation,
                 isExplicit: false,
-                ownedSource: entry.ownedSource ?? ownedByAlias[aliasID]
+                ownedSource: entry.ownedSource ?? ownedByAlias[aliasID],
+                artworkSourceAccountID: entry.ownedPresentation != nil
+                    ? entry.ownedSource?.accountID
+                    : entry.presentationAccountID
+                        ?? Self.presentationAccountID(
+                            from: destinationID
+                        )
             ))
         }
 
         orderedEntries = entries
         activeAliasIDs = Set(entries.map(\.aliasID))
         hasStaleDestinations = stale
+    }
+
+    private static func presentationAccountID(
+        from destinationID: WatchlistDestinationID
+    ) -> String? {
+        for prefix in ["plex.", "mediabrowser."]
+        where destinationID.rawValue.hasPrefix(prefix) {
+            let accountID = String(destinationID.rawValue.dropFirst(prefix.count))
+            return accountID.isEmpty ? nil : accountID
+        }
+        return nil
     }
 
     /// A conservative "same title" key for suppressing an unowned duplicate.

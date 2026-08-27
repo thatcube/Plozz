@@ -150,6 +150,23 @@ public final class MediaAliasLedgerModel {
         publish(await ledger.snapshot(), profileID: profileID)
     }
 
+    @discardableResult
+    public func clearPresentationArtwork(
+        profileID: String,
+        aliasIDs: Set<MediaAliasID>
+    ) async throws -> Int {
+        try ensureDeletionStateAvailable()
+        guard !removedProfileIDs.contains(profileID) else {
+            throw MediaAliasLedgerError.profileDeleted(profileID)
+        }
+        let ledger = try await ledger(for: profileID)
+        let changed = try await ledger.clearPresentationArtwork(
+            aliasIDs: aliasIDs
+        )
+        publish(await ledger.snapshot(), profileID: profileID)
+        return changed
+    }
+
     /// Applies one identity-index publication with one durable write and one
     /// observable snapshot publication, regardless of intent count.
     @discardableResult

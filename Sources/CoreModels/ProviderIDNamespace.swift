@@ -108,6 +108,22 @@ public extension Dictionary where Key == String, Value == String {
         return nil
     }
 
+    /// Removes every spelling of the supplied provider-id namespaces.
+    ///
+    /// Keys come from several backends (`AniList`, `anilistid`, `MAL`,
+    /// `myanimelist`, and so on), so removing only the canonical spelling leaves
+    /// the same id visible through an alias. Uses the exact lookup alias table
+    /// above so read and removal cannot disagree.
+    mutating func removeProviderIDs(
+        in namespaces: Set<ProviderIDNamespace>
+    ) {
+        let aliases = Set(namespaces.flatMap(\.aliases))
+        let doomed = keys.filter {
+            aliases.contains(normalizeProviderIDKey($0))
+        }
+        for key in doomed { removeValue(forKey: key) }
+    }
+
     /// Fills missing show-level namespaces from another item's series ids first,
     /// then its ordinary ids. Used when an episode is replaced by a freshly fetched
     /// provider record: the new episode carries episode-level TMDb/TVDB ids, while

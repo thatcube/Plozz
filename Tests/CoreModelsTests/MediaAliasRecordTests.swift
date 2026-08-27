@@ -3,6 +3,285 @@ import XCTest
 @testable import CoreModels
 
 final class MediaAliasRecordTests: XCTestCase {
+    func testRepairsLegacyArcaneAnimeSearchContamination() throws {
+        let record = try XCTUnwrap(MediaAliasRecord(
+            kind: .series,
+            strongEvidence: [
+                strong(.series, .imdb, "tt11126994"),
+                strong(.series, .tmdb, "94605"),
+                strong(.series, .tvdb, "371028"),
+                strong(.series, .aniDB, "12811"),
+                strong(.series, .aniList, "104490"),
+                strong(.series, .myAnimeList, "22385")
+            ],
+            weakEvidence: [
+                weak(.series, "Arcane", 2021),
+                weak(.series, "Arcane: League of Legends", 2002)
+            ],
+            presentation: MediaAliasPresentation(
+                title: "Arcane: League of Legends",
+                year: 2002,
+                artworkURL: "https://anime.example/wrong-poster.jpg",
+                backdropURL: "https://anime.example/wrong-backdrop.jpg"
+            )
+        ))
+
+        XCTAssertEqual(
+            Set(record.strongEvidence.map(\.namespace)),
+            [.imdb, .tmdb, .tvdb]
+        )
+        XCTAssertEqual(record.weakEvidence.map(\.year), [2021])
+        XCTAssertEqual(record.presentation?.year, 2021)
+        XCTAssertNil(record.presentation?.artworkURL)
+        XCTAssertNil(record.presentation?.backdropURL)
+    }
+
+    func testRepairsLegacyAndorAnimeSearchContamination() throws {
+        let record = try XCTUnwrap(MediaAliasRecord(
+            kind: .series,
+            strongEvidence: [
+                strong(.series, .imdb, "tt9253284"),
+                strong(.series, .tmdb, "83867"),
+                strong(.series, .tvdb, "393189"),
+                strong(.series, .aniDB, "1482"),
+                strong(.series, .aniList, "102451")
+            ],
+            weakEvidence: [weak(.series, "Andor", 2022)],
+            presentation: MediaAliasPresentation(title: "Andor", year: 2022)
+        ))
+
+        XCTAssertEqual(
+            Set(record.strongEvidence.map(\.namespace)),
+            [.imdb, .tmdb, .tvdb]
+        )
+        XCTAssertEqual(record.presentation?.year, 2022)
+    }
+
+    func testRepairsDocumentedHouseOfTheDragonContamination() throws {
+        let record = try XCTUnwrap(MediaAliasRecord(
+            kind: .series,
+            strongEvidence: [
+                strong(.series, .imdb, "tt11198330"),
+                strong(.series, .tmdb, "94997"),
+                strong(.series, .tvdb, "371572"),
+                strong(.series, .aniList, "112376")
+            ],
+            weakEvidence: [
+                weak(.series, "House of the Dragon", 2022),
+                weak(.series, "Dragon Goes House-Hunting", 2021)
+            ],
+            presentation: MediaAliasPresentation(
+                title: "House of the Dragon",
+                year: 2022
+            )
+        ))
+
+        XCTAssertEqual(
+            Set(record.strongEvidence.map(\.namespace)),
+            [.imdb, .tmdb, .tvdb]
+        )
+        XCTAssertEqual(record.weakEvidence.map(\.year), [2022])
+    }
+
+    /// Every mainstream anchor is required. Two ids are not permission to strip
+    /// anime evidence from a record that may genuinely be an anime adaptation.
+    func testLegacyRepairRequiresAllThreeMainstreamAnchors() throws {
+        let record = try XCTUnwrap(MediaAliasRecord(
+            kind: .series,
+            strongEvidence: [
+                strong(.series, .imdb, "tt11126994"),
+                strong(.series, .tmdb, "94605"),
+                strong(.series, .aniList, "104490")
+            ],
+            weakEvidence: [weak(.series, "Arcane", 2021)],
+            presentation: MediaAliasPresentation(title: "Arcane", year: 2021)
+        ))
+
+        XCTAssertTrue(
+            record.strongEvidence.contains {
+                $0.namespace == .aniList && $0.value == "104490"
+            }
+        )
+    }
+
+    func testMediaItemSnapshotRepairsTheSameLegacyContamination() throws {
+        let poisoned = MediaItem(
+            id: "4407",
+            title: "Arcane: League of Legends",
+            kind: .series,
+            productionYear: 2002,
+            posterURL: URL(string: "https://anime.example/wrong-poster.jpg"),
+            seriesPosterURL: URL(
+                string: "https://anime.example/wrong-series-poster.jpg"
+            ),
+            backdropURL: URL(
+                string: "https://anime.example/wrong-backdrop.jpg"
+            ),
+            heroBackdropURL: URL(
+                string: "https://anime.example/wrong-hero.jpg"
+            ),
+            fallbackArtworkURL: URL(
+                string: "https://anime.example/wrong-fallback.jpg"
+            ),
+            logoURL: URL(string: "https://anime.example/wrong-logo.png"),
+            ratings: [
+                ExternalRating(
+                    source: .anilist,
+                    value: 70,
+                    scale: .outOfHundred
+                ),
+                ExternalRating(
+                    source: .imdb,
+                    value: 8.5,
+                    scale: .outOfTen
+                )
+            ],
+            providerIDs: [
+                "Imdb": "tt11126994",
+                "Tmdb": "94605",
+                "Tvdb": "371028",
+                "AniList": "104490",
+                "Mal": "22385",
+                "AniDB": "12811"
+            ],
+            metadataProvenance: MetadataProvenance([
+                .ratings: MetadataAttribution(source: .anilist)
+            ]),
+            artworkSelections: [
+                ArtworkSelection(
+                    placement: .homeHero,
+                    references: [
+                        .remote(
+                            URL(
+                                string:
+                                    "https://anime.example/wrong-selection.jpg"
+                            )!
+                        )
+                    ]
+                )
+            ]
+        )
+        let decoded = try JSONDecoder().decode(
+            MediaItem.self,
+            from: JSONEncoder().encode(poisoned)
+        )
+
+        XCTAssertEqual(decoded.productionYear, 2021)
+        XCTAssertNil(decoded.providerID(.aniList))
+        XCTAssertNil(decoded.providerID(.myAnimeList))
+        XCTAssertNil(decoded.providerID(.aniDB))
+        XCTAssertEqual(decoded.providerID(.tmdb), "94605")
+        XCTAssertNil(decoded.posterURL)
+        XCTAssertNil(decoded.seriesPosterURL)
+        XCTAssertNil(decoded.backdropURL)
+        XCTAssertNil(decoded.heroBackdropURL)
+        XCTAssertNil(decoded.fallbackArtworkURL)
+        XCTAssertNil(decoded.logoURL)
+        XCTAssertTrue(decoded.artworkSelections.isEmpty)
+        XCTAssertEqual(decoded.ratings.map(\.source), [.imdb])
+        XCTAssertNil(decoded.metadataProvenance[.ratings])
+    }
+
+    func testMediaItemRepairDoesNotChangeAChildProductionYear() throws {
+        let poisoned = MediaItem(
+            id: "episode",
+            title: "Episode",
+            kind: .episode,
+            productionYear: 2024,
+            providerIDs: [
+                "SeriesImdb": "tt11126994",
+                "SeriesTmdb": "94605",
+                "SeriesTvdb": "371028",
+                "SeriesAniList": "104490"
+            ]
+        )
+        let decoded = try JSONDecoder().decode(
+            MediaItem.self,
+            from: JSONEncoder().encode(poisoned)
+        )
+
+        XCTAssertEqual(decoded.productionYear, 2024)
+        XCTAssertNil(decoded.providerID(.seriesAniList))
+        XCTAssertEqual(decoded.providerID(.seriesTmdb), "94605")
+    }
+
+    func testLegacyRepairKeepsBaseAndSeriesIdentityScopesIndependent() {
+        let mixedOnly = [
+            "Imdb": "tt11126994",
+            "SeriesTmdb": "94605",
+            "SeriesTvdb": "371028"
+        ]
+        XCTAssertNil(
+            LegacyAnimeIdentityRepair.expectedYear(
+                providerIDs: mixedOnly,
+                kind: .episode
+            )
+        )
+
+        let bothScopes = [
+            "Imdb": "tt9253284",
+            "Tmdb": "83867",
+            "Tvdb": "393189",
+            "SeriesImdb": "tt11126994",
+            "SeriesTmdb": "94605",
+            "SeriesTvdb": "371028"
+        ]
+        XCTAssertEqual(
+            LegacyAnimeIdentityRepair.expectedYear(
+                providerIDs: bothScopes,
+                kind: .episode
+            ),
+            2021
+        )
+        XCTAssertEqual(
+            LegacyAnimeIdentityRepair.expectedYear(
+                providerIDs: bothScopes,
+                kind: .series
+            ),
+            2022
+        )
+    }
+
+    func testMediaItemRepairDoesNotUseAPartialMixedScope() throws {
+        let poisoned = MediaItem(
+            id: "episode",
+            title: "Episode",
+            kind: .episode,
+            productionYear: 2024,
+            providerIDs: [
+                "Imdb": "tt11126994",
+                "SeriesTmdb": "94605",
+                "SeriesTvdb": "371028",
+                "SeriesAniList": "104490"
+            ]
+        )
+        let decoded = try JSONDecoder().decode(
+            MediaItem.self,
+            from: JSONEncoder().encode(poisoned)
+        )
+
+        XCTAssertEqual(decoded.productionYear, 2024)
+        XCTAssertEqual(decoded.providerID(.seriesAniList), "104490")
+    }
+
+    /// The bad ids are legitimate on the works they actually identify. The repair
+    /// is anchored to all three mainstream IDs, never a global blacklist.
+    func testDoesNotRemoveAnimeIDsFromTheirOwnWork() throws {
+        let record = try XCTUnwrap(MediaAliasRecord(
+            kind: .series,
+            strongEvidence: [
+                strong(.series, .aniDB, "12811"),
+                strong(.series, .aniList, "104490"),
+                strong(.series, .myAnimeList, "22385")
+            ],
+            weakEvidence: [weak(.series, "a_caFe", 2002)],
+            presentation: MediaAliasPresentation(title: "a_caFe", year: 2002)
+        ))
+
+        XCTAssertEqual(record.strongEvidence.count, 3)
+        XCTAssertEqual(record.presentation?.year, 2002)
+    }
+
     func testIDSurvivesPresentationMutationAndCanonicalRoundTrip() throws {
         let id = MediaAliasID(UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!)
         var record = try XCTUnwrap(MediaAliasRecord(

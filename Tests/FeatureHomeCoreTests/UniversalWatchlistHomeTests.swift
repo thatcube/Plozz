@@ -173,15 +173,62 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         )
         XCTAssertEqual(afterCache.map(\.id), ["discover"])
     }
+
+    func testFirstPaintRehydratesOwnedArtworkBeforePublishing() {
+        let saved = MediaItem(
+            id: "4407",
+            title: "Arcane",
+            kind: .series,
+            posterURL: URL(
+                string: "https://plex.example/photo/:/transcode"
+            ),
+            locallyValidatedPlayableSource: true,
+            sourceAccountID: "plex"
+        )
+        let signed = URL(
+            string:
+                "https://plex.example/photo/:/transcode"
+                + "?X-Plex-Token=current"
+        )!
+        let handler = UniversalWatchlistHomeHandler(
+            items: [saved],
+            ready: false,
+            rehydrate: { items in
+                items.map { item in
+                    var item = item
+                    item.posterURL = signed
+                    return item
+                }
+            }
+        )
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: UniversalWatchlistHomeStore(
+                content: .init(watchlist: [saved])
+            ),
+            mediaItemActionHandler: handler
+        )
+
+        guard case .loaded(let content) = model.state else {
+            return XCTFail("Expected cached content")
+        }
+        XCTAssertEqual(content.watchlist.first?.posterURL, signed)
+    }
 }
 
 @MainActor
 private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
     var items: [MediaItem]
     var ready: Bool
-    init(items: [MediaItem], ready: Bool = true) {
+    var rehydrate: ([MediaItem]) -> [MediaItem]
+    init(
+        items: [MediaItem],
+        ready: Bool = true,
+        rehydrate: @escaping ([MediaItem]) -> [MediaItem] = { $0 }
+    ) {
         self.items = items
         self.ready = ready
+        self.rehydrate = rehydrate
     }
     func actions(
         for item: MediaItem,
@@ -196,6 +243,9 @@ private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
         items
     }
     func isDurableWatchlistPresentationReady() -> Bool { ready }
+    func rehydratePersistedArtwork(_ items: [MediaItem]) -> [MediaItem] {
+        rehydrate(items)
+    }
 }
 
 private final class UniversalWatchlistHomeStore:

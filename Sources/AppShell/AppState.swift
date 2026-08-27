@@ -260,6 +260,9 @@ public final class AppState {
             durableWatchlistPresentationReady: { [unowned self] in
                 self.universalWatchlistNativeViewLoaded
             },
+            rehydratePersistedArtworkItems: { [unowned self] items in
+                self.rehydratedPersistedArtwork(items)
+            },
             seedLegacyUniversalWatchlist: { [weak self] _ in
                 try? await self?.seedLegacyUniversalWatchlist()
             }

@@ -1269,6 +1269,57 @@ public struct JellyfinProvider: MediaProvider {
         client.imageURL(itemID: itemID, kind: kind, maxWidth: maxWidth)
     }
 
+    public func reauthenticatedImageURL(
+        _ persistedURL: URL,
+        maxWidth: Int?
+    ) -> URL? {
+        guard let path = MediaProviderURLIdentity.relativeResourcePath(
+            of: persistedURL,
+            under: session.server.baseURL
+        ) else { return nil }
+        guard MediaProviderURLIdentity.isJellyfinArtworkResourcePath(path)
+        else { return nil }
+        guard var components = URLComponents(
+            url: session.server.baseURL,
+            resolvingAgainstBaseURL: false
+        ) else { return nil }
+        var basePath = components.path
+        while basePath.count > 1, basePath.hasSuffix("/") {
+            basePath.removeLast()
+        }
+        if basePath == "/" { basePath = "" }
+        components.path = basePath + path
+        var query = URLComponents(
+            url: persistedURL,
+            resolvingAgainstBaseURL: false
+        )?.queryItems?.filter {
+            ![
+                "api_key", "x-emby-token", "x-mediabrowser-token"
+            ].contains($0.name.lowercased())
+        } ?? []
+        if let maxWidth {
+            query.removeAll { $0.name.lowercased() == "maxwidth" }
+            query.append(URLQueryItem(
+                name: "maxWidth",
+                value: String(maxWidth)
+            ))
+        }
+        query.append(URLQueryItem(
+            name: "api_key",
+            value: session.accessToken
+        ))
+        components.queryItems = query
+        return components.url
+    }
+
+    public func ownsPersistedImageURL(_ persistedURL: URL) -> Bool {
+        guard let path = MediaProviderURLIdentity.relativeResourcePath(
+            of: persistedURL,
+            under: session.server.baseURL
+        ) else { return false }
+        return MediaProviderURLIdentity.isJellyfinArtworkResourcePath(path)
+    }
+
     // MARK: Subtitles
     public func remoteSubtitleSearch(itemID: String, language: String, preference: SubtitleSearchPreference) async throws -> [RemoteSubtitle] {
         // Jellyfin's RemoteSearch endpoint takes only a language; the SDH/Forced

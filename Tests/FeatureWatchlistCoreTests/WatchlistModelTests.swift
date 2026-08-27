@@ -145,9 +145,13 @@ final class WatchlistModelTests: XCTestCase {
             entries: [(MediaAliasID(), .movie, nil)]
         )
         try model.retireNativeImports(profileID: "p")
+        try model.markLegacyPresentationArtworkScrubbed(profileID: "p")
 
         let metadata = try model.migrationMetadata(profileID: "p")
         XCTAssertNotNil(metadata.legacyHomeSeedCompletedAt)
+        XCTAssertNotNil(
+            metadata.legacyPresentationArtworkScrubbedAt
+        )
         XCTAssertNotNil(metadata.nativeImportRetiredAt)
         XCTAssertEqual(model.activeSnapshot.orderedEntries.count, 1)
     }
@@ -378,6 +382,75 @@ final class WatchlistModelTests: XCTestCase {
         XCTAssertEqual(
             try Data(contentsOf: store.fileURL),
             Data("not-json".utf8)
+        )
+    }
+
+    func testAtomicStoreLoadRewritesCompletedLegacyPresentation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PlozzWatchlistRewriteTests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try AtomicWatchlistIntentStore(
+            directoryURL: root,
+            profileID: "p"
+        )
+        _ = try store.load()
+        let intent = WatchlistIntent(
+            aliasID: MediaAliasID(),
+            kind: .series,
+            desiredState: .present,
+            rank: 0,
+            origin: .local,
+            presentation: MediaAliasPresentation(
+                title: "Arcane",
+                year: 2021,
+                artworkURL: "https://art.example/clean.jpg"
+            )
+        )!
+        try store.save(WatchlistIntentStoreState(
+            intents: [intent],
+            migration: WatchlistMigrationMetadata(
+                legacyHomeSeedCompletedAt: Date()
+            )
+        ))
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: store.fileURL)
+            ) as? [String: Any]
+        )
+        var intents = try XCTUnwrap(
+            object["intents"] as? [[String: Any]]
+        )
+        var legacy = intents[0]
+        legacy["origin"] = "legacyHomeSeed"
+        var presentation = try XCTUnwrap(
+            legacy["presentation"] as? [String: Any]
+        )
+        presentation["artworkURL"] =
+            "https://art.example/wrong.jpg?X-Plex-Token=SECRET"
+        legacy["presentation"] = presentation
+        intents[0] = legacy
+        object["intents"] = intents
+        try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        ).write(to: store.fileURL, options: [.atomic])
+
+        let reloaded = try AtomicWatchlistIntentStore(
+            directoryURL: root,
+            profileID: "p"
+        )
+        let loaded = try XCTUnwrap(reloaded.load().intents.first)
+
+        XCTAssertNil(loaded.presentation?.artworkURL)
+        XCTAssertFalse(
+            String(
+                decoding: try Data(contentsOf: store.fileURL),
+                as: UTF8.self
+            ).contains("SECRET")
         )
     }
 

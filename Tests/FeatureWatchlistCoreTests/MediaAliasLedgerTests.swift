@@ -100,6 +100,72 @@ final class MediaAliasLedgerTests: XCTestCase {
         }
     }
 
+    func testAtomicFileLoadRewritesLegacyContaminationAndCredentials() throws {
+        let directory = testStorageDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let record = try XCTUnwrap(MediaAliasRecord(
+            kind: .series,
+            strongEvidence: [
+                strong(.series, .imdb, "tt9253284"),
+                strong(.series, .tmdb, "83867"),
+                strong(.series, .tvdb, "393189")
+            ],
+            presentation: MediaAliasPresentation(
+                title: "Andor",
+                year: 2022,
+                artworkURL: "https://art.example/clean.jpg"
+            )
+        ))
+        let store = try AtomicFileMediaAliasStore(
+            directoryURL: directory,
+            profileID: "rewrite"
+        )
+        try store.save(MediaAliasLedgerState(records: [record]))
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: store.fileURL)
+            ) as? [String: Any]
+        )
+        var records = try XCTUnwrap(object["records"] as? [[String: Any]])
+        var polluted = records[0]
+        var strongEvidence = try XCTUnwrap(
+            polluted["strongEvidence"] as? [[String: Any]]
+        )
+        strongEvidence.append([
+            "kind": "series",
+            "namespace": "aniList",
+            "value": "102451"
+        ])
+        polluted["strongEvidence"] = strongEvidence
+        var presentation = try XCTUnwrap(
+            polluted["presentation"] as? [String: Any]
+        )
+        presentation["artworkURL"] =
+            "https://art.example/wrong.jpg?X-Plex-Token=SECRET"
+        polluted["presentation"] = presentation
+        records[0] = polluted
+        object["records"] = records
+        try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        ).write(to: store.fileURL, options: [.atomic])
+
+        let reloaded = try AtomicFileMediaAliasStore(
+            directoryURL: directory,
+            profileID: "rewrite"
+        )
+        let loaded = try XCTUnwrap(reloaded.load().records.first)
+
+        XCTAssertNil(loaded.presentation?.artworkURL)
+        XCTAssertFalse(
+            String(
+                decoding: try Data(contentsOf: store.fileURL),
+                as: UTF8.self
+            ).contains("SECRET")
+        )
+    }
+
     func testAtomicFileStoreRejectsStaleWriter() throws {
         let directory = testStorageDirectory()
         defer {

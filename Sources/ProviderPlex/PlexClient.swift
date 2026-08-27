@@ -59,6 +59,8 @@ public struct PlexClient: Sendable {
     /// used by URL builders after a request has settled it.
     public var baseURL: URL { resolver.current }
 
+    var knownBaseURLs: [URL] { resolver.knownBaseURLs }
+
     /// Whether the resolver has a confirmed-reachable (or persisted last-known-good)
     /// connection, so `baseURL`'s locality can be trusted for best-source selection.
     /// See ``PlexConnectionResolver/hasConfirmedReachableConnection``.
@@ -749,6 +751,31 @@ public struct PlexClient: Sendable {
         ) else { return nil }
         components.path = path.hasPrefix("/") ? path : "/" + path
         components.queryItems = [URLQueryItem(name: "X-Plex-Token", value: plexTVToken)]
+        return components.url
+    }
+
+    /// Restores the current Discover credential on an exact saved Discover
+    /// resource. Plex CDN URLs are intentionally not accepted: those are already
+    /// public and must never be rewritten onto this host.
+    func reauthenticatedDiscoverImageURL(
+        _ persistedURL: URL
+    ) -> URL? {
+        guard persistedURL.host?.lowercased()
+                == Self.watchlistBase.host else { return nil }
+        let sanitized = SyncURLSanitizer.sanitize(persistedURL)
+        guard let path = MediaProviderURLIdentity.relativeResourcePath(
+            of: sanitized,
+            under: Self.watchlistBase
+        ), path.hasPrefix("/library/metadata/"),
+              !plexTVToken.isEmpty,
+              var components = URLComponents(
+                  url: sanitized,
+                  resolvingAgainstBaseURL: false
+              )
+        else { return nil }
+        components.queryItems = (components.queryItems ?? []) + [
+            URLQueryItem(name: "X-Plex-Token", value: plexTVToken)
+        ]
         return components.url
     }
 

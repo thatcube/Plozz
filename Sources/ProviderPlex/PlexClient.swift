@@ -1134,8 +1134,20 @@ public struct PlexClient: Sendable {
     /// Builds an absolute, token-bearing image URL for a server-relative art
     /// path (`thumb`/`art`), routed through Plex's photo transcoder so tvOS gets
     /// an appropriately sized image.
+    ///
+    /// A path that is **already absolute** is returned untouched. It belongs to
+    /// somebody else's host — a plex.tv Discover thumb, say, which is what every
+    /// watchlist entry carries — and wrapping one in this server's transcoder
+    /// asks the server to go and fetch a URL it has no business fetching, signed
+    /// with a token that means nothing there. The request doesn't fail visibly:
+    /// the server answers with a placeholder, the same placeholder every time,
+    /// so a whole watchlist row drew one show's poster under everybody else's
+    /// title while the captions stayed perfectly correct. Being unable to size
+    /// a remote image is a far smaller problem — `ArtworkImageVariant` already
+    /// caps what any card decodes.
     func imageURL(path: String?, maxWidth: Int?) -> URL? {
         guard let path, !path.isEmpty else { return nil }
+        if let absolute = URL(string: path), absolute.scheme != nil { return absolute }
         guard let width = maxWidth else {
             return absoluteURL(serverPath: path, extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)])
         }

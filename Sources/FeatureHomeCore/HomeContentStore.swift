@@ -147,7 +147,14 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     /// candidates from persisted `MediaItem.artworkSelections`.
     /// v4: Plex episodes cached before the `posterURL` fix carry the SHOW's poster
     /// where the episode's own still belongs — see `DetailSnapshotCache`.
-    private static let schemaDirName = "plozz-home-content-v4"
+    /// v5: Plex watchlist rows cached before the Discover-artwork fix hold URLs
+    /// built against the viewer's own server, which had never heard of those
+    /// titles and answered every one of them with the same placeholder — so a
+    /// whole watchlist row wore one show's poster. The live read corrects itself
+    /// now, but a snapshot painted at launch cannot: it made the row flip between
+    /// right and wrong depending on whether the network had answered yet, which
+    /// reads as far more broken than being consistently wrong.
+    private static let schemaDirName = "plozz-home-content-v5"
     private static let schemaDirPrefix = "plozz-home-content"
 
     /// Process-wide guards. `HomeContentStore` is (re)constructed inline in

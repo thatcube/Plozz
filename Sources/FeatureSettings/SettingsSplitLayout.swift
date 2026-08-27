@@ -126,9 +126,9 @@ struct SettingsSplitLayout: View {
     /// left-press out of a control has exactly one place to land (the row you
     /// came in from), with no geometrically-nearer row to steal it.
     @State private var focusInDetail = false
-    /// During a shell re-host, tvOS may focus the first master row before it
-    /// honours preferred focus. Without this gate that transient focus writes
-    /// "language" over the externally saved "navigation" selection.
+    /// During a shell re-host, only the persisted row is focusable. tvOS otherwise
+    /// lands briefly on the first row, then overrides our focus request and writes
+    /// "language" over the saved "navigation" selection.
     @State private var isRestoringExternalFocus: Bool
     /// Only the newest asynchronous restore may close the gate. A transient
     /// wrong-row focus can schedule a replacement while the first task is yielded.
@@ -208,6 +208,11 @@ struct SettingsSplitLayout: View {
                 selectedRowID = ids.first
             }
         }
+        .onDisappear {
+            // Invalidate any delayed restoration owned by this view instance.
+            focusRestoreGeneration &+= 1
+            isRestoringExternalFocus = false
+        }
     }
 
     // MARK: - Master list (left)
@@ -245,11 +250,20 @@ struct SettingsSplitLayout: View {
             // focus-region state change.
             if newID != nil { focusInDetail = false }
             if isRestoringExternalFocus {
-                // Ignore the system's transient first-row landing while a
-                // persisted selection is being restored. Reassert below after the
-                // current focus transaction completes.
-                if newID != selectedRowID {
-                    restoreExternalFocusIfNeeded()
+                if newID == nil {
+                    // A real move into the detail pane wins over restoration.
+                    // Cancel the pending release task and preserve normal left-back
+                    // focus behavior.
+                    focusRestoreGeneration &+= 1
+                    isRestoringExternalFocus = false
+                    focusInDetail = true
+                } else if newID != selectedRowID {
+                    // A focus update already in flight may report the first row
+                    // once. It is now disabled, so ask the engine to resolve again
+                    // against the sole eligible saved row.
+                    #if os(tvOS)
+                    resetFocus(in: masterScope)
+                    #endif
                 }
                 return
             }
@@ -278,17 +292,14 @@ struct SettingsSplitLayout: View {
         Task { @MainActor in
             await Task.yield()
             guard generation == focusRestoreGeneration else { return }
-            focusedRow = selectedRowID
             resetFocus(in: masterScope)
-            // UIKit's focus relocation arrives after the appearance transaction,
-            // not merely after another main-actor executor turn. Hold the gate
-            // across that window, then reassert once — same proven timing used by
-            // NowPlayingView when it must beat the focus engine's own relocation.
+            // Keep every sibling ineligible across UIKit's delayed relocation,
+            // then reassert once using the same proven focus timing as
+            // NowPlayingView. This is bounded: after 250ms the list always unlocks.
             try? await Task.sleep(for: .milliseconds(60))
             guard generation == focusRestoreGeneration else { return }
-            focusedRow = selectedRowID
             resetFocus(in: masterScope)
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(190))
             guard generation == focusRestoreGeneration else { return }
             isRestoringExternalFocus = false
         }
@@ -309,9 +320,13 @@ struct SettingsSplitLayout: View {
             SettingsMasterRowLabel(row: row, isSelected: selectedRowID == row.id)
         }
         .buttonStyle(SettingsFocusButtonStyle())
-        // While editing in the detail pane, take every other row out of the
-        // focus order so a left-press can only return to where we came in from.
-        .disabled(focusInDetail && selectedRowID != row.id)
+        // While editing OR restoring after a shell swap, take every other row out
+        // of the focus order. Focus restoration must be solved by controlling
+        // eligibility, not by racing tvOS after it lands on Language.
+        .disabled(
+            (focusInDetail || isRestoringExternalFocus)
+                && selectedRowID != row.id
+        )
     }
 
     // MARK: - Detail pane (right)

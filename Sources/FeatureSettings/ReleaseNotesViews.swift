@@ -45,7 +45,6 @@ public struct ReleaseNotesSettingsView: View {
 public struct ReleaseNotesStartupView: View {
     private enum FocusedAction: Hashable {
         case done
-        case disable
     }
 
     private let model: ReleaseNotesModel
@@ -62,32 +61,36 @@ public struct ReleaseNotesStartupView: View {
             Color.black.opacity(0.72)
                 .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 28) {
-                Text("What’s New in Plozz")
-                    .font(.title.bold())
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .center, spacing: 24) {
+                    Text("What’s New in Plozz")
+                        .font(.system(size: 34, weight: .semibold))
 
-                FadingScrollView(maxHeight: 560) {
-                    ReleaseNotesVersionList(groups: model.pendingVersionGroups)
-                        .padding(.horizontal, 8)
-                }
+                    Spacer()
 
-                HStack(spacing: 24) {
                     Button("Done") {
                         model.dismissStartupNotes()
                     }
                     .buttonStyle(.borderedProminent)
                     .focused($focusedAction, equals: .done)
-
-                    Button("Don’t Show Again", role: .destructive) {
-                        confirmsDisable = true
-                    }
-                    .buttonStyle(.bordered)
-                    .focused($focusedAction, equals: .disable)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
+
+                FadingScrollView(maxHeight: 600) {
+                    VStack(alignment: .leading, spacing: 32) {
+                        ReleaseNotesVersionList(groups: model.pendingVersionGroups)
+
+                        Button("Don’t Show Again", role: .destructive) {
+                            confirmsDisable = true
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+                }
             }
-            .padding(48)
-            .frame(maxWidth: 1280)
+            .padding(40)
+            .frame(maxWidth: 1120)
             .background(.ultraThinMaterial)
             .clipShape(
                 RoundedRectangle(
@@ -103,9 +106,10 @@ public struct ReleaseNotesStartupView: View {
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.45), radius: 42, y: 18)
-            .padding(80)
+            .padding(96)
         }
-        .onAppear { focusedAction = .done }
+        .defaultFocus($focusedAction, .done)
+        .task { focusedAction = .done }
         .onExitCommand { model.dismissStartupNotes() }
         .alert("Don’t show release notes again?", isPresented: $confirmsDisable) {
             Button("Don’t Show Again", role: .destructive) {
@@ -226,28 +230,78 @@ private struct ReleaseNotesSectionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(sections) { section in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(verbatim: section.category.rawValue)
-                        .font(.headline)
-
-                    ForEach(section.items, id: \.self) { item in
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(verbatim: "•")
-                            Text(verbatim: item)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .plozzForeground(.secondary)
-                        #if os(tvOS)
-                        // tvOS scrolls by moving focus. One stop per note lets a
-                        // release taller than the dialog scroll continuously
-                        // without turning the whole card into one trapped stop.
-                        .focusable()
-                        .focusEffectDisabled()
-                        #endif
-                    }
-                }
+                ReleaseNotesSectionView(section: section)
             }
         }
     }
 }
+
+private struct ReleaseNotesSectionView: View {
+    let section: ReleaseNotesSection
+
+    var body: some View {
+        #if os(tvOS)
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(chunks) { chunk in
+                VStack(alignment: .leading, spacing: 10) {
+                    if chunk.showsHeading {
+                        Text(verbatim: section.category.rawValue)
+                            .font(.headline)
+                    }
+                    ForEach(chunk.items, id: \.self) { item in
+                        ReleaseNotesBullet(item: item)
+                    }
+                }
+                // tvOS scrolls by moving focus. Bounded multi-note chunks create
+                // fewer stops than one-per-bullet while keeping every stop short
+                // enough for the scroll view to reveal completely.
+                .focusable()
+                .focusEffectDisabled()
+            }
+        }
+        #else
+        VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: section.category.rawValue)
+                .font(.headline)
+            ForEach(section.items, id: \.self) { item in
+                ReleaseNotesBullet(item: item)
+            }
+        }
+        #endif
+    }
+
+    #if os(tvOS)
+    private var chunks: [ReleaseNotesSectionChunk] {
+        stride(from: 0, to: section.items.count, by: 3).map { start in
+            let end = min(start + 3, section.items.count)
+            return ReleaseNotesSectionChunk(
+                id: "\(section.category.rawValue)-\(start)",
+                items: Array(section.items[start..<end]),
+                showsHeading: start == 0
+            )
+        }
+    }
+    #endif
+}
+
+private struct ReleaseNotesBullet: View {
+    let item: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(verbatim: "•")
+            Text(verbatim: item)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .plozzForeground(.secondary)
+    }
+}
+
+#if os(tvOS)
+private struct ReleaseNotesSectionChunk: Identifiable {
+    let id: String
+    let items: [String]
+    let showsHeading: Bool
+}
+#endif
 #endif

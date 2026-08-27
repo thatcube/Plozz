@@ -64,6 +64,40 @@ public enum NativeWatchlistAccounts {
     }
 }
 
+/// Scope keys for the universal-watchlist runtime.
+///
+/// The split is load-bearing:
+///
+/// - ``live(profileID:identityGeneration:accountsKey:)`` keys objects that capture
+///   credentials. A token override changing must rebuild them even when the person
+///   did not change.
+/// - ``persistent(profileID:accountsKey:plexIdentityKey:)`` keys last-known
+///   results on disk. It must survive token refreshes and process restarts, but
+///   must change when the actual Plex Home user or server set changes.
+///
+/// Mixing the two made cached library ownership useless. The process-local
+/// generation restarts at zero and bumps while credentials restore, so yesterday's
+/// persisted scope almost never equalled today's. The whole native view — including
+/// every `ownedSource` already proved — was dropped on every launch, and every card
+/// showed "+" until a fresh network read and library resolution finished.
+enum UniversalWatchlistScope {
+    static func live(
+        profileID: String,
+        identityGeneration: Int,
+        accountsKey: String
+    ) -> String {
+        "\(profileID)#\(identityGeneration)#\(accountsKey)"
+    }
+
+    static func persistent(
+        profileID: String,
+        accountsKey: String,
+        plexIdentityKey: String
+    ) -> String {
+        "\(profileID)#\(accountsKey)#\(plexIdentityKey)"
+    }
+}
+
 /// One memoized membership set, keyed by the revision that changes whenever the
 /// watchlist would. Main-actor isolated and process-wide because the hosts are
 /// per-shell singletons and a stale revision simply misses the cache.
@@ -1003,12 +1037,13 @@ public extension UniversalWatchlistHost {
     func makeUniversalWatchlistReconciler(
         profileID: String
     ) async throws {
-        // Keyed by profile AND Plex identity. The destinations capture the token
-        // of whoever the profile plays as, and switching "watching as" changes
-        // that token without changing the profile — so a profile-only key kept
-        // the previous identity's destination alive and went on reading the
-        // previous person's watchlist. `plexIdentityGeneration` bumps on every
-        // override change, which is exactly the event that invalidates them.
+        // The LIVE reconciler is keyed by profile AND Plex identity generation.
+        // The destinations capture the token of whoever the profile plays as,
+        // and switching "watching as" changes that token without changing the
+        // profile — so a profile-only key kept the previous identity's
+        // destination alive and went on reading the previous person's watchlist.
+        // `plexIdentityGeneration` bumps on every override change, which is
+        // exactly the event that invalidates those live objects.
         //
         // The accounts are in the key too, because switching a server off for a
         // profile changes neither the profile nor the Plex identity. Without
@@ -1017,14 +1052,43 @@ public extension UniversalWatchlistHost {
         // read-time view exists to stop.
         let accountsKey = nativeWatchlistAccounts
             .map(\.account.id).sorted().joined(separator: ",")
-        let scopeKey = "\(profileID)#\(plexWatchlistIdentityGeneration)#\(accountsKey)"
-        guard universalWatchlistProfileID != scopeKey else { return }
+        let reconcilerKey = UniversalWatchlistScope.live(
+            profileID: profileID,
+            identityGeneration: plexWatchlistIdentityGeneration,
+            accountsKey: accountsKey
+        )
+        guard universalWatchlistProfileID != reconcilerKey else { return }
         universalWatchlistIdentityUpdateTask?.cancel()
         universalWatchlistIdentityUpdateTask = nil
         await universalWatchlistRetryScheduler?.cancel()
         universalWatchlistRetryScheduler = nil
         var destinations: [any WatchlistDestination] = []
         let profile = profiles.activeProfile
+        // The PERSISTED native view must use a stable identity, never the
+        // generation above.
+        //
+        // A generation is a process-local counter: it starts at zero every
+        // launch and bumps while the saved Home-user credential is restored.
+        // Persisting it into `NativeWatchlistView.identityScope` meant a warm
+        // launch almost always compared yesterday's `#1` with today's `#0` (or
+        // vice versa), rejected the whole cached view, and forgot every
+        // `ownedSource` it had already proved. The row painted every title with
+        // a "+" until a fresh network read + library resolution finished 30–45
+        // seconds later — on every launch, for a watchlist the viewer had opened
+        // a hundred times.
+        //
+        // `plexPlaybackIdentityKey` is the existing canonical answer: account id
+        // + bound Home-user id (or "owner"), stable across token refreshes and
+        // different when the actual viewer changes. Accounts stay in the scope
+        // too, so switching a server off still invalidates what it contributed.
+        let plexIdentityKey = profile.plexPlaybackIdentityKey(
+            for: nativeWatchlistAccounts.map(\.account)
+        )
+        let cacheScopeKey = UniversalWatchlistScope.persistent(
+            profileID: profileID,
+            accountsKey: accountsKey,
+            plexIdentityKey: plexIdentityKey
+        )
         for resolved in nativeWatchlistAccounts {
             if let provider = resolved.provider as? PlexProvider,
                let destination = PlexWatchlistDestination(provider: provider) {
@@ -1069,7 +1133,10 @@ public extension UniversalWatchlistHost {
         } ?? InMemoryWatchlistMutationStateStore()
         let mutationStore = try DurableWatchlistMutationStore(store: stateStore)
         universalWatchlistMutationStore = mutationStore
-        loadUniversalWatchlistNativeView(profileID: profileID, scope: scopeKey)
+        loadUniversalWatchlistNativeView(
+            profileID: profileID,
+            scope: cacheScopeKey
+        )
         universalWatchlistReconciler = WatchlistReconciler(
             registry: WatchlistDestinationRegistry(destinations),
             mutationStore: mutationStore
@@ -1088,7 +1155,7 @@ public extension UniversalWatchlistHost {
             }
         )
         universalWatchlistRetryScheduler = scheduler
-        universalWatchlistProfileID = scopeKey
+        universalWatchlistProfileID = reconcilerKey
         await scheduler.reschedule()
     }
 

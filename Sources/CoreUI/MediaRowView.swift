@@ -143,8 +143,10 @@ public struct MediaRowView: View {
     /// traversal. Cleared when direction reverses because a long row can evict the
     /// outbound posters before the viewer comes back.
     @State private var prefetchedIDs: Set<String> = []
+    @State private var prefetchedPreviewIDs: Set<String> = []
     @State private var lastArtworkPrefetchIndex: Int?
     @State private var artworkPrefetchDirection = 1
+    @State private var artworkPrefetchTasks = ArtworkPrefetchTasks()
     /// Cards whose detail-hero backdrop has been warmed — see `prefetchHeroPreview`.
     @State private var prefetchedHeroIDs: Set<String> = []
     /// The card focus was on when this row's page was covered — see `isCovered`.
@@ -450,6 +452,7 @@ public struct MediaRowView: View {
                 .onDisappear {
                     pendingReport?.cancel()
                     pendingReport = nil
+                    artworkPrefetchTasks.cancelAll()
                 }
             }
         }
@@ -594,7 +597,9 @@ public struct MediaRowView: View {
             fallback: artworkPrefetchDirection
         )
         if direction != artworkPrefetchDirection {
+            artworkPrefetchTasks.cancelAll()
             prefetchedIDs.removeAll(keepingCapacity: true)
+            prefetchedPreviewIDs.removeAll(keepingCapacity: true)
         }
         artworkPrefetchDirection = direction
         lastArtworkPrefetchIndex = index
@@ -604,22 +609,32 @@ public struct MediaRowView: View {
             case .landscape, .episodeColumn: return .landscapeCard
             }
         }()
-        for i in MediaRowPrefetchWindow.indices(
+        let fullIndices = MediaRowPrefetchWindow.indices(
             from: index,
             direction: direction,
             count: items.count,
             lookahead: lookahead
-        ) {
+        )
+        for i in fullIndices {
             let candidate = items[i]
-            guard !prefetchedIDs.contains(candidate.id) else { continue }
-            prefetchedIDs.insert(candidate.id)
-            for url in MediaArtworkPrefetchPolicy.candidates(
+            let candidates = MediaArtworkPrefetchPolicy.candidates(
                 for: candidate,
                 style: artworkStyle,
                 spoilerSettings: spoilerSettings,
                 showsSeriesArtwork: showsSeriesArtwork
-            ).prefix(2) {
-                ArtworkImageCache.shared.prefetch(url, variant: variant)
+            )
+            // Queue a tiny nearest-first frame before this card's heavier full
+            // decode. One preview candidate is enough; if the primary is invalid,
+            // the full two-candidate ladder below still handles the fallback.
+            if presentation == .poster,
+               prefetchedPreviewIDs.insert(candidate.id).inserted,
+               let preview = candidates.first {
+                trackPrefetch(preview, variant: .posterPreview)
+            }
+            if prefetchedIDs.insert(candidate.id).inserted {
+                for url in candidates.prefix(2) {
+                    trackPrefetch(url, variant: variant)
+                }
             }
             // Series-artwork cards also carry a LOGO, resolved asynchronously and
             // through a different pipeline from the picture. Warming only the
@@ -640,7 +655,39 @@ public struct MediaRowView: View {
                 TextlessBackdropStore.shared.warm(for: candidate, variant: variant)
             }
         }
+        if presentation == .poster {
+            let near = Set(fullIndices)
+            for i in MediaRowPrefetchWindow.indices(
+                from: index,
+                direction: direction,
+                count: items.count,
+                lookahead: 16
+            ) where !near.contains(i) {
+                let candidate = items[i]
+                guard prefetchedPreviewIDs.insert(candidate.id).inserted,
+                      let preview = MediaArtworkPrefetchPolicy.candidates(
+                          for: candidate,
+                          style: artworkStyle,
+                          spoilerSettings: spoilerSettings,
+                          showsSeriesArtwork: showsSeriesArtwork
+                      ).first
+                else { continue }
+                trackPrefetch(preview, variant: .posterPreview)
+            }
+        }
         #endif
+    }
+
+    private func trackPrefetch(
+        _ url: URL,
+        variant: ArtworkImageVariant
+    ) {
+        if let task = ArtworkImageCache.shared.prefetch(
+            url,
+            variant: variant
+        ) {
+            artworkPrefetchTasks.track(task)
+        }
     }
 
     /// Scrolls to and focuses `initialFocusID`, or — when only `initialScrollID`
@@ -851,6 +898,23 @@ enum MediaRowPrefetchWindow {
         }
         let upper = min(count - 1, index + max(lookahead, 0))
         return Array(index...upper)
+    }
+}
+
+private final class ArtworkPrefetchTasks {
+    private var tasks: [Task<Void, Never>] = []
+
+    func track(_ task: Task<Void, Never>) {
+        tasks.append(task)
+    }
+
+    func cancelAll() {
+        tasks.forEach { $0.cancel() }
+        tasks.removeAll(keepingCapacity: true)
+    }
+
+    deinit {
+        tasks.forEach { $0.cancel() }
     }
 }
 

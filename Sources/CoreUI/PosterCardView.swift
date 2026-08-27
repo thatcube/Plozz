@@ -670,6 +670,8 @@ public struct PosterCardView: View {
             references: artworkReferences,
             maxAspectRatio: posterAspectGuard,
             variant: artworkVariant,
+            previewVariant:
+                style == .poster ? .posterPreview : nil,
             asyncFallbackURL: asyncArtworkFallback,
             // Required even when `artworkReferences` is empty: the async fallback
             // is title-specific, so its task/memo identity has to be too.

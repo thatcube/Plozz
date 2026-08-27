@@ -355,8 +355,18 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             variant: variant,
             stopAtPrimary: true
         ) ?? ArtworkSeedMemo.value(for: memoKey).map { (image: $0, index: references.startIndex) }
+        let previewReferences: [ArtworkReference]
+        if let first = references.first, case .remote = first {
+            previewReferences = [first]
+        } else {
+            previewReferences = []
+        }
         let seededPreview = seeded == nil ? previewVariant.flatMap {
-            Self.cachedUsableImage(references: references, maxAspectRatio: maxAspectRatio, variant: $0)
+            Self.cachedUsableImage(
+                references: previewReferences,
+                maxAspectRatio: maxAspectRatio,
+                variant: $0
+            )
         } : nil
         _image = State(initialValue: (seeded ?? seededPreview)?.image)
         _resolved = State(initialValue: seeded != nil || seededPreview != nil)
@@ -461,18 +471,18 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // Progressive first pass. Deliberately before the full loop below, and
         // deliberately only when there is nothing on screen: an image already up is
         // never replaced by a cheaper one, so this can only ever fill a gap.
-        if image == nil, let previewVariant {
-            for reference in references {
-                guard let loaded = await ArtworkImageCache.shared.image(
-                    for: reference, variant: previewVariant
-                ) else { continue }
-                guard Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil else { continue }
-                guard !Task.isCancelled else { return }
-                image = loaded
-                resolved = true
-                isPreviewQuality = true
-                break
-            }
+        if image == nil, let previewVariant,
+           let first = references.first,
+           case .remote = first,
+           let loaded = await ArtworkImageCache.shared.image(
+               for: first,
+               variant: previewVariant
+           ),
+           Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil {
+            guard !Task.isCancelled else { return }
+            image = loaded
+            resolved = true
+            isPreviewQuality = true
         }
         // Attempt the network passes more than once. A `nil` from the cache means
         // only "no image came back" — it does NOT distinguish "this title has no
@@ -497,16 +507,35 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             }
             // 2) Nothing usable from the provider — try the async fallback (TMDb).
             if let asyncFallbackURL,
-               let url = await asyncFallbackURL(),
-               let loaded = await ArtworkImageCache.shared.image(for: url, variant: variant) {
-                image = loaded
-                resolved = true
-                isPreviewQuality = false
-                loadedKey = key
-                ArtworkSeedMemo.store(loaded, for: key)
-                pinnedIdentity = pinIdentity
-                onResolveReference?(nil)
-                return
+               let url = await asyncFallbackURL() {
+                // Posterless cards have no direct `references`, so the progressive
+                // pass above has nothing to inspect. Once the fallback URL itself
+                // is known, give it the same cheap first frame as an ordinary
+                // poster instead of waiting blank for the full 960px decode.
+                if image == nil, let previewVariant,
+                   let preview = await ArtworkImageCache.shared.image(
+                       for: url,
+                       variant: previewVariant
+                   ) {
+                    guard !Task.isCancelled else { return }
+                    image = preview
+                    resolved = true
+                    isPreviewQuality = true
+                    pinnedIdentity = pinIdentity
+                }
+                if let loaded = await ArtworkImageCache.shared.image(
+                    for: url,
+                    variant: variant
+                ) {
+                    image = loaded
+                    resolved = true
+                    isPreviewQuality = false
+                    loadedKey = key
+                    ArtworkSeedMemo.store(loaded, for: key)
+                    pinnedIdentity = pinIdentity
+                    onResolveReference?(nil)
+                    return
+                }
             }
             // Cancelled (the cell scrolled away, or the inputs changed): leave
             // `loadedKey` unset so the next run re-resolves from scratch instead

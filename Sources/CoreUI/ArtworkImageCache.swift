@@ -490,19 +490,33 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
     /// fire-and-forget prefetch used by rails to decode upcoming cards ahead of
     /// scroll. Bounded by the shared background-warm limiter so a prewarm/scroll
     /// burst can't flood the artwork connection pool and starve foreground art.
-    public func prefetch(_ url: URL, variant: ArtworkImageVariant = .original) {
-        guard cachedImage(for: url, variant: variant) == nil else { return }
-        Task.detached(priority: .utility) {
+    @discardableResult
+    public func prefetch(
+        _ url: URL,
+        variant: ArtworkImageVariant = .original
+    ) -> Task<Void, Never>? {
+        guard cachedImage(for: url, variant: variant) == nil else {
+            return nil
+        }
+        return Task.detached(priority: .utility) {
             await ArtworkSession.warmLimiter.run {
+                guard !Task.isCancelled else { return }
                 _ = await ArtworkImageCache.shared.image(for: url, variant: variant, background: true)
             }
         }
     }
 
-    public func prefetch(_ reference: ArtworkReference, variant: ArtworkImageVariant = .original) {
-        guard cachedImage(for: reference, variant: variant) == nil else { return }
-        Task.detached(priority: .utility) {
+    @discardableResult
+    public func prefetch(
+        _ reference: ArtworkReference,
+        variant: ArtworkImageVariant = .original
+    ) -> Task<Void, Never>? {
+        guard cachedImage(for: reference, variant: variant) == nil else {
+            return nil
+        }
+        return Task.detached(priority: .utility) {
             await ArtworkSession.warmLimiter.run {
+                guard !Task.isCancelled else { return }
                 _ = await ArtworkImageCache.shared.image(for: reference, variant: variant, background: true)
             }
         }

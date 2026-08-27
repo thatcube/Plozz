@@ -27,6 +27,10 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
     /// Native source size — no downsampling. Used when a consumer genuinely needs the
     /// full-resolution image.
     case original
+    /// Fast progressive frame for poster rails. Small enough to decode well ahead
+    /// of rapid focus movement on older Apple TVs; replaced by `posterCard` once
+    /// the full card image is ready.
+    case posterPreview
     /// Vertical poster wall cards. ~420pt at 2x plus focus-lift headroom.
     case posterCard
     /// Wide landscape / episode-still cards. ~480pt at 2x plus focus-lift headroom.
@@ -62,6 +66,7 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
         case .musicThumbnail: return 256
         case .serviceLogo: return 192
         case .personHeadshot: return 400
+        case .posterPreview: return 320
         case .posterCard: return 960
         case .landscapeCard: return 1_200
         case .heroPreview: return 768

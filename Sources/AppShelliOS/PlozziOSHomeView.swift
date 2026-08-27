@@ -193,6 +193,16 @@ struct PlozziOSHomeView: View {
         ) { _ in
             viewModel.scheduleDurableWatchlistRefresh()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistCacheDidLoad
+            )
+        ) { _ in
+            // The cache is already in memory, and nobody is waiting for a press
+            // acknowledgement. Fold last-known ownership immediately rather than
+            // waiting for the interaction debounce used above.
+            viewModel.refreshDurableWatchlist()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             viewModel.scheduleReenrich()
         }

@@ -70,6 +70,22 @@ public extension Notification.Name {
     static let universalWatchlistDidChange =
         Notification.Name("PlozzUniversalWatchlistDidChange")
 
+    /// Posted after the last-known native watchlist has been restored from disk.
+    ///
+    /// Separate from ``universalWatchlistDidChange`` because that notification is
+    /// intentionally debounced by Home: it normally follows a user write, and an
+    /// immediate full-row identity resolve delayed the frame that acknowledged the
+    /// press by six or seven seconds. A cache restore is the opposite situation —
+    /// nobody is interacting, the data is already in memory, and the whole point
+    /// is to paint last-known ownership before the first network refresh.
+    ///
+    /// Home answers this one immediately. Without it, the cache loaded correctly
+    /// but sat unpublished until a 30–45 second destination refresh happened to
+    /// post the ordinary change notification; every owned card showed "+" in the
+    /// meantime.
+    static let universalWatchlistCacheDidLoad =
+        Notification.Name("PlozzUniversalWatchlistCacheDidLoad")
+
     /// Posted when a watchlist press is accepted, before the durable write.
     ///
     /// The cheap counterpart to `universalWatchlistDidChange`, and separate from

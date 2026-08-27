@@ -826,6 +826,7 @@ public extension UniversalWatchlistHost {
     /// closed would come back on the next launch, which is the exact bug the
     /// read-time view exists to fix.
     func loadUniversalWatchlistNativeView(profileID: String, scope: String) {
+        let previous = universalWatchlistNativeView
         let store: (any NativeWatchlistViewStoring)?
         if let directory = universalWatchlistStorageDirectory {
             store = try? AtomicNativeWatchlistViewStore(
@@ -844,6 +845,53 @@ public extension UniversalWatchlistHost {
         var view = ((try? store?.load()) ?? .empty).scoped(to: scope)
         view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
         universalWatchlistNativeView = view
+        if FanoutDiagnostics.isEnabled {
+            let entries = view.bucketsByDestinationID.values
+                .reduce(0) { $0 + $1.entries.count }
+            let owned = view.bucketsByDestinationID.values
+                .reduce(0) { count, bucket in
+                    count + bucket.entries.lazy
+                        .filter { $0.ownedSource != nil }.count
+                }
+            FanoutDiagnostics.emit(
+                "watchlist.cache loaded=\(entries) owned=\(owned) "
+                + "destinations=\(view.bucketsByDestinationID.count) "
+                + "changed=\(view != previous)"
+            )
+        }
+
+        // Tell Home about a REAL cached answer immediately.
+        //
+        // `HomeViewModel` can paint its own content snapshot before this
+        // preparation task reaches the native-view store. Its initializer then
+        // asks the still-empty watchlist runtime to re-resolve that snapshot and
+        // turns every title into "unknown" — a "+" on every card. The cache loads
+        // milliseconds later with the `ownedSource` answers from last session,
+        // but until now nobody announced that fact. Home only heard the later
+        // destination refresh, 30–45 seconds away.
+        //
+        // Distinct from the ordinary watchlist notification because Home debounces
+        // that one to keep a user press responsive. This is startup state already
+        // in memory; it should be folded immediately.
+        if view != previous, !view.bucketsByDestinationID.isEmpty {
+            UniversalWatchlistMembershipCache.shared.invalidate()
+            // The Home model can be constructed before its view has installed
+            // the notification observer. Yield one main-actor turn: if Home was
+            // already mounted this changes nothing; if it was still being built,
+            // the subscription exists by the time this fires. Guard the profile
+            // and value so a switch during the yield cannot publish somebody
+            // else's cache.
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self,
+                      self.profiles.activeProfileID == profileID,
+                      self.universalWatchlistNativeView == view else { return }
+                NotificationCenter.default.post(
+                    name: .universalWatchlistCacheDidLoad,
+                    object: nil
+                )
+            }
+        }
     }
 
     func universalWatchlistIdentityDidUpdate() {

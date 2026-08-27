@@ -622,6 +622,17 @@ public struct HomeView: View {
         ) { _ in
             viewModel.scheduleDurableWatchlistRefresh()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistCacheDidLoad
+            )
+        ) { _ in
+            // Startup cache, not a user press. It is already in memory, and
+            // painting last-known ownership before the first network refresh is
+            // the entire reason it exists — do not put it through the 350ms
+            // interaction debounce above.
+            viewModel.refreshDurableWatchlist()
+        }
         // New content that lands while the viewer sits on Home appears without a
         // navigation round trip. Zero-size and render-isolated — see the type.
         .onMoveCommand { _ in lastInteractionAt = .now }

@@ -232,30 +232,12 @@ public final class HomeViewModel {
         // snapshot is used; anything else leaves
         // `state == .idle` so a genuine first launch shows the normal loading state.
         if var cached = contentStore.load() {
-            if let mediaItemActionHandler,
-               mediaItemActionHandler.isDurableWatchlistPresentationReady() {
-                let resolved = mediaItemActionHandler.durableWatchlistItems(
-                    from: cached.watchlist + cached.latest
-                )
-                if !resolved.isEmpty || cached.watchlist.isEmpty {
-                    cached.watchlist = resolved
-                }
-            } else {
-                // Last session's Home snapshot is a complete, resolved view. The
-                // watchlist runtime opens its own persisted native view a little
-                // later in startup; until then it contains only explicit Plozz
-                // intents. Re-resolving now downgraded 181 cached titles to 78
-                // explicit ones and erased every last-known `ownedSource`, which
-                // put "+" on the whole row before the runtime cache restored the
-                // same answers seconds later.
-                //
-                // Trust the snapshot until the cache-loaded notification asks us
-                // to fold the now-authoritative runtime in. A local removal may
-                // therefore survive for those few milliseconds after a crash
-                // that interrupted the snapshot save — a safe stale answer, and
-                // strictly better than discarding every native title on every
-                // ordinary launch.
-            }
+            cached.watchlist = Self.resolvedWatchlist(
+                candidates: cached.watchlist + cached.latest,
+                fetched: cached.watchlist,
+                lastKnown: cached.watchlist,
+                handler: mediaItemActionHandler
+            )
             // With NO servers to watch, every SERVER-derived row in the snapshot
             // belongs to a library this profile no longer sees. Repainting them
             // is what made turning every server off appear to do nothing —
@@ -385,6 +367,7 @@ public final class HomeViewModel {
             }
         }
         PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state)) silent=\(!showLoadingState)")
+        let onScreenWatchlist = state.value?.watchlist ?? []
         if showLoadingState { state = .loading }
 
         let aggregator = self.aggregator
@@ -437,10 +420,13 @@ public final class HomeViewModel {
             )
             noteUnconfirmed(reconciled: reconciledCW, fetched: merged.continueWatching)
             Self.logOverlay(fetched: merged.continueWatching, reconciled: reconciledCW, pending: pending)
-            let durableWatchlist = mediaItemActionHandler?
-                .durableWatchlistItems(
-                    from: reconciledCW + merged.latest + merged.watchlist
-                ) ?? merged.watchlist
+            let durableWatchlist = Self.resolvedWatchlist(
+                candidates:
+                    reconciledCW + merged.latest + merged.watchlist,
+                fetched: merged.watchlist,
+                lastKnown: onScreenWatchlist,
+                handler: mediaItemActionHandler
+            )
             content = Content(
                 continueWatching: reconciledCW,
                 latest: merged.latest,
@@ -469,10 +455,13 @@ public final class HomeViewModel {
             )
             noteUnconfirmed(reconciled: reconciledCW, fetched: unmerged.continueWatching)
             Self.logOverlay(fetched: unmerged.continueWatching, reconciled: reconciledCW, pending: pending)
-            let durableWatchlist = mediaItemActionHandler?
-                .durableWatchlistItems(
-                    from: reconciledCW + unmerged.latest + unmerged.watchlist
-                ) ?? unmerged.watchlist
+            let durableWatchlist = Self.resolvedWatchlist(
+                candidates:
+                    reconciledCW + unmerged.latest + unmerged.watchlist,
+                fetched: unmerged.watchlist,
+                lastKnown: onScreenWatchlist,
+                handler: mediaItemActionHandler
+            )
             content = Content(
                 continueWatching: reconciledCW,
                 latest: unmerged.latest,
@@ -737,11 +726,42 @@ public final class HomeViewModel {
         candidates += content.librarySections.flatMap {
             $0.sections.flatMap(\.items)
         }
-        content.watchlist = mediaItemActionHandler.durableWatchlistItems(
-            from: candidates
+
+        content.watchlist = Self.resolvedWatchlist(
+            candidates: candidates,
+            fetched: content.watchlist,
+            lastKnown: content.watchlist,
+            handler: mediaItemActionHandler
         )
         state = content.isEmpty ? .empty : .loaded(content)
         if !content.isEmpty { scheduleDurableWatchlistSave(content) }
+    }
+
+    /// The one policy for folding the durable watchlist into Home.
+    ///
+    /// Before the native view has loaded, the runtime contains only explicit
+    /// Plozz intents. It is not an authoritative partial result: resolving
+    /// against it downgraded 181 last-known titles to 78 unknown ones in both the
+    /// constructor AND the first background aggregation, which is why gating the
+    /// constructor alone still painted "+" on every launch.
+    ///
+    /// A saved Home row is the complete last-known presentation and wins during
+    /// that startup window. On a genuine first run there is no saved row, so the
+    /// freshly fetched provider row is the honest thing to show until native
+    /// resolution is ready.
+    static func resolvedWatchlist(
+        candidates: [MediaItem],
+        fetched: [MediaItem],
+        lastKnown: [MediaItem],
+        handler: (any MediaItemActionHandling)?
+    ) -> [MediaItem] {
+        guard let handler else { return fetched }
+        guard handler.isDurableWatchlistPresentationReady() else {
+            return lastKnown.isEmpty ? fetched : lastKnown
+        }
+        let resolved = handler.durableWatchlistItems(from: candidates)
+        if resolved.isEmpty, !lastKnown.isEmpty { return lastKnown }
+        return resolved
     }
 
     /// Persists Home's snapshot after a watchlist change, off the press.

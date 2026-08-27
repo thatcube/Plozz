@@ -132,6 +132,47 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         }
         XCTAssertEqual(refreshed.watchlist.map(\.id), ["explicit"])
     }
+
+    /// The first provider aggregation starts before native-cache restoration too.
+    /// Gating only `HomeViewModel.init` fixed the first frame and then this pass
+    /// immediately replaced it with the same explicit-only runtime answer.
+    func testBackgroundAggregationKeepsLastKnownRowUntilCacheIsReady() {
+        let cached = MediaItem(
+            id: "owned",
+            title: "Last-known owned copy",
+            kind: .movie,
+            locallyValidatedPlayableSource: true
+        )
+        let freshlyFetched = MediaItem(
+            id: "discover",
+            title: "Fresh Discover row",
+            kind: .movie,
+            availability: .unknown,
+            locallyValidatedPlayableSource: false
+        )
+        let handler = UniversalWatchlistHomeHandler(
+            items: [freshlyFetched],
+            ready: false
+        )
+
+        let beforeCache = HomeViewModel.resolvedWatchlist(
+            candidates: [freshlyFetched],
+            fetched: [freshlyFetched],
+            lastKnown: [cached],
+            handler: handler
+        )
+        XCTAssertEqual(beforeCache.map(\.id), ["owned"])
+        XCTAssertTrue(beforeCache[0].locallyValidatedPlayableSource)
+
+        handler.ready = true
+        let afterCache = HomeViewModel.resolvedWatchlist(
+            candidates: [cached, freshlyFetched],
+            fetched: [freshlyFetched],
+            lastKnown: [cached],
+            handler: handler
+        )
+        XCTAssertEqual(afterCache.map(\.id), ["discover"])
+    }
 }
 
 @MainActor

@@ -336,9 +336,9 @@ public final class WatchlistModel {
                     line += "\n      art=none"
                 }
                 line += "\n      item=\(item.id)"
-                    + " validated=\(item.locallyValidatedPlayableSource)"
-                    + " availability=\(String(describing: item.availability))"
-                    + " alias=\(entry.aliasID)"
+                line += " validated=\(item.locallyValidatedPlayableSource)"
+                line += " availability=\(String(describing: item.availability))"
+                line += " alias=\(entry.aliasID)"
             }
             ContinueWatchingDiagnostics.emit(line)
         }

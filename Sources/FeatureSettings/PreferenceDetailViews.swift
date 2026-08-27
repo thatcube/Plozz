@@ -78,9 +78,11 @@ struct AppearanceDetailView: View {
                     title: "Navigation",
                     description: "A slim left rail with your libraries, horizontal tabs across the top, or the system sidebar.",
                 ) {
-                    CompactNavigationPicker(selection: $navigation.style)
-                }
-        ] + navigationLibraryRows + [
+                    NavigationAppearanceDetail(
+                        navigation: navigation,
+                        librariesScope: librariesScope
+                    )
+                },
                 SettingsSplitRow(
                     id: "music-player",
                     title: "Music Player",
@@ -93,22 +95,6 @@ struct AppearanceDetailView: View {
                 }
         ] + CircadianRowsBuilder(model: nightShift).rows
             + SpoilerRowsBuilder(spoilers: spoilers).rows
-    }
-
-    /// Library arrangement is shared by both leading-edge navigation styles.
-    /// Top bar has no library destinations, so showing its editor there would edit
-    /// invisible state.
-    private var navigationLibraryRows: [SettingsSplitRow] {
-        guard navigation.style != .tabBar else { return [] }
-        return [
-            SettingsSplitRow(
-                id: "navigation-libraries",
-                title: "Navigation Libraries",
-                description: "Choose which libraries appear in the navigation, and the order they appear in."
-            ) {
-                NavigationLibrariesDetailView(scope: librariesScope)
-            }
-        ]
     }
 
     /// Theme cards plus the transparency (liquid-glass) control folded in beneath
@@ -127,6 +113,31 @@ struct AppearanceDetailView: View {
                     title: { $0.displayName },
                     detail: { $0.detail }
                 )
+            }
+        }
+    }
+
+    /// Everything controlled by the single Navigation master row.
+    ///
+    /// Style and its library arrangement belong together: changing to either
+    /// leading-edge style reveals the shared ordered/hidden list directly beneath
+    /// the picker. Top bar has no library destinations, so that section disappears.
+    private struct NavigationAppearanceDetail: View {
+        @Bindable var navigation: NavigationStyleSettingsModel
+        let librariesScope: ProfileLibrariesScope
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                CompactNavigationPicker(selection: $navigation.style)
+
+                if navigation.style != .tabBar {
+                    SettingsDetailGroup(
+                        title: "Navigation Libraries",
+                        description: "Choose which libraries appear in the navigation, and the order they appear in."
+                    ) {
+                        NavigationLibrariesDetailView(scope: librariesScope)
+                    }
+                }
             }
         }
     }

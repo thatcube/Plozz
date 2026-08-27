@@ -113,6 +113,31 @@ enum LegacyAnimeIdentityRepair {
             return base ?? series
         }
     }
+
+    static func expectedYear(
+        strongEvidence: [MediaAliasStrongEvidence],
+        kind: MediaItemKind
+    ) -> Int? {
+        func value(_ namespace: ProviderIDNamespace) -> String? {
+            strongEvidence.first { $0.namespace == namespace }?.value
+        }
+        let base = expectedYear(
+            imdb: value(.imdb),
+            tmdb: value(.tmdb),
+            tvdb: value(.tvdb)
+        )
+        let series = expectedYear(
+            imdb: value(.seriesImdb),
+            tmdb: value(.seriesTmdb),
+            tvdb: value(.seriesTvdb)
+        )
+        switch kind {
+        case .episode, .season:
+            return series ?? base
+        default:
+            return base ?? series
+        }
+    }
 }
 
 /// Durable identity only. Consumer state such as watchlist membership, ratings,
@@ -233,14 +258,16 @@ public struct MediaAliasRecord: Codable, Hashable, Identifiable, Sendable {
     /// not a blacklist of the anime ids themselves — those ids remain valid on
     /// the works they actually identify.
     private mutating func repairKnownLegacyAnimeContamination() {
-        var providerIDs: [String: String] = [:]
-        for evidence in strongEvidence
-        where providerIDs[evidence.namespace.canonicalKey] == nil {
-            providerIDs[evidence.namespace.canonicalKey] = evidence.value
-        }
-        guard LegacyAnimeIdentityRepair.containsAnimeIDs(in: providerIDs),
+        // This runs from canonical sync encoding too. Almost every record is
+        // already clean, so reject it using the typed namespace directly rather
+        // than rebuilding/normalizing a provider-id dictionary six times. That
+        // repeated string filtering showed up as a 2.8–3.6 second main-thread
+        // Sentry hang while a large alias ledger was captured.
+        guard strongEvidence.contains(where: {
+            LegacyAnimeIdentityRepair.animeNamespaces.contains($0.namespace)
+        }),
               let year = LegacyAnimeIdentityRepair.expectedYear(
-            providerIDs: providerIDs,
+            strongEvidence: strongEvidence,
             kind: kind
         ) else { return }
         strongEvidence.removeAll {

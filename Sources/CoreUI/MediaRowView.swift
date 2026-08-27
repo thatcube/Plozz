@@ -139,9 +139,12 @@ public struct MediaRowView: View {
     /// Whether the user has actually moved around this row since its target was
     /// last re-pointed. Latches the entry gate off — see `cardIsDisabled`.
     @State private var hasBrowsedSinceTargetChange = false
-    /// Items whose artwork has already been queued for prefetch, so each card's
-    /// `onAppear` only ever schedules its forward window once.
+    /// Items whose artwork has already been queued during the current directional
+    /// traversal. Cleared when direction reverses because a long row can evict the
+    /// outbound posters before the viewer comes back.
     @State private var prefetchedIDs: Set<String> = []
+    @State private var lastArtworkPrefetchIndex: Int?
+    @State private var artworkPrefetchDirection = 1
     /// Cards whose detail-hero backdrop has been warmed — see `prefetchHeroPreview`.
     @State private var prefetchedHeroIDs: Set<String> = []
     /// The card focus was on when this row's page was covered — see `isCovered`.
@@ -538,7 +541,7 @@ public struct MediaRowView: View {
             .id(item.id)
             .onAppear {
                 visibleIDs.insert(item.id)
-                prefetchArtwork(ahead: item)
+                prefetchArtwork(around: item)
             }
             .onDisappear { visibleIDs.remove(item.id) }
         if tracksFocus {
@@ -575,25 +578,38 @@ public struct MediaRowView: View {
         presentation == .poster ? .poster : .landscape
     }
 
-    /// Warms the decoded-image cache for a forward window of cards starting at the
-    /// one that just appeared, so artwork is already resolved by the time each
-    /// scrolls into view — eliminating the gray placeholder flash during a rapid
-    /// RIGHT hold. Each card schedules its window at most once; the cache itself
-    /// skips URLs already resident or in flight, so this stays cheap. Decoding runs
-    /// off the main thread, so it never stutters the scroll.
-    private func prefetchArtwork(ahead item: MediaItem) {
+    /// Warms the decoded-image cache in the direction the row is moving.
+    ///
+    /// A 181-poster Watchlist is much larger than the 96 MB decoded cache. By the
+    /// far right, early posters have correctly been evicted. The old prefetcher
+    /// only looked toward larger indexes and remembered every card forever, so the
+    /// return trip did no work until an evicted card was already visible.
+    private func prefetchArtwork(around item: MediaItem) {
         #if canImport(UIKit)
         guard let index = itemIndexByID[item.id] else { return }
         let lookahead = 8
-        let upper = min(index + lookahead, items.count - 1)
-        guard index <= upper else { return }
+        let direction = MediaRowPrefetchWindow.direction(
+            from: lastArtworkPrefetchIndex,
+            to: index,
+            fallback: artworkPrefetchDirection
+        )
+        if direction != artworkPrefetchDirection {
+            prefetchedIDs.removeAll(keepingCapacity: true)
+        }
+        artworkPrefetchDirection = direction
+        lastArtworkPrefetchIndex = index
         let variant: ArtworkImageVariant = {
             switch presentation {
             case .poster: return .posterCard
             case .landscape, .episodeColumn: return .landscapeCard
             }
         }()
-        for i in index...upper {
+        for i in MediaRowPrefetchWindow.indices(
+            from: index,
+            direction: direction,
+            count: items.count,
+            lookahead: lookahead
+        ) {
             let candidate = items[i]
             guard !prefetchedIDs.contains(candidate.id) else { continue }
             prefetchedIDs.insert(candidate.id)
@@ -807,6 +823,34 @@ public struct MediaRowView: View {
         } else {
             proxy.scrollTo(target, anchor: anchor)
         }
+    }
+}
+
+enum MediaRowPrefetchWindow {
+    static func direction(
+        from previousIndex: Int?,
+        to index: Int,
+        fallback: Int
+    ) -> Int {
+        guard let previousIndex, previousIndex != index else {
+            return fallback < 0 ? -1 : 1
+        }
+        return index < previousIndex ? -1 : 1
+    }
+
+    static func indices(
+        from index: Int,
+        direction: Int,
+        count: Int,
+        lookahead: Int
+    ) -> [Int] {
+        guard count > 0, index >= 0, index < count else { return [] }
+        if direction < 0 {
+            let lower = max(0, index - max(lookahead, 0))
+            return Array(stride(from: index, through: lower, by: -1))
+        }
+        let upper = min(count - 1, index + max(lookahead, 0))
+        return Array(index...upper)
     }
 }
 

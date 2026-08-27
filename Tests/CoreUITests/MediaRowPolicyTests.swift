@@ -5,6 +5,59 @@ import CoreModels
 @testable import CoreUI
 
 final class MediaRowPolicyTests: XCTestCase {
+    func testPrefetchWindowFollowsRightwardTraversal() {
+        XCTAssertEqual(
+            MediaRowPrefetchWindow.indices(
+                from: 5,
+                direction: 1,
+                count: 20,
+                lookahead: 3
+            ),
+            [5, 6, 7, 8]
+        )
+    }
+
+    func testPrefetchWindowReversesForReturnTraversal() {
+        XCTAssertEqual(
+            MediaRowPrefetchWindow.direction(
+                from: 12,
+                to: 11,
+                fallback: 1
+            ),
+            -1
+        )
+        XCTAssertEqual(
+            MediaRowPrefetchWindow.indices(
+                from: 11,
+                direction: -1,
+                count: 20,
+                lookahead: 3
+            ),
+            [11, 10, 9, 8]
+        )
+    }
+
+    func testPrefetchWindowClampsAtRowEdges() {
+        XCTAssertEqual(
+            MediaRowPrefetchWindow.indices(
+                from: 1,
+                direction: -1,
+                count: 20,
+                lookahead: 8
+            ),
+            [1, 0]
+        )
+        XCTAssertEqual(
+            MediaRowPrefetchWindow.indices(
+                from: 18,
+                direction: 1,
+                count: 20,
+                lookahead: 8
+            ),
+            [18, 19]
+        )
+    }
+
     func testEntryCallbackObservesFocusWithoutCreatingAnEntryGate() {
         XCTAssertTrue(MediaRowFocusPolicy.observesFocus(
             initialFocusID: nil,

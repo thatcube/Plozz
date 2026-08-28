@@ -5,18 +5,24 @@ import Foundation
 /// A **per-profile** display preference (each profile keeps its own choice) like
 /// `AppTheme` / `CardStyle`: persisted via `NavigationStyleSettingsStore`
 /// (namespace-scoped) and rebuilt on profile switch in
-/// `AppState.rebuildSettingsModels()`. `MainTabView` reads the model to pick a
-/// `TabViewStyle` and the Settings ▸ Appearance screen writes it. Foundation-only
+/// `AppState.rebuildSettingsModels()`. `MainTabView` reads the model to pick the
+/// shell chrome and the Settings ▸ Appearance screen writes it. Foundation-only
 /// so it can live in `CoreModels` and be edited without importing SwiftUI.
 ///
-/// Both looks are native tvOS 18 `TabView` presentations over the *same* tabs —
-/// the individual pages are byte-for-byte identical regardless of choice, so
-/// switching only swaps the surrounding chrome.
+/// `.tabBar` and `.sidebar` are native tvOS 18 `TabView` presentations. The top
+/// bar keeps the compact fixed destinations; the sidebar also exposes the active
+/// profile and configured library destinations. `.rail` is Plozz's own chrome: a
+/// collapsed icon rail that expands over stationary content, lists the viewer's
+/// libraries as first-class destinations, and disappears entirely on a detail page.
 public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendable {
-    // Case order drives the segmented picker order in Settings, so the default
-    // sidebar option is listed first (left-most).
+    // Case order drives the picker order in Settings, so the default option is
+    // listed first (left-most).
+    /// Plozz's custom collapsible left rail. Collapsed to icons until focus enters
+    /// it, then expands over stationary content; libraries are top-level destinations and
+    /// Settings is pinned to the bottom. Default.
+    case rail
     /// The native collapsible left sidebar (`.sidebarAdaptable`): tabs collapse
-    /// to a rail and expand on left-focus, matching the system TV app. Default.
+    /// to a rail and expand on left-focus, matching the system TV app.
     case sidebar
     /// The classic top tab bar (`.tabBarOnly`): tabs sit in a pill across the
     /// top of every page. This is the app's historical look.
@@ -39,6 +45,12 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
                 defaultValue: "Sidebar",
                 comment: "Navigation layout option in Settings > Appearance."
             )
+        case .rail:
+            return LocalizedStringResource(
+                "navigationStyle.rail",
+                defaultValue: "Pinned Sidebar",
+                comment: "Navigation layout option in Settings > Appearance."
+            )
         }
     }
 
@@ -47,6 +59,7 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
         switch self {
         case .tabBar: return "rectangle.topthird.inset.filled"
         case .sidebar: return "sidebar.left"
+        case .rail: return "sidebar.leading"
         }
     }
 
@@ -63,15 +76,31 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
         case .sidebar:
             return LocalizedStringResource(
                 "navigationStyle.detail.sidebar",
-                defaultValue: "A collapsible left sidebar that expands on focus.",
+                defaultValue: "One button opens the system sidebar.",
+                comment: "One-line explanation shown under the navigation-style picker."
+            )
+        case .rail:
+            return LocalizedStringResource(
+                "navigationStyle.detail.rail",
+                defaultValue: "A pinned icon list expands to show labels and libraries.",
                 comment: "One-line explanation shown under the navigation-style picker."
             )
         }
     }
 
-    /// Default to the more immersive sidebar; the top bar remains available as an
-    /// opt-in in Settings ▸ Appearance ▸ Navigation.
-    public static let `default`: NavigationStyle = .sidebar
+    /// Whether this chrome sits along the **leading edge** of the screen, so views
+    /// that reach the left edge (the Home hero carousel) hand a Left press to the
+    /// chrome instead of wrapping.
+    public var hasLeadingEdgeChrome: Bool {
+        switch self {
+        case .sidebar, .rail: return true
+        case .tabBar: return false
+        }
+    }
+
+    /// Default to Plozz's own rail; the two native presentations remain available
+    /// as opt-ins in Settings ▸ Appearance ▸ Navigation.
+    public static let `default`: NavigationStyle = .rail
 
     /// Persistence key base shared by `MainTabView` (reads the model to choose the
     /// tab style) and Settings (writes it). Per-profile: the default profile reuses

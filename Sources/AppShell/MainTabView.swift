@@ -72,7 +72,23 @@ struct MainTabView: View {
     /// Whether `tab` is the one on screen. A plain `Bool` rather than a
     /// tab-gated `Binding`, and that difference is the point — see below.
     private func isActiveTab(_ tab: MainTab) -> Bool {
-        selectedTabRaw == tab.rawValue
+        // Custom rail and native sidebar both select `NavigationRailDestination`.
+        // Under either one, "is this the visible stack" is a question about that
+        // selection rather than the fixed top-bar TabView. Getting this wrong lets
+        // a hidden stack consume the player's pending person/title hand-off.
+        guard navigationStyle == .tabBar else {
+            switch tab {
+            case .home:
+                switch activeLibraryNavigationDestination {
+                case .home, .library, .allLibraries: return true
+                case .search, .music, .settings: return false
+                }
+            case .search: return activeLibraryNavigationDestination == .search
+            case .music: return activeLibraryNavigationDestination == .music
+            case .settings: return activeLibraryNavigationDestination == .settings
+            }
+        }
+        return selectedTabRaw == tab.rawValue
     }
 
     private enum MainTab: String {
@@ -111,6 +127,15 @@ struct MainTabView: View {
         )
     }
 
+    /// Native sidebar includes one action-like route (`profile`) beside normal
+    /// destinations. Selecting profile raises RootView's existing top-level
+    /// ProfileSelectionView; the binding deliberately keeps the current content
+    /// destination selected so Cancel returns to it.
+    private enum NativeSidebarDestination: Hashable {
+        case profile
+        case content(NavigationRailDestination)
+    }
+
     /// Performs the capture rig's tab requests. See ``ScreenshotDirector``.
     private struct ScreenshotTabRouter: View {
         let director: ScreenshotDirector
@@ -125,6 +150,34 @@ struct MainTabView: View {
                     director.tab = nil
                     onSelect(tab)
                     director.finish(.ok)
+                }
+        }
+    }
+
+    /// Makes the visible Home-backed stack the single owner of Top Shelf and
+    /// screenshot navigation requests.
+    ///
+    /// Native sidebar can keep one HomeTab alive per visited library. Letting all
+    /// of them observe shared request objects creates a race; active-gating alone
+    /// leaves requests latched while Search/Music/Settings is selected. This leaf
+    /// first routes the shell to Home. The one HomeTab that becomes active then
+    /// consumes the request, while hidden tabs remain inert.
+    private struct HomeRequestDestinationRouter: View {
+        let pendingPlay: PendingPlayRequest
+        let screenshotDirector: ScreenshotDirector
+        let onRequireHome: () -> Void
+
+        var body: some View {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+                .task(id: pendingPlay.itemID) {
+                    guard pendingPlay.itemID != nil else { return }
+                    onRequireHome()
+                }
+                .task(id: screenshotDirector.request) {
+                    guard screenshotDirector.request != nil else { return }
+                    onRequireHome()
                 }
         }
     }
@@ -217,6 +270,10 @@ struct MainTabView: View {
     /// aggregation. Constructed with the active profile's namespace by
     /// `RootView` (same lifecycle as `homeLayoutStore`).
     let homeContentStore: HomeContentStoring
+    /// Per-profile paint hint for the navigation rail's library slots, so the chrome
+    /// shows the viewer's real libraries immediately instead of filling in once
+    /// discovery lands. Same lifecycle as `homeLayoutStore`.
+    let navigationLibrariesSnapshotStore: NavigationLibrariesSnapshotStoring
     private var ratingsProvider: any ExternalRatingsProviding { syncServices.ratingsProvider }
     private var trakt: TraktService { syncServices.trakt }
     private var simkl: SimklService { syncServices.simkl }
@@ -295,6 +352,9 @@ struct MainTabView: View {
     /// set from the eager identity index. Threaded into Home/Search/Browse merging,
     /// the detail picker and the watch fan-out so all read one consistent set.
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// The identity index's publish counter, threaded to the cross-server browse so
+    /// a long merge re-folds when the index grows. Defaulted for previews/tests.
+    var identityRevision: @Sendable () -> Int = { 0 }
     /// Kicks off (or incrementally refreshes) the identity index for the signed-in
     /// accounts. Invoked when the signed-in UI appears.
     let onWarmIdentityIndex: () -> Void
@@ -349,6 +409,30 @@ struct MainTabView: View {
     /// the onboarding chooser, and on return we want to land back on the tab the
     /// user left from (usually Settings), not reset to Home.
     @SceneStorage("mainTab.selection") private var selectedTabRaw = MainTab.home.rawValue
+    /// The rail's selected destination, persisted separately from the TabView's so
+    /// switching chrome never lands on a destination the other style can't show.
+    @SceneStorage("navigationRail.selection")
+    private var railSelectionRaw = NavigationRailDestination.home.storageValue
+    /// Carries the currently-visible top-bar destination into rail/sidebar when
+    /// the style changes, without erasing the separately remembered library
+    /// destination. Cleared when the viewer chooses a real library-navigation
+    /// destination or returns to top bar.
+    @State private var libraryNavigationEntryOverride: NavigationRailDestination?
+    /// Whether a detail page is on top of the visible destination, so the rail can
+    /// step aside. Owned here and injected, so the stacks that know their depth can
+    /// report it without any of them knowing about the chrome.
+    @State private var navigationChrome = NavigationChromeModel()
+    /// The libraries the rail offers. Seeded from the per-profile snapshot on
+    /// appearance (instant chrome) and then refreshed from live discovery.
+    @State private var railLibraries: [AggregatedLibrary] = []
+    /// Whether the rail's library list reflects a real answer yet (snapshot or
+    /// discovery), as opposed to the empty value it starts at.
+    ///
+    /// Load-bearing for persistence, not for display: before this is true, every
+    /// library selection prunes to Home simply because nothing is known yet, and
+    /// writing that back would destroy the viewer's remembered destination on
+    /// every cold launch.
+    @State private var railLibrariesLoaded = false
     /// A person page the in-player Cast card asked for, waiting to be pushed.
     ///
     /// Consumed by whichever tab is on screen — see `personRoute(for:)`. Held
@@ -357,16 +441,206 @@ struct MainTabView: View {
     /// A title the in-player Cast card asked for, waiting to be pushed once the
     /// player has closed. Same hand-off as `pendingPersonRoute`.
     @State private var pendingTitleRoute: MediaItem?
+    /// Settings navigation identity owned above all three navigation shells.
+    /// MainTabView passes the reference but never reads its path, so Settings
+    /// pushes do not invalidate this large shell body.
+    @State private var settingsNavigation = SettingsNavigationModel()
 
     private var selectedTab: Binding<MainTab> {
         Binding(
             get: { MainTab(rawValue: selectedTabRaw) ?? .home },
+            // Top-bar selection is deliberately separate. A viewer can leave a
+            // library selected in rail/sidebar mode, use the top bar, then return
+            // without that library destination being erased.
             set: { selectedTabRaw = $0.rawValue }
         )
     }
 
+    /// Destination currently visible under native sidebar or custom rail.
+    private var activeLibraryNavigationDestination: NavigationRailDestination {
+        libraryNavigationEntryOverride ?? resolvedRailSelection
+    }
+
     private var navigationStyle: NavigationStyle {
         navigationStyleModel.style
+    }
+
+    // MARK: - Custom navigation rail
+
+    /// Library navigation's binding, shared by custom rail and native sidebar.
+    /// Reads the **pruned** selection.
+    ///
+    /// The rail must be told what is actually on screen, not what was last stored:
+    /// when the selected library disappears (a server goes unreachable) the content
+    /// falls back to Home, and a raw binding would leave the rail highlighting
+    /// nothing. The setter writes the raw value, and `railShell` persists the
+    /// resolved one when they diverge — otherwise a library returning later would
+    /// silently yank the viewer out of Home and into a destination they never chose.
+    private var libraryNavigationSelection: Binding<NavigationRailDestination> {
+        Binding(
+            get: { activeLibraryNavigationDestination },
+            set: { destination in
+                libraryNavigationEntryOverride = nil
+                railSelectionRaw = destination.storageValue
+                selectedTabRaw = mainTab(for: destination).rawValue
+            }
+        )
+    }
+
+    private var nativeSidebarSelection: Binding<NativeSidebarDestination> {
+        Binding(
+            get: { .content(activeLibraryNavigationDestination) },
+            set: { destination in
+                switch destination {
+                case .profile:
+                    openProfileSwitcher()
+                case let .content(content):
+                    libraryNavigationSelection.wrappedValue = content
+                }
+            }
+        )
+    }
+
+    /// Fixed top-bar equivalent of a library-aware destination. Library roots map
+    /// to Home because the compact top bar intentionally has no library tabs.
+    private func mainTab(for destination: NavigationRailDestination) -> MainTab {
+        switch destination {
+        case .home, .library, .allLibraries: return .home
+        case .search: return .search
+        case .music: return .music
+        case .settings: return .settings
+        }
+    }
+
+    private func destination(for tab: MainTab) -> NavigationRailDestination {
+        switch tab {
+        case .home: return .home
+        case .search: return .search
+        case .music: return .music
+        case .settings: return .settings
+        }
+    }
+
+    /// Opens RootView's existing profile page while preserving the destination
+    /// currently on screen. RootView removes MainTabView while the picker is up,
+    /// so a transient style-entry override would otherwise vanish and Cancel
+    /// would restore an older library destination.
+    private func openProfileSwitcher() {
+        // Only the transient override needs saving. Writing the resolved selection
+        // in the normal case is dangerous before library discovery completes:
+        // a remembered library/music destination temporarily prunes to Home, and
+        // persisting that would erase it permanently.
+        if let override = libraryNavigationEntryOverride {
+            railSelectionRaw = override.storageValue
+            libraryNavigationEntryOverride = nil
+        }
+        onSwitchProfile()
+    }
+
+    /// Routes shell-level requests to the one Home stack allowed to consume them.
+    private func requireHomeDestination() {
+        // Home and every library root are already Home-backed and have one active
+        // router. Moving them to `.home` is redundant and would permanently erase
+        // the viewer's remembered library selection on a Top Shelf launch.
+        guard !isActiveTab(.home) else { return }
+        if navigationStyle == .tabBar {
+            selectedTabRaw = MainTab.home.rawValue
+        } else {
+            libraryNavigationSelection.wrappedValue = .home
+        }
+    }
+
+    /// The stored selection before pruning. Only used to notice divergence.
+    private var storedRailSelection: NavigationRailDestination {
+        NavigationRailDestination(storageValue: railSelectionRaw) ?? .home
+    }
+
+    /// Commits the pruning, so a destination that has genuinely gone away stops
+    /// being the stored one — otherwise the moment its server answers again the
+    /// viewer is thrown out of whatever they were looking at and back into a
+    /// library they never picked.
+    ///
+    /// Gated on the library list being known: at launch it is empty, so every
+    /// library selection prunes to Home, and writing THAT back would erase the
+    /// remembered destination on every cold start. The rail still *displays* the
+    /// pruned value throughout, so its highlight is never a lie — only the
+    /// persistence waits.
+    private func persistPrunedRailSelection() {
+        guard railLibrariesLoaded else { return }
+        let resolved = resolvedRailSelection
+        guard resolved.storageValue != railSelectionRaw else { return }
+        railSelectionRaw = resolved.storageValue
+    }
+
+    /// The rail's candidate libraries: discovered (or remembered), still owned by a
+    /// signed-in account, and not switched off.
+    ///
+    /// The account filter is what makes the persisted snapshot safe to paint from.
+    /// A remembered library whose account has since been removed would otherwise
+    /// stay in the rail, and opening it resolves through `resolveProvider`, which
+    /// falls back to the PRIMARY account for an unknown id — i.e. it would browse a
+    /// different server's container id. Better to drop the row.
+    private var availableRailLibraries: [AggregatedLibrary] {
+        let liveAccountIDs = Set(accounts.map(\.account.id))
+        return railLibraries.filter {
+            liveAccountIDs.contains($0.accountID) && homeVisibility.isEnabled($0.key)
+        }
+    }
+
+    /// The libraries the profile can actually browse right now (music excluded —
+    /// it has its own destination).
+    private var browsableRailLibraries: [AggregatedLibrary] {
+        NavigationRailPlan.browsableLibraries(availableRailLibraries)
+    }
+
+    /// The rail's library slots, in the profile's own arrangement.
+    private var railEntries: [NavigationRailLibraryEntry] {
+        NavigationRailPlan.entries(
+            visibleLibraries: availableRailLibraries,
+            layout: navigationStyleModel.libraryLayout
+        )
+    }
+
+    /// The selection after pruning: a library that has been hidden, removed, or
+    /// signed out of falls back to Home rather than leaving a blank screen.
+    private var resolvedRailSelection: NavigationRailDestination {
+        NavigationRailPlan.resolvedSelection(
+            storedRailSelection,
+            entries: railEntries,
+            hasMusic: musicAvailability.hasMusic
+        )
+    }
+
+    /// Folds a discovery result into what the rail already knew, **per account**.
+    ///
+    /// Discovery is a whole-household fan-out, and a single unreachable server
+    /// comes back as "that account contributed nothing" — indistinguishable, in the
+    /// merged result, from "that account has no libraries". Replacing the rail
+    /// wholesale on a partial answer therefore deletes the unreachable server's
+    /// rows, and because the rail persists its pruned selection, a two-second
+    /// outage would permanently forget the library the viewer had chosen.
+    ///
+    /// So an account that answered is authoritative for its own libraries (removals
+    /// included), and an account that did not answer keeps what it had. A library
+    /// only leaves the rail when its own server says it is gone.
+    static func reconcileRailLibraries(
+        discovered: [AggregatedLibrary],
+        unreachableAccountIDs: Set<String>,
+        remembered: [AggregatedLibrary]
+    ) -> [AggregatedLibrary] {
+        guard !unreachableAccountIDs.isEmpty else { return discovered }
+        let carriedOver = remembered.filter { unreachableAccountIDs.contains($0.accountID) }
+        guard !carriedOver.isEmpty else { return discovered }
+        var seen: Set<String> = []
+        return (discovered + carriedOver).filter { seen.insert($0.key).inserted }
+    }
+
+    /// Re-runs library discovery for the rail when the signed-in accounts or the
+    /// per-profile library switches change.
+    private var railLibrariesKey: String {
+        let ids = accounts.map(\.account.id).sorted()
+        let disabled = homeVisibility.visibility.disabledKeys.sorted()
+        return (ids + ["|"] + disabled).joined(separator: ",")
     }
 
     private var resolvedPalette: ThemePalette {
@@ -434,7 +708,7 @@ struct MainTabView: View {
                     scheduleLibraryReloadFromCurrentScope(changedAccountID: accountID)
                 },
                 onSetAskProfileOnStartup: onSetAskProfileOnStartup,
-                onSwitchProfile: onSwitchProfile,
+                onSwitchProfile: openProfileSwitcher,
                 onSaveProfile: onSaveProfile,
                 onCreateProfile: onCreateProfile,
                 onUpdateProfileCosmetics: onUpdateProfileCosmetics,
@@ -465,7 +739,8 @@ struct MainTabView: View {
                 pendingSyncedServers: pendingSyncedServers,
                 onIgnorePendingServer: onIgnorePendingServer,
                 onSetUpFromAnotherDevice: onSetUpFromAnotherDevice,
-                metadataSettings: metadataSettings
+                metadataSettings: metadataSettings,
+                navigation: settingsNavigation
             )
             .background { SettingsPageBackground() }
     }
@@ -474,7 +749,11 @@ struct MainTabView: View {
     /// Extracted from `body`: the `HomeTab` initializer takes ~40 arguments and,
     /// inside the `TabView` expression, it is a large part of why this body sat
     /// on the Swift type-checker's budget.
-    private var homeTabContent: some View {
+    private func homeTabContent(
+        root: HomeTabRoot = .home,
+        id: String? = nil,
+        isActive: Bool? = nil
+    ) -> some View {
             // TEMPORARY discriminator. HomeTab's body runs ~46/s during the hang
             // while MainTabView's body does not run at all, which leaves two very
             // different explanations: either this closure is being re-evaluated
@@ -485,6 +764,7 @@ struct MainTabView: View {
             // blamed either way. This tick answers it directly.
             let _ = PlozzBodyRate.tick("homeTabContent")
             return HomeTab(
+                root: root,
                 accounts: accounts,
                 configuredServerCount: displayAccounts.count,
                 detailSnapshotCache: detailSnapshotCache,
@@ -520,6 +800,7 @@ struct MainTabView: View {
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
                 identitySources: identitySources,
+                identityRevision: identityRevision,
                 pendingWatchMutations: pendingWatchMutations,
                 appliedWatchRecency: appliedWatchRecency,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
@@ -527,10 +808,30 @@ struct MainTabView: View {
                 resumePrompt: $resumePrompt,
                 pendingPersonRoute: $pendingPersonRoute,
                 pendingTitleRoute: $pendingTitleRoute,
-                isActiveTab: isActiveTab(.home),
+                isActiveTab: isActive ?? isActiveTab(.home),
                 runtime: homeRuntime
             )
-            .id(homeScopeKey)
+            // A rail library root gets its own identity, so switching libraries
+            // rebuilds the stack instead of re-using the previous library's grid.
+            .id(id ?? homeScopeKey)
+    }
+
+    /// The Music destination.
+    ///
+    /// The availability model is handed over by REFERENCE and read inside the Music
+    /// tab, not unpacked here. Reading `detectedAccounts` / `visibleLibraryIDs` in
+    /// this body made the whole tab tree a subscriber of them, so the first cache
+    /// seed after launch re-ran the body and took the Home tab's `@State` — and its
+    /// entire in-flight four-account load — down with it.
+    private var musicTabContent: some View {
+        MusicAvailabilityScope(
+            availability: musicAvailability,
+            controller: audioController,
+            authenticatedHTTPResolver: authenticatedHTTPResolver,
+            appTheme: themeModel.theme,
+            musicPlayer: musicPlayerModel,
+            showNowPlaying: $showNowPlaying
+        )
     }
 
     /// Extracted for the same reason as ``homeTabContent`` — see there.
@@ -568,6 +869,195 @@ struct MainTabView: View {
             .id(homeScopeKey)
     }
 
+    /// The whole signed-in shell, in whichever chrome the profile chose. Every
+    /// modifier the shell needs — the player hosts, the environment injections, the
+    /// music probe — is applied to this in `body`, so the two chromes can never
+    /// drift in what they provide.
+    @ViewBuilder
+    private var shellContent: some View {
+        switch navigationStyle {
+        case .rail:
+            railShell
+        case .sidebar:
+            nativeSidebarShell
+        case .tabBar:
+            nativeTopBarShell
+        }
+    }
+
+    /// A stable key for "which destination is on screen", used by the diagnostics
+    /// event and the ambient-audio stop. Spans both chromes so neither needs its own
+    /// copy of those rules.
+    private var activeDestinationKey: String {
+        navigationStyle == .tabBar
+            ? selectedTabRaw
+            : activeLibraryNavigationDestination.storageValue
+    }
+
+    /// Native top bar keeps its four compact, fixed destinations. Putting an
+    /// arbitrary number of libraries across the top would make it unusable.
+    private var nativeTopBarShell: some View {
+        TabView(selection: selectedTab) {
+            Tab("Home", systemImage: "house.fill", value: MainTab.home) {
+                homeTabContent()
+            }
+
+            Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
+                searchTabContent
+            }
+
+            // Conditional Music tab: present only when at least one signed-in
+            // account exposes a music library. Video-only users see no tab and no
+            // mini-player — the app is byte-for-byte unchanged for them.
+            if musicAvailability.hasMusic {
+                Tab("Music", systemImage: "music.note", value: MainTab.music) {
+                    musicTabContent
+                }
+            }
+
+            Tab("Settings", systemImage: "gearshape.fill", value: MainTab.settings) {
+                settingsTabContent
+            }
+        }
+        .tabViewStyle(.tabBarOnly)
+    }
+
+    /// Native tvOS sidebar. Uses the same ordered/hidden library plan as custom
+    /// rail, but lets SwiftUI own presentation, focus and expansion.
+    private var nativeSidebarShell: some View {
+        TabView(selection: nativeSidebarSelection) {
+            Tab(value: NativeSidebarDestination.profile) {
+                // Selection immediately raises RootView's existing profile page.
+                Color.clear
+            } label: {
+                Label {
+                    Text(verbatim: activeProfile.name)
+                        .font(.system(size: 26, weight: .regular))
+                } icon: {
+                    ProfileAvatarView(profile: activeProfile, size: 32)
+                }
+            }
+
+            Tab(value: NativeSidebarDestination.content(.home)) {
+                homeTabContent(isActive: activeLibraryNavigationDestination == .home)
+            } label: {
+                homeTabLabel
+            }
+
+            Tab(value: NativeSidebarDestination.content(.search)) {
+                searchTabContent
+            } label: {
+                searchTabLabel
+            }
+
+            if musicAvailability.hasMusic {
+                Tab(value: NativeSidebarDestination.content(.music)) {
+                    musicTabContent
+                } label: {
+                    musicTabLabel
+                }
+            }
+
+            TabSection("Libraries") {
+                ForEach(railEntries) { entry in
+                    Tab(value: NativeSidebarDestination.content(entry.destination)) {
+                        libraryDestination(entry)
+                    } label: {
+                        navigationLibraryLabel(entry)
+                    }
+                }
+            }
+
+            Tab(value: NativeSidebarDestination.content(.settings)) {
+                settingsTabContent
+            } label: {
+                settingsTabLabel
+            }
+        }
+        .tabViewStyle(.sidebarAdaptable)
+    }
+
+    /// Plozz's own chrome: the collapsible library rail plus the selected
+    /// destination.
+    private var railShell: some View {
+        NavigationRailShell(
+            profile: activeProfile,
+            entries: railEntries,
+            showsMusic: musicAvailability.hasMusic,
+            selection: libraryNavigationSelection,
+            onOpenProfileSwitcher: openProfileSwitcher,
+            chrome: navigationChrome,
+            content: railDestination
+        )
+        .environment(navigationChrome)
+    }
+
+    /// The destination custom rail has selected.
+    @ViewBuilder
+    private var railDestination: some View {
+        switch activeLibraryNavigationDestination {
+        case .home:
+            homeTabContent()
+        case .search:
+            searchTabContent
+        case .music:
+            musicTabContent
+        case .settings:
+            settingsTabContent
+        case .allLibraries, .library:
+            if let entry = railEntries.first(where: {
+                $0.destination == activeLibraryNavigationDestination
+            }) {
+                libraryDestination(entry)
+            } else {
+                homeTabContent()
+            }
+        }
+    }
+
+    /// One library root shared by custom rail and native sidebar.
+    @ViewBuilder
+    private func libraryDestination(_ entry: NavigationRailLibraryEntry) -> some View {
+        if let library = entry.library {
+            homeTabContent(
+                root: .library(library.library),
+                // A cross-server library's source set can change under a stable key.
+                id: "\(homeScopeKey)|\(entry.key)|"
+                    + librarySourceSignature(library.library),
+                // Native sidebar owns one HomeTab per library Tab. Only the visible
+                // one may consume pending player routes; custom rail renders exactly
+                // one destination, so it is always active.
+                isActive: navigationStyle == .rail
+                    || activeLibraryNavigationDestination == entry.destination
+            )
+        } else {
+            homeTabContent(
+                root: .allLibraries(browsableRailLibraries),
+                // Exact source set is part of identity: the browse view model is
+                // created once, so a recovered server must rebuild this root.
+                id: "\(homeScopeKey)|allLibraries|"
+                    + allLibrariesSourceSignature(browsableRailLibraries),
+                isActive: navigationStyle == .rail
+                    || activeLibraryNavigationDestination == entry.destination
+            )
+        }
+    }
+
+    /// Native sidebar label for a real or synthetic library destination.
+    private func navigationLibraryLabel(
+        _ entry: NavigationRailLibraryEntry
+    ) -> some View {
+        let title = entry.library?.library.displayName ?? Text(AllLibrariesBrowse.title)
+        let symbol = entry.library?.library.navigationSymbolName
+            ?? "square.stack.3d.up.fill"
+        return Label {
+            title
+                .font(.system(size: 26, weight: .regular))
+        } icon: {
+            Image(systemName: symbol)
+        }
+    }
+
     var body: some View {
         // TEMPORARY. MainTabView was the one view in the detail-page loop with no
         // probe, and the loop is driven through the bindings IT creates: the
@@ -578,65 +1068,88 @@ struct MainTabView: View {
         // probe the cycle is invisible at exactly the point it turns over.
         let _ = plozzPrintChanges { Self._printChanges() }
         let _ = PlozzBodyRate.tick("MainTabView")
-        return TabView(selection: selectedTab) {
-            Tab(value: MainTab.home) {
-                homeTabContent
-            } label: {
-                homeTabLabel
-            }
-
-            Tab(value: MainTab.search) {
-                searchTabContent
-            } label: {
-                searchTabLabel
-            }
-
-            // Conditional Music tab: present only when at least one signed-in
-            // account exposes a music library. Video-only users see no tab and no
-            // mini-player — the app is byte-for-byte unchanged for them.
-            if musicAvailability.hasMusic {
-                Tab(value: MainTab.music) {
-                    // The availability model is handed over by REFERENCE and read
-                    // inside the Music tab, not unpacked here. Reading
-                    // `detectedAccounts` / `visibleLibraryIDs` in this body made the
-                    // whole tab tree a subscriber of them, so the first cache seed
-                    // after launch re-ran this body and took the Home tab's `@State`
-                    // — and its entire in-flight four-account load — down with it.
-                    MusicAvailabilityScope(
-                        availability: musicAvailability,
-                        controller: audioController,
-                        authenticatedHTTPResolver: authenticatedHTTPResolver,
-                        appTheme: themeModel.theme,
-                        musicPlayer: musicPlayerModel,
-                        showNowPlaying: $showNowPlaying
-                    )
-                } label: {
-                    musicTabLabel
-                }
-            }
-
-            Tab(value: MainTab.settings) {
-                settingsTabContent
-            } label: {
-                settingsTabLabel
-            }
-        }
-        .plozzTabStyle(navigationStyle)
+        return shellContent
         .background {
             // Switching tabs is `MainTabView`'s job, so the capture rig's tab
-            // requests are consumed here rather than in the Home stack. A leaf
+            // requests are consumed here rather than in either shell. A leaf
             // for the usual reason: reading the request in this body would make
-            // the whole tab view a subscriber of it.
+            // the whole signed-in shell a subscriber of it.
             ScreenshotTabRouter(
                 director: homeRuntime.screenshotDirector,
                 onSelect: { name in
                     guard let tab = MainTab(rawValue: name) else { return }
-                    selectedTabRaw = tab.rawValue
+                    if navigationStyle == .tabBar {
+                        selectedTabRaw = tab.rawValue
+                    } else {
+                        // Sidebar and custom rail are driven by library navigation
+                        // selection, not `selectedTabRaw`. Capture routing must use
+                        // the same binding or it acknowledges success without
+                        // changing the screen.
+                        libraryNavigationSelection.wrappedValue = destination(for: tab)
+                    }
                 }
             )
         }
-        .onChange(of: selectedTabRaw, initial: true) { _, tab in
-            BrowseDiagnostics.event("screen tab=\(tab)")
+        .background {
+            HomeRequestDestinationRouter(
+                pendingPlay: homeRuntime.pendingPlay,
+                screenshotDirector: homeRuntime.screenshotDirector,
+                onRequireHome: requireHomeDestination
+            )
+        }
+        .onChange(of: resolvedRailSelection) { _, _ in
+            guard navigationStyle != .tabBar else { return }
+            persistPrunedRailSelection()
+        }
+        .onChange(of: navigationStyle) { previous, current in
+            if previous == .tabBar, current != .tabBar {
+                // Style picker lives inside Settings. Carry the screen currently
+                // visible in top bar into the new leading-edge shell, but do not
+                // overwrite a separately remembered library destination.
+                let tab = MainTab(rawValue: selectedTabRaw) ?? .home
+                libraryNavigationEntryOverride = destination(for: tab)
+            } else if current == .tabBar {
+                libraryNavigationEntryOverride = nil
+            }
+        }
+        // Also on the FLAG, not just the value. At launch the library list is empty
+        // so a stored library already resolves to Home; when discovery completes
+        // without it, the resolved value is Home before and after — no value edge.
+        .onChange(of: railLibrariesLoaded) { _, _ in
+            guard navigationStyle != .tabBar else { return }
+            persistPrunedRailSelection()
+        }
+        .task(id: "\(navigationStyle.rawValue)|\(railLibrariesKey)") {
+            guard navigationStyle != .tabBar else { return }
+            // Paint native/custom library navigation on its first frame from the
+            // persisted snapshot — no network — then reconcile below.
+            let remembered = navigationLibrariesSnapshotStore.load()
+            if railLibraries.isEmpty, !remembered.isEmpty {
+                railLibraries = remembered
+                railLibrariesLoaded = true
+            }
+        }
+        .task(
+            id: "\(navigationStyle.rawValue)|\(railLibrariesKey)",
+            priority: .utility
+        ) {
+            guard navigationStyle != .tabBar else { return }
+            let discovered = await discovery.libraryDiscovery(from: currentAccounts())
+            guard !Task.isCancelled else { return }
+            let reconciled = Self.reconcileRailLibraries(
+                discovered: discovered.libraries,
+                unreachableAccountIDs: discovered.unreachableAccountIDs,
+                remembered: railLibraries
+            )
+            guard !reconciled.isEmpty || discovered.unreachableAccountIDs.isEmpty else {
+                return
+            }
+            railLibraries = reconciled
+            railLibrariesLoaded = true
+            navigationLibrariesSnapshotStore.save(reconciled)
+        }
+        .onChange(of: activeDestinationKey, initial: true) { _, destination in
+            BrowseDiagnostics.event("screen tab=\(destination)")
             // Keeps person tracing alive across relaunches once it has been
             // asked for, so restoring the live stream never costs the repro.
             PersonDiagnostics.armLatchIfTracing()
@@ -740,7 +1253,7 @@ struct MainTabView: View {
         .onChange(of: heroTrailerController.isPlaying) { _, playing in
             themeMusicController.setBlocked(playing)
         }
-        .onChange(of: selectedTabRaw) {
+        .onChange(of: activeDestinationKey) {
             themeMusicController.stop()
             heroTrailerController.stop()
         }

@@ -20,7 +20,10 @@ final class AggregatedLibraryProviderTests: XCTestCase {
         try await provider.items(in: "lib", kind: .movie, page: PageRequest(startIndex: start, limit: limit))
     }
 
-    func testInterleavesAcrossServersWithoutFullScan() async throws {
+    func testMergesServersInSortOrderWithoutFullScan() async throws {
+        // The grid claims a sort in its own menu, so the stitched result has to
+        // honour it: a k-way merge on the sort key, NOT a round-robin interleave
+        // (which produced "P0, J0, P1, J1…" under a menu reading "Name A–Z").
         let plexItems = (0..<6).map { movie("p\($0)", title: "P\($0)", year: 2000 + $0, tmdb: "10\($0)") }
         let jellyItems = (0..<6).map { movie("j\($0)", title: "J\($0)", year: 2000 + $0, tmdb: "20\($0)") }
         let plex = FakeMediaProvider(allItems: plexItems)
@@ -29,7 +32,7 @@ final class AggregatedLibraryProviderTests: XCTestCase {
 
         let first = try await page(provider, start: 0, limit: 4)
         XCTAssertEqual(first.items.count, 4)
-        XCTAssertEqual(first.items.map(\.id), ["p0", "j0", "p1", "j1"], "Round-robin interleave across servers")
+        XCTAssertEqual(first.items.map(\.id), ["j0", "j1", "j2", "j3"], "Name-sorted across servers")
         XCTAssertEqual(first.totalCount, 12, "Both small libraries fully drained → exact merged total")
 
         // No deep paging: each server was asked for exactly one bounded chunk

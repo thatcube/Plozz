@@ -11,10 +11,10 @@
 #   3. printing the NET changed files + diffstat between that baseline and target,
 #      with commit history available only as secondary context.
 #
-# The `fastlane beta` lane needs a WHAT_TO_TEST.txt (or PLOZZ_WHATS_NEW). The
-# normal flow is: run this, inspect the net diff, write a short tester-facing summary
-# to WHAT_TO_TEST.txt, then `fastlane beta --env fastlane`. See the "How to deploy
-# to TestFlight" section in AGENTS.local.md.
+# The `fastlane beta` lane needs a committed entry in
+# App/Resources/ReleaseNotes.json. The normal flow is: run this, inspect the net
+# diff, add one categorized entry, commit it, then select that entry with
+# PLOZZ_RELEASE_ID when running fastlane.
 #
 # Usage:
 #   tools/release-changeset.sh                 # baseline = last TestFlight build
@@ -179,7 +179,8 @@ hr
 echo "Next: draft a short, plain-text, tester-facing 'What to Test' from the"
 echo "NET DIFF above — never from commit subjects alone, because history may include"
 echo "reverted or superseded work. Verify every claimed behavior exists in the target"
-echo "tree. Group by feature, use no markdown bullets, and omit internal churn. Write"
-echo "it to WHAT_TO_TEST.txt at the repo root, then run:"
-echo "    fastlane beta --env fastlane"
+echo "tree. Add it to App/Resources/ReleaseNotes.json under New / Updated / Fixed,"
+echo "then validate and ship the selected entry:"
+echo "    tools/release-notes.py validate --release-id release/NNN --version YYYY.M.D --build NNN"
+echo "    PLOZZ_RELEASE_ID=release/NNN fastlane beta --env fastlane"
 hr

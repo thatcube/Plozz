@@ -23,6 +23,9 @@ import LastFmService
 /// player presentation, mirroring `HomeTab`'s wiring. Search is aggregated
 /// across every active account; results route to their owning provider.
 struct SearchTab: View {
+    /// The rail's chrome model, present only under ``NavigationStyle/rail``. This
+    /// stack reports its depth so the rail steps aside on a detail page.
+    @Environment(NavigationChromeModel.self) private var navigationChrome: NavigationChromeModel?
     let accounts: [ResolvedAccount]
     /// Detail-snapshot cache scoped to the active content identity, threaded from
     /// `MainTabView` so revisit paints never cross a profile/account/credential.
@@ -321,6 +324,8 @@ struct SearchTab: View {
             // pushed pages never see the router.
             .mediaItemNavigator { navigateToItem($0) }
         }
+        // See HomeTab: reports detail-page depth so the custom rail steps aside.
+        .reportsNavigationDepth(path.count, to: navigationChrome)
     }
 
     /// Routes a context-menu navigation action to this tab's stack. An episode

@@ -70,7 +70,8 @@ public final class ProfileSettingsModel {
     /// the app root like `cardStyleModel`, and rebuilt on profile switch like the
     /// other per-profile models.
     public private(set) var watchStatusIndicatorModel: WatchStatusIndicatorSettingsModel
-    /// The active profile's navigation chrome (top bar vs. collapsible sidebar).
+    /// The active profile's navigation chrome (top bar vs. collapsible sidebar vs.
+    /// the custom library rail) **and**, for the rail, its library arrangement.
     /// Injected into the environment at the app root like `cardStyleModel`, and
     /// rebuilt on profile switch like the other per-profile models.
     public private(set) var navigationStyleModel: NavigationStyleSettingsModel
@@ -96,7 +97,7 @@ public final class ProfileSettingsModel {
     /// model, all models are treated as injected (test path) and never rebuilt on
     /// profile switch; otherwise they're built scoped to `namespace`.
     ///
-    /// All 18 sub-models are uniformly injectable via optional parameters (defaulted
+    /// All sub-models are uniformly injectable via optional parameters (defaulted
     /// to `nil`), so tests can seed any subset and production call sites — which pass
     /// none — build every model scoped to `namespace` exactly as before.
     public init(
@@ -138,7 +139,7 @@ public final class ProfileSettingsModel {
             || nightShiftModel != nil
         self.usesInjectedModels = injected
 
-        // Single source of truth for constructing all 18 sub-models: injected models
+        // Single source of truth for constructing all sub-models: injected models
         // are used as-is, the rest are built scoped to `ns`. `rebuild(namespace:)`
         // funnels through the same builder so the two code paths can't drift.
         let models = Self.makeModels(
@@ -215,7 +216,7 @@ public final class ProfileSettingsModel {
         nightShiftModel = models.nightShiftModel
     }
 
-    /// Aggregate of the 18 per-profile sub-models, used to funnel `init` and
+    /// Aggregate of the per-profile sub-models, used to funnel `init` and
     /// `rebuild(namespace:)` through one construction path.
     private struct Models {
         var appLanguageModel: AppLanguageSettingsModel
@@ -288,7 +289,10 @@ public final class ProfileSettingsModel {
                 focusStore: CardFocusStyleSettingsStore(namespace: ns)
             ),
             watchStatusIndicatorModel: watchStatusIndicatorModel ?? WatchStatusIndicatorSettingsModel(store: WatchStatusIndicatorSettingsStore(namespace: ns)),
-            navigationStyleModel: navigationStyleModel ?? NavigationStyleSettingsModel(store: NavigationStyleSettingsStore(namespace: ns)),
+            navigationStyleModel: navigationStyleModel ?? NavigationStyleSettingsModel(
+                store: NavigationStyleSettingsStore(namespace: ns),
+                layoutStore: NavigationLibraryLayoutStore(namespace: ns)
+            ),
             transparencyModel: transparencyModel ?? TransparencyPreferenceModel(store: TransparencyPreferenceStore(namespace: ns)),
             heroSettingsModel: heroSettingsModel ?? HeroSettingsModel(store: HeroSettingsStore(namespace: ns)),
             nightShiftModel: nightShiftModel ?? NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))

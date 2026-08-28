@@ -776,6 +776,7 @@ private struct PlozziOSHeroPictureLayout {
 }
 
 private struct PlozziOSHeroBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.themePalette) private var palette
 
     let presentation: HeroPresentation
@@ -831,7 +832,13 @@ private struct PlozziOSHeroBackdrop: View {
         // being painted over with an opaque grey that reads as muddy.
         .mask {
             if appliesFadeMask {
-                PlozziOSHeroFadeMask(extendsArtwork: extendsArtwork)
+                PlozziOSHeroFadeMask(
+                    extendsArtwork: extendsArtwork,
+                    // Detail is intentionally shorter than Home, so its light-mode
+                    // dissolve needs more runway to keep the white handoff subtle.
+                    upwardExtension:
+                        surfaceRole == .detail && colorScheme == .light ? 0.10 : 0
+                )
             } else {
                 Rectangle().fill(.white)
             }
@@ -941,6 +948,9 @@ struct PlozziOSHeroFadeMask: View {
     /// background, which is what a fixed 0.62 produced on a hero this tall — and
     /// one that carries all the way behind the buttons and then melts.
     var extendsArtwork: Bool = false
+    /// Additional fraction of the hero covered by the bottom-anchored artwork
+    /// dissolve. Positive values move only its upper edge farther into the image.
+    var upwardExtension: CGFloat = 0
 
     /// Where the melt begins. Light mode starts higher because a light page
     /// swallows the artwork's edge sooner; dark mode holds the image longer so
@@ -970,29 +980,57 @@ struct PlozziOSHeroFadeMask: View {
     }
 
     private func start(in size: CGSize) -> CGFloat {
-        guard extendsArtwork else { return meltStart }
-        return HeroStageMetrics.meltStart(
-            width: size.width,
-            height: size.height,
-            mirrorScale: extendedMeltScale,
-            floor: meltStart
-        )
+        let baseStart = extendsArtwork
+            ? HeroStageMetrics.meltStart(
+                width: size.width,
+                height: size.height,
+                mirrorScale: extendedMeltScale,
+                floor: meltStart
+            )
+            : meltStart
+        return max(0, baseStart - upwardExtension)
     }
 
     private func gradient(start: CGFloat) -> some View {
         let span = max(1 - start, 0.0001)
         return LinearGradient(
-            stops: [
-                .init(color: .black, location: 0),
-                .init(color: .black, location: start),
-                .init(color: .black.opacity(0.72), location: start + span * 0.32),
-                .init(color: .black.opacity(0.36), location: start + span * 0.60),
-                .init(color: .black.opacity(0.10), location: start + span * 0.83),
-                .init(color: .clear, location: 1)
-            ],
+            stops: colorScheme == .light
+                ? lightModeStops(start: start, span: span)
+                : darkModeStops(start: start, span: span),
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+
+    private func lightModeStops(
+        start: CGFloat,
+        span: CGFloat
+    ) -> [Gradient.Stop] {
+        [
+            .init(color: .black, location: 0),
+            .init(color: .black, location: start),
+            .init(color: .black.opacity(0.98), location: start + span * 0.12),
+            .init(color: .black.opacity(0.90), location: start + span * 0.28),
+            .init(color: .black.opacity(0.72), location: start + span * 0.47),
+            .init(color: .black.opacity(0.46), location: start + span * 0.67),
+            .init(color: .black.opacity(0.22), location: start + span * 0.84),
+            .init(color: .black.opacity(0.07), location: start + span * 0.94),
+            .init(color: .clear, location: 1)
+        ]
+    }
+
+    private func darkModeStops(
+        start: CGFloat,
+        span: CGFloat
+    ) -> [Gradient.Stop] {
+        [
+            .init(color: .black, location: 0),
+            .init(color: .black, location: start),
+            .init(color: .black.opacity(0.72), location: start + span * 0.32),
+            .init(color: .black.opacity(0.36), location: start + span * 0.60),
+            .init(color: .black.opacity(0.10), location: start + span * 0.83),
+            .init(color: .clear, location: 1)
+        ]
     }
 }
 
@@ -1038,7 +1076,10 @@ struct PlozziOSHeroLegibilityScrim: View {
             // A portrait hero has no room for a side wash; only the landscape
             // layout puts the title in a left-hand column.
             edges: style == .landscape ? [.leading, .bottom] : [.bottom],
-            sideDarkeningStart: 0.34
+            sideDarkeningStart: 0.34,
+            // Preserve a small untouched band at the top, then protect every
+            // foreground element with one long, subtle ramp to the bottom.
+            bottomFadeTop: 0.20
         )
     }
 }
@@ -1338,6 +1379,44 @@ private struct PlozziOSMirrorVideoLayer: UIViewRepresentable {
     }
 }
 
+private struct PlozziOSStableHomeHeroMetadata: View {
+    let presentation: HeroPresentation
+    let style: HeroArtworkStyle
+    let hidesRatings: Bool
+    let scheduleLine: LocalizedStringResource?
+    let logoFallback: (@Sendable () async -> URL?)?
+    @State private var descriptionText: String?
+
+    init(
+        presentation: HeroPresentation,
+        style: HeroArtworkStyle,
+        hidesRatings: Bool,
+        scheduleLine: LocalizedStringResource?,
+        logoFallback: (@Sendable () async -> URL?)?
+    ) {
+        self.presentation = presentation
+        self.style = style
+        self.hidesRatings = hidesRatings
+        self.scheduleLine = scheduleLine
+        self.logoFallback = logoFallback
+        _descriptionText = State(
+            initialValue: HeroContentPolicy.homeDescription(for: presentation)
+        )
+    }
+
+    var body: some View {
+        PlozziOSHeroMetadata(
+            presentation: presentation,
+            style: style,
+            mode: .home,
+            hidesRatings: hidesRatings,
+            scheduleLine: scheduleLine,
+            logoFallback: logoFallback,
+            descriptionOverride: .init(text: descriptionText)
+        )
+    }
+}
+
 struct PlozziOSHomeHeroForeground: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(PlozziOSAppModel.self) private var appModel
@@ -1360,10 +1439,9 @@ struct PlozziOSHomeHeroForeground: View {
             alignment: style == .compactPortrait ? .center : .leading,
             spacing: 12
         ) {
-            PlozziOSHeroMetadata(
+            PlozziOSStableHomeHeroMetadata(
                 presentation: presentation,
                 style: style,
-                mode: .home,
                 hidesRatings: appModel.settings.spoilers.settings
                     .shouldHideRatings(for: item),
                 scheduleLine: scheduleLine,
@@ -2350,6 +2428,14 @@ private struct PlozziOSHeroMetadata: View {
     /// visibly on a discovery item, which comes from Seerr/TMDb and so has no
     /// provider logo at all, while TMDb itself usually has one.
     var logoFallback: (@Sendable () async -> URL?)? = nil
+    /// A selected Home slide freezes its first fully prepared description. Later
+    /// payload refreshes may update other chrome, but must not replace a visible
+    /// overview with a newly arrived tagline.
+    var descriptionOverride: DescriptionOverride? = nil
+
+    struct DescriptionOverride {
+        let text: String?
+    }
 
     /// The same lookup tvOS's heroes use. Kinds that have no title art of their
     /// own are excluded rather than searched for one that cannot exist.
@@ -2520,7 +2606,10 @@ private struct PlozziOSHeroMetadata: View {
     }
 
     private var descriptionText: String? {
-        switch mode {
+        if let descriptionOverride {
+            return descriptionOverride.text
+        }
+        return switch mode {
         case .home:
             HeroContentPolicy.homeDescription(for: rootPresentation)
         case .detail:

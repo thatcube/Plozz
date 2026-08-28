@@ -4,6 +4,7 @@ import CoreModels
 import CoreUI
 import FeatureHomeCore
 import FeatureProfiles
+import FeatureSettings
 import Foundation
 import SwiftUI
 
@@ -52,6 +53,7 @@ public struct PlozziOSRootView: View {
     /// Drives the unrestricted receive/pairing flow launched from the detected-setup
     /// page (brings the whole household over from the detected device).
     @State private var showReceiveFromDetected = false
+    private var releaseNotes: ReleaseNotesModel { .shared }
 
     public init() {}
 
@@ -315,6 +317,25 @@ public struct PlozziOSRootView: View {
                 systemColorScheme: systemColorScheme
             )
         }
+        .task(id: releaseNotesStartupReady) {
+            if releaseNotesStartupReady {
+                releaseNotes.prepareForStartup()
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { releaseNotes.hasPendingStartupNotes },
+                set: { presented in
+                    if !presented {
+                        releaseNotes.dismissStartupNotes()
+                    }
+                }
+            ),
+            onDismiss: { releaseNotes.dismissStartupNotes() }
+        ) {
+            ReleaseNotesStartupView(model: releaseNotes)
+                .presentationSizing(.page)
+        }
         .installNightShiftOverlay(appModel.settings.nightShift)
         .onOpenURL { url in
             receivePairingURL(url)
@@ -339,6 +360,29 @@ public struct PlozziOSRootView: View {
             for: appModel.settings.theme.theme,
             systemColorScheme: systemColorScheme
         )
+    }
+
+    private var releaseNotesStartupReady: Bool {
+        !appModel.accounts.isEmpty
+            && !appModel.mustChooseProfile
+            && (!appModel.requiresLaunchProfileSelection
+                || appModel.didCompleteLaunchProfileSelection)
+            && appModel.pendingFirstRunStep == nil
+            && !showDetectedCover
+            && coldLaunchDetectionHandled
+            && !showingSettings
+            && !showingProfileSwitcher
+            && !showingAddServer
+            && pairingServer == nil
+            && !showReceiveFromDetected
+            && appModel.lockedSwitch == nil
+            && appModel.parentalSwitch == nil
+            && appModel.plexHomeUsers.pendingPlexPINRequest == nil
+            && appModel.pendingIdentityAccount == nil
+            && appModel.pendingLibrarySelection == nil
+            && appModel.pendingSyncedServerPrompt == nil
+            && appModel.pendingPairingInvite == nil
+            && appModel.pendingSyncSetupOffer == nil
     }
 
     /// The name THIS device holds for the offer's requested account (a per-server

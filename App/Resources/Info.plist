@@ -62,6 +62,8 @@
 	<string>$(OMDB_API_KEY)</string>
 	<key>PlozzReleaseChannel</key>
 	<string>$(PLOZZ_RELEASE_CHANNEL)</string>
+	<key>PlozzReleaseID</key>
+	<string>$(PLOZZ_RELEASE_ID)</string>
 	<key>PlozzSentryDSN</key>
 	<string>$(PLOZZ_SENTRY_DSN)</string>
 	<key>SimklClientID</key>

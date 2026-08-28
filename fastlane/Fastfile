@@ -9,14 +9,17 @@
 #   ASC_KEY_PATH     Path to the downloaded AuthKey_XXXXXX.p8  (keep it OUT of git)
 #
 # Usage (Fastlane installed via Homebrew):
-#   fastlane beta       # build + upload to TestFlight
+#   PLOZZ_RELEASE_ID=release/NNN fastlane beta
+#                       # validate catalog entry + build + upload to TestFlight
 #   fastlane build      # archive an .ipa locally, no upload
-#   fastlane release    # build + upload to App Store
+#   PLOZZ_RELEASE_ID=release/NNN fastlane release
+#                       # validate catalog entry + build + upload to App Store
 #
 # Both platform binaries use the existing Plozz App Store Connect record and
 # bundle ID. Distribution signing is handled automatically by `build` via
 # -allowProvisioningUpdates + the API key.
 
+require "json"
 require "shellwords"
 
 APP_IDENTIFIER = "com.thatcube.Plozz"
@@ -280,17 +283,48 @@ def create_app_store_version(app_id:, platform:, version:)
   )
 end
 
-# Release notes shown to testers as TestFlight's "What to Test". Sourced from the
-# PLOZZ_WHATS_NEW env var first (so agent/scripted runs can pass it inline), else
-# a repo-root WHAT_TO_TEST.txt file (gitignored scratch or committed notes). An
-# external beta must have notes, so `beta` errors clearly if both are empty.
-def whats_new
-  txt = ENV["PLOZZ_WHATS_NEW"]
-  if (txt.nil? || txt.strip.empty?)
-    path = File.expand_path("../WHAT_TO_TEST.txt", __dir__)
-    txt = File.read(path) if File.exist?(path)
+# The committed catalog is the sole release-note source for the app, TestFlight,
+# GitHub releases, and App Store metadata. A stable release id is explicit so two
+# builds shipped under the same CalVer date cannot select the wrong entry.
+def release_notes_entry
+  @release_notes_entry ||= begin
+    release_id = ENV["PLOZZ_RELEASE_ID"].to_s.strip
+    if release_id.empty?
+      UI.user_error!(
+        "PLOZZ_RELEASE_ID is required for distribution builds.\n" \
+        "Select a committed App/Resources/ReleaseNotes.json entry, for example:\n" \
+        "  PLOZZ_RELEASE_ID=release/030 fastlane beta --env fastlane"
+      )
+    end
+
+    catalog_path = File.expand_path("../App/Resources/ReleaseNotes.json", __dir__)
+    validator = File.expand_path("../tools/release-notes.py", __dir__)
+    sh(
+      "#{validator.shellescape} --catalog #{catalog_path.shellescape} validate " \
+      "--release-id #{release_id.shellescape} --version #{marketing_version.shellescape}"
+    )
+    catalog = JSON.parse(File.read(catalog_path))
+    catalog.fetch("releases").find { |entry| entry.fetch("id") == release_id }
+  rescue JSON::ParserError, KeyError => e
+    UI.user_error!("Invalid release-notes catalog: #{e.message}")
   end
-  (txt || "").strip
+end
+
+def release_notes_text(entry = release_notes_entry)
+  entry.fetch("sections").map do |section|
+    items = section.fetch("items").map { |item| "• #{item}" }.join("\n")
+    "#{section.fetch('category')}\n#{items}"
+  end.join("\n\n")
+end
+
+def validate_release_notes_build(entry, build_number)
+  validator = File.expand_path("../tools/release-notes.py", __dir__)
+  catalog_path = File.expand_path("../App/Resources/ReleaseNotes.json", __dir__)
+  sh(
+    "#{validator.shellescape} --catalog #{catalog_path.shellescape} validate " \
+    "--release-id #{entry.fetch('id').shellescape} " \
+    "--version #{marketing_version.shellescape} --build #{build_number}"
+  )
 end
 
 # Tags the shipped commit `release/<build>` and opens a GitHub Release with an
@@ -441,6 +475,9 @@ lane :build do |options|
   build_number = next_build_number
   ENV["PLOZZ_BUILD_NUMBER"] = build_number.to_s
   UI.message("Using build number #{build_number} (CFBundleVersion)")
+  unless ENV["PLOZZ_RELEASE_CHANNEL"].to_s.strip.empty?
+    validate_release_notes_build(release_notes_entry, build_number)
+  end
 
   # Pin the marketing version for this run so generate-project.sh bakes exactly
   # the value `release` will later write to the App Store version records —
@@ -480,16 +517,9 @@ lane :beta do
   # an App Store receipt — on tvOS that receipt can be absent, which would make a
   # TestFlight build read as production and default crash reporting OFF.
   ENV["PLOZZ_RELEASE_CHANNEL"] = "testflight"
-  # An external beta must ship with "What to Test" notes and passes Apple's beta
-  # review, so require the notes up front before spending minutes on the build.
-  notes = whats_new
-  if notes.empty?
-    UI.user_error!(
-      "No release notes for the external beta. Provide them before running `beta`:\n" \
-      "  • export PLOZZ_WHATS_NEW=\"...\"   (inline), or\n" \
-      "  • create WHAT_TO_TEST.txt at the repo root."
-    )
-  end
+  entry = release_notes_entry
+  notes = release_notes_text(entry)
+  ENV["PLOZZ_RELEASE_ID"] = entry.fetch("id")
   build
   RELEASE_TARGETS.each do |target|
     UI.header("Uploading #{target[:name]} to TestFlight")
@@ -517,6 +547,9 @@ desc "Build and upload tvOS plus iOS/iPadOS to the App Store"
 lane :release do
   api_key = asc_api_key
   ENV["PLOZZ_RELEASE_CHANNEL"] = "production"
+  entry = release_notes_entry
+  notes = release_notes_text(entry)
+  ENV["PLOZZ_RELEASE_ID"] = entry.fetch("id")
   build
   # Keep every platform's App Store version record in step with the binaries
   # being uploaded. Review rejects a mismatch, and CalVer moves on its own.
@@ -529,8 +562,9 @@ lane :release do
       platform: target[:platform],
       ipa: File.join(OUTPUT_DIR, target[:output_name]),
       submit_for_review: false,
-      skip_metadata: true,
+      skip_metadata: false,
       skip_screenshots: true,
+      release_notes: { "en-US" => notes },
       precheck_include_in_app_purchases: false,
       force: true
     )
@@ -538,6 +572,6 @@ lane :release do
 
   # Tag the shipped commit and open a full GitHub release (marked "Latest") with the
   # changelog and any notes — this is a production App Store ship, not a beta.
-  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], whats_new, false)
+  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes, false)
   report_release_tagging_failures
 end

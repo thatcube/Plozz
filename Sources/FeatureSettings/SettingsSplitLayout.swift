@@ -109,7 +109,12 @@ struct SettingsSplitLayout: View {
     let title: LocalizedStringResource
     let rows: [SettingsSplitRow]
 
-    @State private var selectedRowID: String?
+    /// Optional external selection for a split page that must survive its view
+    /// being re-hosted. Most pages use local state; Appearance injects the
+    /// SettingsNavigationModel-backed value because changing navigation style
+    /// replaces the surrounding shell while this page is open.
+    private let externalSelectedRowID: Binding<String?>?
+    @State private var localSelectedRowID: String?
     @FocusState private var focusedRow: String?
     /// Scopes the master list so the selected row can be its *preferred* default
     /// focus. Pressing left out of the detail pane (or returning from a pushed
@@ -121,6 +126,45 @@ struct SettingsSplitLayout: View {
     /// left-press out of a control has exactly one place to land (the row you
     /// came in from), with no geometrically-nearer row to steal it.
     @State private var focusInDetail = false
+    /// During a shell re-host, only the persisted row is focusable. tvOS otherwise
+    /// lands briefly on the first row, then overrides our focus request and writes
+    /// "language" over the saved "navigation" selection.
+    @State private var isRestoringExternalFocus: Bool
+    /// Only the newest asynchronous restore may close the gate. A transient
+    /// wrong-row focus can schedule a replacement while the first task is yielded.
+    @State private var focusRestoreGeneration = 0
+    #if os(tvOS)
+    @Environment(\.resetFocus) private var resetFocus
+    #endif
+
+    init(
+        title: LocalizedStringResource,
+        rows: [SettingsSplitRow],
+        selection: Binding<String?>? = nil
+    ) {
+        self.title = title
+        self.rows = rows
+        self.externalSelectedRowID = selection
+        // Never read the external observable binding in init. Doing so happens
+        // inside the parent's body and subscribes that parent to every focus-driven
+        // selection change, rebuilding all of its row descriptors per keypress.
+        // External mode never uses this fallback; local mode starts empty as before.
+        self._localSelectedRowID = State(initialValue: nil)
+        // Binding presence is stable metadata and does not read its observable
+        // value, so this avoids the parent-observation bug fixed earlier.
+        self._isRestoringExternalFocus = State(initialValue: selection != nil)
+    }
+
+    private var selectedRowID: String? {
+        get { externalSelectedRowID?.wrappedValue ?? localSelectedRowID }
+        nonmutating set {
+            if let externalSelectedRowID {
+                externalSelectedRowID.wrappedValue = newValue
+            } else {
+                localSelectedRowID = newValue
+            }
+        }
+    }
 
     private var allRows: [SettingsSplitRow] { rows }
     private var allRowIDs: [String] { allRows.map(\.id) }
@@ -147,9 +191,15 @@ struct SettingsSplitLayout: View {
             }
             .padding(.leading, PlozzTheme.Metrics.screenPadding)
         }
+        // A pushed split page must own its background. Native sidebar can re-host
+        // the active destination when navigation style changes; relying on the
+        // Settings root behind it left the master column transparent, exposing the
+        // root Settings page underneath while the detail material stayed intact.
+        .background { SettingsPageBackground() }
         .ignoresSafeArea(edges: .trailing)
         .onAppear {
             if selectedRowID == nil { selectedRowID = allRowIDs.first }
+            restoreExternalFocusIfNeeded()
         }
         // If the selected row vanished (a revealed sub-row was hidden again),
         // fall back to the first row so the pane keeps showing something valid.
@@ -157,6 +207,11 @@ struct SettingsSplitLayout: View {
             if let selected = selectedRowID, !ids.contains(selected) {
                 selectedRowID = ids.first
             }
+        }
+        .onDisappear {
+            // Invalidate any delayed restoration owned by this view instance.
+            focusRestoreGeneration &+= 1
+            isRestoringExternalFocus = false
         }
     }
 
@@ -189,8 +244,30 @@ struct SettingsSplitLayout: View {
         // list (so the only way back is the row we came from). When it returns,
         // unpark and resume the live preview.
         .onChange(of: focusedRow) { _, newID in
+            // A real master-row focus always means focus left the detail pane,
+            // including during restoration. Do this before the restoration gate:
+            // the gate suppresses only the transient selection write, not the
+            // focus-region state change.
+            if newID != nil { focusInDetail = false }
+            if isRestoringExternalFocus {
+                if newID == nil {
+                    // A real move into the detail pane wins over restoration.
+                    // Cancel the pending release task and preserve normal left-back
+                    // focus behavior.
+                    focusRestoreGeneration &+= 1
+                    isRestoringExternalFocus = false
+                    focusInDetail = true
+                } else if newID != selectedRowID {
+                    // A focus update already in flight may report the first row
+                    // once. It is now disabled, so ask the engine to resolve again
+                    // against the sole eligible saved row.
+                    #if os(tvOS)
+                    resetFocus(in: masterScope)
+                    #endif
+                }
+                return
+            }
             if let newID {
-                focusInDetail = false
                 selectedRowID = newID
             } else {
                 focusInDetail = true
@@ -198,6 +275,37 @@ struct SettingsSplitLayout: View {
         }
         .tvOSFocusScope(masterScope)
         .tvOSFocusSection()
+    }
+
+    /// Forces tvOS to honour the externally persisted row after a shell swap.
+    private func restoreExternalFocusIfNeeded() {
+        guard externalSelectedRowID != nil,
+              let selectedRowID,
+              allRowIDs.contains(selectedRowID) else {
+            isRestoringExternalFocus = false
+            return
+        }
+        #if os(tvOS)
+        focusRestoreGeneration &+= 1
+        let generation = focusRestoreGeneration
+        isRestoringExternalFocus = true
+        Task { @MainActor in
+            await Task.yield()
+            guard generation == focusRestoreGeneration else { return }
+            resetFocus(in: masterScope)
+            // Keep every sibling ineligible across UIKit's delayed relocation,
+            // then reassert once using the same proven focus timing as
+            // NowPlayingView. This is bounded: after 250ms the list always unlocks.
+            try? await Task.sleep(for: .milliseconds(60))
+            guard generation == focusRestoreGeneration else { return }
+            resetFocus(in: masterScope)
+            try? await Task.sleep(for: .milliseconds(190))
+            guard generation == focusRestoreGeneration else { return }
+            isRestoringExternalFocus = false
+        }
+        #else
+        isRestoringExternalFocus = false
+        #endif
     }
 
     private func masterRow(_ row: SettingsSplitRow) -> some View {
@@ -212,9 +320,13 @@ struct SettingsSplitLayout: View {
             SettingsMasterRowLabel(row: row, isSelected: selectedRowID == row.id)
         }
         .buttonStyle(SettingsFocusButtonStyle())
-        // While editing in the detail pane, take every other row out of the
-        // focus order so a left-press can only return to where we came in from.
-        .disabled(focusInDetail && selectedRowID != row.id)
+        // While editing OR restoring after a shell swap, take every other row out
+        // of the focus order. Focus restoration must be solved by controlling
+        // eligibility, not by racing tvOS after it lands on Language.
+        .disabled(
+            (focusInDetail || isRestoringExternalFocus)
+                && selectedRowID != row.id
+        )
     }
 
     // MARK: - Detail pane (right)

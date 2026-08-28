@@ -21,20 +21,6 @@ import AniListService
 import MALService
 import LastFmService
 
-extension View {
-    /// Applies the native tvOS 18 `TabView` presentation matching the user's
-    /// `NavigationStyle`. Kept as a `@ViewBuilder` switch (rather than a ternary)
-    /// because `.sidebarAdaptable` and `.tabBarOnly` are distinct concrete
-    /// `TabViewStyle` types that can't share one expression.
-    @ViewBuilder
-    func plozzTabStyle(_ style: NavigationStyle) -> some View {
-        switch style {
-        case .tabBar: self.tabViewStyle(.tabBarOnly)
-        case .sidebar: self.tabViewStyle(.sidebarAdaptable)
-        }
-    }
-}
-
 /// Resolves the provider that owns `accountID`, falling back to the primary
 /// (first) account. `accounts` is guaranteed non-empty by the caller
 /// (`RootView`).
@@ -245,269 +231,23 @@ func makeHeroWatchStateRefresher(
     }
 }
 
-/// Hydrates only sparse metadata needed by the hero chrome. List endpoints are kept
-/// lightweight, but some Plex show rows omit `contentRating` and Jellyfin Favorites
-/// omit `overview` / `taglines` even though the full item record contains them. Fetch
-/// at most four details at once, preserve curated identity/order/watch state, and
-/// copy only missing presentation fields so this cannot reseat the carousel or alter
-/// playback routing.
-private struct HeroMetadataEnrichment: Sendable {
-    let root: MediaItem
-    let playTarget: MediaItem?
-}
-
-private func resolveHeroMetadata(
-    target: MediaItem,
-    provider: any MediaProvider,
-    accountID: String
-) async -> HeroMetadataEnrichment? {
-    guard var hydratedTarget = try? await provider.item(id: target.id) else {
-        return nil
-    }
-    if hydratedTarget.sourceAccountID == nil {
-        hydratedTarget = hydratedTarget.taggingSource(accountID)
-    }
-
-    // A season is never the right thing to SHOW. Its own record is deliberately
-    // sparse — a Plex season carries no ratings, no overview and no air schedule
-    // — and the viewer thinks of that row as the SHOW, not as "Season 2". Hoist
-    // the series for display and resolve a concrete episode to play, which is
-    // exactly how an episode candidate is already treated below: the merge step
-    // then copies the series' ratings, overview, logo and artwork across.
-    if hydratedTarget.kind == .season {
-        guard let seriesID = hydratedTarget.seriesID,
-              var root = try? await provider.item(id: seriesID) else {
-            return nil
-        }
-        if root.sourceAccountID == nil {
-            root = root.taggingSource(accountID)
-        }
-        var playTarget = await HeroPlayTargetResolver.resolve(
-            item: hydratedTarget,
-            provider: provider
-        )
-        if playTarget?.sourceAccountID == nil {
-            playTarget = playTarget?.taggingSource(accountID)
-        }
-        return HeroMetadataEnrichment(root: root, playTarget: playTarget)
-    }
-
-    if hydratedTarget.kind == .episode {
-        guard let seriesID = hydratedTarget.seriesID,
-              var root = try? await provider.item(id: seriesID) else {
-            return nil
-        }
-        if root.sourceAccountID == nil {
-            root = root.taggingSource(accountID)
-        }
-        return HeroMetadataEnrichment(
-            root: root,
-            playTarget: hydratedTarget
-        )
-    }
-
-    if hydratedTarget.kind.needsPlaybackTargetResolution {
-        var playTarget = await HeroPlayTargetResolver.resolve(
-            item: hydratedTarget,
-            provider: provider
-        )
-        if playTarget?.sourceAccountID == nil {
-            playTarget = playTarget?.taggingSource(accountID)
-        }
-        return HeroMetadataEnrichment(
-            root: hydratedTarget,
-            playTarget: playTarget
-        )
-    }
-
-    return HeroMetadataEnrichment(root: hydratedTarget, playTarget: nil)
-}
-
-private func applyingCachedHeroRatings(
-    _ items: [MediaItem],
-    provider: any ExternalRatingsProviding
-) async -> [MediaItem] {
-    guard let cachedProvider =
-        provider as? any CachedExternalRatingsProviding else {
-        return items
-    }
-    var enriched = items
-    for index in enriched.indices {
-        guard let cached = await cachedProvider.cachedRatings(for: enriched[index]),
-              !cached.isEmpty else {
-            continue
-        }
-        enriched[index].ratings =
-            enriched[index].ratings.mergedWithAuthoritative(cached)
-    }
-    return enriched
-}
-
 func makeHeroMetadataEnricher(
     accounts: [ResolvedAccount],
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
     ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider()
 ) -> @Sendable ([MediaItem]) async -> [MediaItem] {
-    let providersByAccount = Dictionary(
-        accounts.map { ($0.account.id, $0.provider) },
-        uniquingKeysWith: { first, _ in first }
-    )
-    return { items in
-        let targets = Dictionary(uniqueKeysWithValues: items.indices.compactMap { index -> (Int, MediaItem)? in
-            let item = items[index]
-            guard item.kind == .series
-                    || item.kind == .episode
-                    || item.officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-                    || item.productionYear == nil
-                    || item.overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-                    || item.taglines.isEmpty else { return nil }
-            let target = bestSourcePlayItem(
-                item,
+    let enricher = HeroMetadataEnricher(
+        accounts: accounts,
+        targetSelector: {
+            bestSourcePlayItem(
+                $0,
                 accounts: accounts,
                 identitySources: identitySources
             )
-            guard let accountID = target.sourceAccountID,
-                  providersByAccount[accountID] != nil else { return nil }
-            return (index, target)
-        })
-        let candidates = targets.keys.sorted()
-        guard !candidates.isEmpty else {
-            return await applyingCachedHeroRatings(
-                items,
-                provider: ratingsProvider
-            )
-        }
-
-        let concurrency = min(4, candidates.count)
-        let details = await withTaskGroup(
-            of: (Int, HeroMetadataEnrichment?).self,
-            returning: [Int: HeroMetadataEnrichment].self
-        ) { group in
-            var next = 0
-            for _ in 0..<concurrency {
-                let index = candidates[next]
-                next += 1
-                guard let target = targets[index],
-                      let accountID = target.sourceAccountID,
-                      let provider = providersByAccount[accountID] else { continue }
-                group.addTask {
-                    return (
-                        index,
-                        await resolveHeroMetadata(
-                            target: target,
-                            provider: provider,
-                            accountID: accountID
-                        )
-                    )
-                }
-            }
-
-            var result: [Int: HeroMetadataEnrichment] = [:]
-            while let (index, detail) = await group.next() {
-                if let detail { result[index] = detail }
-                if next < candidates.count, !Task.isCancelled {
-                    let queuedIndex = candidates[next]
-                    next += 1
-                    guard let target = targets[queuedIndex],
-                          let accountID = target.sourceAccountID,
-                          let provider = providersByAccount[accountID] else { continue }
-                    group.addTask {
-                        return (
-                            queuedIndex,
-                            await resolveHeroMetadata(
-                                target: target,
-                                provider: provider,
-                                accountID: accountID
-                            )
-                        )
-                    }
-                }
-            }
-            return result
-        }
-        guard !Task.isCancelled else { return items }
-
-        var enriched = items
-        for (index, detail) in details {
-            let originalProviderIDs = enriched[index].providerIDs
-            // Only a SERIES card's base ids are series ids. A season card (which
-            // is what Recently Added hands the hero for a show) carries its own
-            // season-scoped tmdb, and adopting that as the series id sent every
-            // series-scoped lookup to a season entity — which is why the hero
-            // showed no air schedule while the detail page, starting from the
-            // series itself, showed it correctly.
-            let originalCarriesSeriesIDs = enriched[index].kind == .series
-            if var playTarget = detail.playTarget {
-                if playTarget.sourceAccountID == nil,
-                   let sourceAccountID = detail.root.sourceAccountID {
-                    playTarget = playTarget.taggingSource(sourceAccountID)
-                }
-                enriched[index] = playTarget
-            }
-            let root = detail.root
-            if enriched[index].kind == .episode {
-                // Root first: it IS the series, so its ids are authoritative.
-                // The original card only fills what remains, and only donates
-                // base ids when it was itself a series.
-                enriched[index].providerIDs.mergeSeriesProviderIDs(
-                    from: root.providerIDs
-                )
-                enriched[index].providerIDs.mergeSeriesProviderIDs(
-                    from: originalProviderIDs,
-                    promotingBaseIDs: originalCarriesSeriesIDs
-                )
-                enriched[index].parentTitle = root.title
-                enriched[index].seriesID = root.id
-                enriched[index].officialRating = root.officialRating
-                enriched[index].genres = root.genres
-                enriched[index].overview = root.overview
-                enriched[index].taglines = root.taglines
-                enriched[index].ratings = root.ratings
-                enriched[index].people = root.people
-                enriched[index].studios = root.studios
-                enriched[index].logoURL = root.logoURL
-                enriched[index].heroBackdropURL = root.heroBackdropURL
-                enriched[index].backdropURL = root.backdropURL
-                enriched[index].fallbackArtworkURL = root.fallbackArtworkURL
-                enriched[index].artworkSelections = root.artworkSelections
-                continue
-            }
-            if enriched[index].officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                enriched[index].officialRating = root.officialRating
-            }
-            if enriched[index].productionYear == nil {
-                enriched[index].productionYear = root.productionYear
-            }
-            // Gap-fill only, and deliberately NOT in the episode branch above:
-            // that one adopts the SERIES' facts, and a series premiere is not the
-            // date this episode aired.
-            if enriched[index].releaseDate == nil {
-                enriched[index].releaseDate = root.releaseDate
-            }
-            if enriched[index].genres.isEmpty {
-                enriched[index].genres = root.genres
-            }
-            if enriched[index].overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                enriched[index].overview = root.overview
-            }
-            if enriched[index].taglines.isEmpty {
-                enriched[index].taglines = root.taglines
-            }
-            if enriched[index].ratings.isEmpty {
-                enriched[index].ratings = root.ratings
-            }
-            if enriched[index].people.isEmpty {
-                enriched[index].people = root.people
-            }
-            if enriched[index].studios.isEmpty {
-                enriched[index].studios = root.studios
-            }
-        }
-        return await applyingCachedHeroRatings(
-            enriched,
-            provider: ratingsProvider
-        )
-    }
+        },
+        ratingsProvider: ratingsProvider
+    )
+    return { await enricher.enrich($0) }
 }
 
 /// Builds the provider that backs a Library-browse grid for `library`. When the
@@ -520,7 +260,8 @@ func makeHeroMetadataEnricher(
 func resolveLibraryBrowse(
     for library: MediaLibrary,
     in accounts: [ResolvedAccount],
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    identityRevision: @escaping @Sendable () -> Int = { 0 }
 ) -> (provider: any MediaProvider, sourceAccountID: String?) {
     let accountIDs = library.allSourceAccountIDs
     if accountIDs.count > 1 {
@@ -536,7 +277,8 @@ func resolveLibraryBrowse(
                 AggregatedLibraryProvider(
                     sources: sources,
                     serverInfo: accounts.sourceServerInfo(),
-                    identitySources: identitySources
+                    identitySources: identitySources,
+                    identityRevision: identityRevision
                 ),
                 nil
             )
@@ -547,6 +289,92 @@ func resolveLibraryBrowse(
         }
     }
     return (resolveProvider(library.sourceAccountID, in: accounts), library.sourceAccountID)
+}
+
+/// Builds the provider that backs the combined **All Libraries** grid: every
+/// browsable library on every signed-in account, paged concurrently and
+/// de-duplicated into one wall through the same ``AggregatedLibraryProvider`` the
+/// cross-server single-library browse uses.
+///
+/// Each source declares its **own** kind, because this grid mixes a movie library
+/// with a TV library — asking a movie section for series returns nothing on both
+/// backends. A cross-server-merged library contributes one source per server, so a
+/// title held on two servers still collapses to one card here exactly as it does
+/// in that library's own browse.
+///
+/// Returns `nil` when nothing resolves (every account signed out mid-flight), so
+/// the caller can fall back rather than construct a provider with no sources —
+/// ``AggregatedLibraryProvider`` requires at least one.
+func resolveAllLibrariesBrowse(
+    libraries: [AggregatedLibrary],
+    in accounts: [ResolvedAccount],
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    identityRevision: @escaping @Sendable () -> Int = { 0 }
+) -> (any MediaProvider)? {
+    var sources: [AggregatedLibrarySource] = []
+    var seen: Set<String> = []
+    for aggregated in libraries where !aggregated.library.isMusic {
+        let library = aggregated.library
+        for accountID in library.allSourceAccountIDs {
+            guard
+                let provider = resolveOptionalProvider(accountID, in: accounts),
+                let containerID = library.containerID(forSourceAccountID: accountID)
+            else { continue }
+            // A merged library is listed once but names several accounts, and the
+            // same (account, container) pair must never be paged twice — that would
+            // double every one of its titles' fetches for no extra content.
+            guard seen.insert("\(accountID)\u{1F}\(containerID)").inserted else { continue }
+            sources.append(
+                AggregatedLibrarySource(
+                    accountID: accountID,
+                    containerID: containerID,
+                    provider: provider,
+                    kind: library.kind
+                )
+            )
+        }
+    }
+    guard !sources.isEmpty else { return nil }
+    return AggregatedLibraryProvider(
+        sources: sources,
+        serverInfo: accounts.sourceServerInfo(),
+        identitySources: identitySources,
+        identityRevision: identityRevision
+    )
+}
+
+/// A stable signature of every (account, container, kind) the combined grid will
+/// page, used as part of the destination's SwiftUI identity.
+///
+/// `LibraryBrowseView` builds its view model once and holds it in `@State`, so a
+/// destination whose identity doesn't move keeps the ORIGINAL provider. Keying on
+/// library keys alone isn't enough: a server coming back adds sources to libraries
+/// whose keys never changed, and the grid would go on paging the smaller set.
+/// Sorted, so a reordered discovery result alone can't reset the grid.
+func allLibrariesSourceSignature(_ libraries: [AggregatedLibrary]) -> String {
+    libraries
+        .filter { !$0.library.isMusic }
+        .flatMap { aggregated in
+            aggregated.library.allSourceAccountIDs.map { accountID in
+                let container = aggregated.library.containerID(forSourceAccountID: accountID) ?? ""
+                return "\(accountID)/\(container)/\(aggregated.library.kind.rawValue)"
+            }
+        }
+        .sorted()
+        .joined(separator: ",")
+}
+
+/// The same signature for ONE library, so a single-library grid also rebuilds when
+/// its cross-server source set changes.
+func librarySourceSignature(_ library: MediaLibrary) -> String {
+    // The KIND is part of it too: `LibraryBrowseViewModel` captures it once as
+    // `containerKind` and pages with it forever, so a library whose kind is
+    // re-classified under the same id would keep being asked for the old one.
+    let sources = library.allSourceAccountIDs
+        .map { "\($0)/\(library.containerID(forSourceAccountID: $0) ?? "")" }
+        .sorted()
+        .joined(separator: ",")
+    return "\(library.kind.rawValue)|\(sources)"
 }
 
 /// Retargets a cross-server-merged card to the **locality-best** copy before it

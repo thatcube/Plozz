@@ -90,6 +90,19 @@ public struct MediaRowView: View {
     /// screen padding (Home rows); detail pages pass the larger hero leading
     /// padding so the row aligns with the hero text above it.
     private let leadingInset: CGFloat
+    /// How far the navigation chrome insets page content. Added to `leadingInset`
+    /// so the row's FIRST card clears the rail, while the scroll viewport still
+    /// spans the full width — which is what lets cards scroll *under* the rail and
+    /// fade out there instead of being cut off at a narrowed viewport edge.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
+    /// Keeps branch-specific masking completely out of native navigation styles.
+    @Environment(\.plozzPinnedSidebarActive) private var pinnedSidebarActive
+
+    /// Extra scroll margin beyond the fade, so a FOCUSED card — which grows
+    /// outward past its layout frame — still parks entirely clear of the feather.
+    /// Parking a card exactly at the fade's end looks correct at rest and clipped
+    /// the moment it takes focus, which is the symptom this exists to prevent.
+    private var focusLiftAllowance: CGFloat { 28 }
     private let onSelect: (MediaItem) -> Void
     /// When `true`, selecting a card starts playback immediately, so its cards
     /// show the resume chip (play glyph + progress bar + time). Threaded to
@@ -366,30 +379,46 @@ public struct MediaRowView: View {
                         .font(PlozzRailTitle.font(
                             sectionHeaderFontSize: layoutMetrics.sectionHeaderFontSize
                         ))
-                        .padding(.leading, leadingInset)
+                        .padding(.leading, leadingInset + navigationContentInset)
                 }
 
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
+                PinnedSidebarLeadingFade(
+                    isActive: pinnedSidebarActive,
+                    inset: navigationContentInset,
+                    verticalOverhang: layoutMetrics.railShadowClearance
+                ) {
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: layoutMetrics.cardSpacing) {
                             ForEach(items, id: \.stablePresentationID) { item in
                                 tappableCard(for: item)
                             }
                         }
+                        // The row's ordinary page gutter, unchanged from before the
+                        // navigation rail existed.
                         .padding(.leading, leadingInset)
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                         // Reserve generous vertical room *inside* the clip so a
-                        // focused card's lift + drop shadow are never cut. The rail
-                        // keeps clipping (no `scrollClipDisabled`) — that's what
-                        // keeps the focus engine's edge math correct so the first/
-                        // last card holds its inset instead of being yanked flush to
-                        // the screen. The negative outer padding below cancels this
-                        // clearance in layout, so the row's height and its gap to the
-                        // neighbouring rows are unchanged; only the clip grows.
+                        // focused card's lift + drop shadow are never cut. The
+                        // negative outer padding below cancels this clearance in
+                        // layout, so the row's height and its gap to the neighbouring
+                        // rows are unchanged; only the drawing area grows.
                         .padding(.vertical, layoutMetrics.railShadowClearance)
                     }
                     .padding(.top, layoutMetrics.railTopClearanceOffset)
                     .padding(.bottom, layoutMetrics.railBottomClearanceOffset)
+                    // The navigation gutter is the scroll view's SAFE AREA — the
+                    // same mechanism that lets a row scroll under the system tab bar
+                    // on tvOS, and the reason that has never needed any of this.
+                    //
+                    // A safe area is the one inset the focus engine parks a focused
+                    // card against, while the viewport stays full width so the card
+                    // still DRAWS in the gutter on its way past and can be feathered
+                    // there. Padding inside the stack scrolls away; `contentMargins`
+                    // is ignored by focus scrolling (only the first card landed);
+                    // insetting the viewport puts the gutter outside the scroll view
+                    // entirely, so it either hard-cuts or the engine scrolls cards
+                    // back in. The safe area is the only one that does all three.
                     // Section the whole rail VIEWPORT (the full-width horizontal
                     // ScrollView) — NOT the scrolled inner LazyHStack — but ONLY for
                     // the gated single-target flow (the episode rail). tvOS only enters

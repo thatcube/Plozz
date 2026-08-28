@@ -117,6 +117,14 @@ public final class IdentityIndexModel {
         identitySnapshotStore.sourcesProvider()
     }
 
+    /// The index's publish counter, for consumers that fold membership in
+    /// **incrementally** and so need to know when to reconcile what they already
+    /// folded (the cross-server library browse). A one-shot merge never needs it —
+    /// it re-reads the live snapshot per item.
+    public var identityRevisionProvider: @Sendable () -> Int {
+        identitySnapshotStore.revisionProvider()
+    }
+
     /// The account set the in-flight warm is scanning, so a repeat trigger for
     /// the SAME set can let it finish instead of starting it over.
     @ObservationIgnored

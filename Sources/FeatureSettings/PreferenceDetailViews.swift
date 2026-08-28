@@ -4,6 +4,12 @@ import CoreModels
 import CoreUI
 
 struct AppearanceDetailView: View {
+    /// The household's libraries + per-profile availability, needed by the
+    /// navigation-arrangement pane. Passed in (rather than reached for) so this
+    /// view stays a plain function of what Settings already resolved.
+    let librariesScope: ProfileLibrariesScope
+    /// Keeps the selected Appearance feature stable while navigation shell changes.
+    let settingsNavigation: SettingsNavigationModel
     @Bindable var theme: ThemeSettingsModel
     /// Circadian Mode (night-warming) settings, folded in as sections here — it's
     /// a display concern, so it no longer earns its own top-level row.
@@ -27,7 +33,12 @@ struct AppearanceDetailView: View {
     @Environment(AppLanguageSettingsModel.self) private var appLanguage
 
     var body: some View {
-        SettingsSplitLayout(title: "Appearance", rows: rows)
+        @Bindable var settingsNavigation = settingsNavigation
+        SettingsSplitLayout(
+            title: "Appearance",
+            rows: rows,
+            selection: $settingsNavigation.appearanceRowID
+        )
             // Circadian's day/night preview animates a model flag; make sure it
             // never keeps running once you leave Appearance or turn Circadian off.
             .onChange(of: nightShift.settings.isEnabled) { _, enabled in
@@ -71,10 +82,12 @@ struct AppearanceDetailView: View {
                 },
                 SettingsSplitRow(
                     id: "navigation",
-                    title: "Navigation",
-                    description: "Horizontal tabs across the top, or a collapsible left sidebar.",
+                    title: "Navigation"
                 ) {
-                    CompactNavigationPicker(selection: $navigation.style)
+                    NavigationAppearanceDetail(
+                        navigation: navigation,
+                        librariesScope: librariesScope
+                    )
                 },
                 SettingsSplitRow(
                     id: "music-player",
@@ -114,6 +127,32 @@ struct AppearanceDetailView: View {
     /// watched indicator, and what focus does to a card — since all three are
     /// "how a card looks". Shorter swatches so the preview rows sit together
     /// without heavy scrolling; each headed by a shared uppercase section header.
+
+    /// Everything controlled by the single Navigation master row.
+    ///
+    /// Style and its library arrangement belong together: changing to either
+    /// leading-edge style reveals the shared ordered/hidden list directly beneath
+    /// the picker. Top bar has no library destinations, so that section disappears.
+    private struct NavigationAppearanceDetail: View {
+        @Bindable var navigation: NavigationStyleSettingsModel
+        let librariesScope: ProfileLibrariesScope
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                CompactNavigationPicker(selection: $navigation.style)
+
+                if navigation.style != .tabBar {
+                    SettingsDetailGroup(
+                        title: "Navigation Libraries",
+                        description: "Choose which libraries appear in the navigation, and the order they appear in."
+                    ) {
+                        NavigationLibrariesDetailView(scope: librariesScope)
+                    }
+                }
+            }
+        }
+    }
+
     @ViewBuilder private var cardsControls: some View {
         @Bindable var cardStyle = cardStyle
         @Bindable var watchStatusIndicator = watchStatusIndicator

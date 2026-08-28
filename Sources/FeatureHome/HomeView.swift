@@ -198,6 +198,10 @@ public struct HomeView: View {
     @Namespace private var heroFocusScope
 
     @Environment(\.plozzMetrics) private var metrics
+    /// How far the navigation rail insets page content, so the libraries row can
+    /// carry the same gutter as every media row.
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
+    @Environment(\.plozzPinnedSidebarActive) private var pinnedSidebarActive
 
     public init(
         viewModel: HomeViewModel,
@@ -355,6 +359,14 @@ public struct HomeView: View {
             )
             let heroActive = heroSlotState == .content
             let heroLayoutActive = heroSlotState != .hidden
+            let ignoredScrollEdges: Edge.Set = (
+                heroLayoutActive ? Edge.Set.top : []
+            ).union(
+                // Gate on STYLE, not the live inset. The rail publishes inset 0
+                // while hidden for a detail push, but Home stays rendered beneath
+                // that transition and must not change horizontal geometry.
+                navigationStyle == .rail ? Edge.Set.trailing : []
+            )
             // Account-scoped ids of every watchlisted title, so the hero can show
             // the *series'* watchlist state on an episode/season slide.
             let watchlistedKeys = Set(content.watchlist.map {
@@ -561,7 +573,10 @@ public struct HomeView: View {
                 // above the backdrop (the gap that made the hero sit too low).
                 // An empty edge set is a no-op, so the classic rows layout keeps
                 // its normal top inset under the tab bar.
-                .ignoresSafeArea(.container, edges: heroLayoutActive ? .top : [])
+                // The custom rail alone needs `.trailing`: its content inset
+                // otherwise leaves each row short of the physical edge. Native
+                // top/sidebar styles retain their original safe-area behavior.
+                .ignoresSafeArea(.container, edges: ignoredScrollEdges)
             }
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too. Only in
@@ -1035,27 +1050,31 @@ public struct HomeView: View {
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             Text("Libraries")
                 .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
-                .padding(.leading, PlozzTheme.Metrics.screenPadding)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: metrics.cardSpacing) {
-                    ForEach(libraries) { aggregated in
-                        LibraryCardView(
-                            aggregated: aggregated,
-                            subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
-                            action: { onSelectLibrary(aggregated.library) }
-                        )
+                .padding(.leading, PlozzTheme.Metrics.screenPadding + navigationContentInset)
+            PinnedSidebarLeadingFade(
+                isActive: pinnedSidebarActive,
+                inset: navigationContentInset,
+                verticalOverhang: metrics.railShadowClearance
+            ) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: metrics.cardSpacing) {
+                        ForEach(libraries) { aggregated in
+                            LibraryCardView(
+                                aggregated: aggregated,
+                                subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
+                                action: { onSelectLibrary(aggregated.library) }
+                            )
+                        }
                     }
+                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                    // Reserve room *inside* the clip for the focused tile's lift +
+                    // shadow. The negative outer padding cancels that room in layout, so
+                    // the row's height and spacing are unchanged — only the clip grows.
+                    .padding(.vertical, metrics.railShadowClearance)
                 }
-                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
-                // engine doesn't yank the first/last tile flush to the screen edge,
-                // and reserve room *inside* the clip for the focused tile's lift +
-                // shadow. The negative outer padding cancels that room in layout, so
-                // the row's height and spacing are unchanged — only the clip grows.
-                .padding(.vertical, metrics.railShadowClearance)
+                .padding(.top, metrics.railTopClearanceOffset)
+                .padding(.bottom, metrics.railBottomClearanceOffset)
             }
-            .padding(.top, metrics.railTopClearanceOffset)
-            .padding(.bottom, metrics.railBottomClearanceOffset)
         }
     }
 

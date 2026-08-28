@@ -28,6 +28,8 @@ public struct MusicTabView: View {
     private let musicPlayer: MusicPlayerSettingsModel
 
     @State private var path = NavigationPath()
+    /// The shell's chrome model, present only under the custom navigation rail.
+    @Environment(NavigationChromeModel.self) private var navigationChrome: NavigationChromeModel?
     /// Owned by the app shell (`MainTabView`) and bound in, so the full-screen
     /// Now Playing player is hosted as a `fullScreenCover` on the root `TabView`.
     /// Under the sidebar tab style a cover attached inside this tab's navigation
@@ -75,6 +77,16 @@ public struct MusicTabView: View {
         .onChange(of: controller.playbackStartToken) { _, _ in
             showNowPlaying = true
         }
+        // Under the custom navigation rail, an album/artist/playlist page is a
+        // detail page like any other: report the depth so the rail steps aside
+        // instead of overlaying it (and stealing a Left press). A no-op under the
+        // two native tab styles, which install no chrome model.
+        //
+        // On the STACK, never inside `navigationDestination` — a modifier attached
+        // to a pushed destination is torn down with it, so popping the last page
+        // would remove the only thing that could report depth 0 and the rail would
+        // stay hidden on the music landing screen.
+        .reportsNavigationDepth(path.count, to: navigationChrome)
     }
 
     /// Plays a single recently-played song from the landing rail. Resolves the

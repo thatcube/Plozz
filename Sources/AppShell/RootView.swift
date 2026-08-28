@@ -111,6 +111,7 @@ public struct RootView: View {
     /// consent in `appState.crashReportingModel` — nothing is sent unless the user
     /// has opted in AND a DSN is present.
     @State private var crashReporting = CrashReportingController()
+    private var releaseNotes: ReleaseNotesModel { .shared }
 
     /// Maps the active content identity (profile + accounts + Plex Home-user
     /// generation) to one scoped detail-snapshot cache, memoized for the app's
@@ -197,6 +198,18 @@ public struct RootView: View {
             profileID: profile.id,
             plexPlaybackIdentityKey: profile.plexPlaybackIdentityKey(for: accounts)
         )
+    }
+
+    private var releaseNotesStartupReady: Bool {
+        guard appState.profileFlow.pendingSetupProfile == nil else { return false }
+        guard case .ready = appState.state else { return false }
+        return !appState.profileFlow.isChoosingProfile
+            && appState.profileFlow.pendingLockedProfile == nil
+            && appState.profileFlow.pendingParentalSwitch == nil
+            && appState.profileFlow.pendingIdentityAccountID == nil
+            && appState.profileFlow.pendingLockOfferProfile == nil
+            && !appState.profileFlow.isPickingThemeForNewProfile
+            && appState.plexHomeUsers.pendingPlexPINRequest == nil
     }
 
     public var body: some View {
@@ -316,6 +329,7 @@ public struct RootView: View {
                         audioController: appState.audioController,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
                         homeContentStore: HomeContentStore(namespace: appState.profilesModel.activeNamespace),
+                        navigationLibrariesSnapshotStore: NavigationLibrariesSnapshotStore(namespace: appState.profilesModel.activeNamespace),
                         mediaItemActionHandler: appState.mediaItemActionHandler,
                         enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
                         // These bridge closures are `@Sendable` (the player may invoke
@@ -410,6 +424,7 @@ public struct RootView: View {
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         metadataSettings: appState.makeMetadataSettingsDependencies(),
                         identitySources: appState.identityIndex.identitySourcesProvider,
+                        identityRevision: appState.identityIndex.identityRevisionProvider,
                         onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() },
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,
@@ -419,7 +434,9 @@ public struct RootView: View {
                         // subscribed the ROOT of the app to a model that ticks
                         // through every sync, and a root re-render dirties every
                         // view below it — the widest possible invalidation.
-                        syncStatusSummary: SyncStatusProvider { Self.syncStatusText(appState.cloudSyncStatus) },
+                        syncStatusSummary: SyncStatusProvider {
+                            Self.syncStatusPresentation(appState.cloudSyncStatus)
+                        },
                         onSyncNow: { appState.syncCloudNow() },
                         syncRepair: syncRepairActions,
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
@@ -563,6 +580,24 @@ public struct RootView: View {
                 onSkip: { appState.profileFlow.dismissLockOffer() }
             )
         }
+        .task(id: releaseNotesStartupReady) {
+            if releaseNotesStartupReady {
+                releaseNotes.prepareForStartup()
+            }
+        }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { releaseNotes.hasPendingStartupNotes },
+                set: { presented in
+                    if !presented {
+                        releaseNotes.dismissStartupNotes()
+                    }
+                }
+            ),
+            onDismiss: { releaseNotes.dismissStartupNotes() }
+        ) {
+            ReleaseNotesStartupView(model: releaseNotes)
+        }
         // One-time theme picker for a profile just created in-app (Settings →
         // "Add Profile"). The app has already switched to the new profile, so
         // this edits its per-profile theme; Continue dismisses into the app.
@@ -698,19 +733,17 @@ public struct RootView: View {
         .installNightShiftOverlay(appState.profileSettings.nightShiftModel)
     }
 
-    /// Composes the sync status line as `Text` rather than a `String`. The
-    /// diagnostic is a raw CloudKit message, so it stays verbatim; the wording
-    /// around it stays a resource and is resolved at render time.
-    private static func syncStatusText(_ status: CloudSyncStatus) -> Text {
-        let parts = status.summaryLineParts
-        var text = Text(parts.summary)
-        if let diagnostic = parts.diagnostic {
-            text = text + Text(verbatim: " · \(diagnostic)")
-        }
-        if let detail = parts.detail {
-            text = text + Text(verbatim: "\n") + Text(detail)
-        }
-        return text
+    /// Keeps status reads inside the leaf view that renders them. Reading the
+    /// observable phase at the app root would invalidate the entire app per tick.
+    private static func syncStatusPresentation(
+        _ status: CloudSyncStatus
+    ) -> SyncStatusPresentation {
+        SyncStatusPresentation(
+            summary: status.summary,
+            isSyncing: status.phase == .syncing,
+            itemCount: status.syncedRecordCount,
+            accountTag: status.accountTag
+        )
     }
 }
 

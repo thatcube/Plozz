@@ -53,6 +53,16 @@ export PLOZZ_TV_TOPSHELF_ENTITLEMENTS="${PLOZZ_TV_TOPSHELF_ENTITLEMENTS:-TopShel
 # canonical app's Push / iCloud / Associated Domains capabilities.
 export PLOZZ_IOS_APP_ENTITLEMENTS="${PLOZZ_IOS_APP_ENTITLEMENTS:-App/PlozziOS/PlozziOS.entitlements}"
 
+# Xcode resolves xcconfig includes before scheme pre-actions run, so linking the
+# local override from a scheme is one build too late. Restore it here before
+# either XcodeGen or the bake-only device-build path reads build settings.
+secrets_file="Config/Secrets.local.xcconfig"
+canonical_secrets="${XDG_CONFIG_HOME:-$HOME/.config}/plozz/Secrets.local.xcconfig"
+if [ ! -e "$secrets_file" ] && [ -f "$canonical_secrets" ]; then
+  ln -s "$canonical_secrets" "$secrets_file"
+  echo "Linked $secrets_file from $canonical_secrets"
+fi
+
 if [ "$BAKE_ONLY" != "1" ]; then
   xcodegen generate
 elif [ ! -f "Plozz.xcodeproj/project.pbxproj" ]; then
@@ -110,20 +120,44 @@ fi
 # written after a purchase) — so a TestFlight install could read as production
 # and silently default crash reporting OFF. The fastlane `beta`/`release` lanes
 # set PLOZZ_RELEASE_CHANNEL so the answer is decided at build time instead.
-if [ -n "${PLOZZ_RELEASE_CHANNEL:-}" ]; then
-  case "${PLOZZ_RELEASE_CHANNEL}" in
+release_channel="${PLOZZ_RELEASE_CHANNEL:-}"
+if [ -n "$release_channel" ]; then
+  case "$release_channel" in
     testflight|production) ;;
     *)
-      echo "error: PLOZZ_RELEASE_CHANNEL must be 'testflight' or 'production' (got '${PLOZZ_RELEASE_CHANNEL}')" >&2
+      echo "error: PLOZZ_RELEASE_CHANNEL must be 'testflight' or 'production' (got '${release_channel}')" >&2
       exit 1
       ;;
   esac
-  if [ -f "$proj" ]; then
-    /usr/bin/sed -i '' -E "s|PLOZZ_RELEASE_CHANNEL = [^;]*;|PLOZZ_RELEASE_CHANNEL = \"${PLOZZ_RELEASE_CHANNEL}\";|g" "$proj"
-    echo "Baked PLOZZ_RELEASE_CHANNEL = ${PLOZZ_RELEASE_CHANNEL} into ${proj}"
-  else
-    echo "warning: $proj not found; skipping release-channel bake"
+fi
+if [ -f "$proj" ]; then
+  /usr/bin/sed -i '' -E "s|PLOZZ_RELEASE_CHANNEL = [^;]*;|PLOZZ_RELEASE_CHANNEL = \"${release_channel}\";|g" "$proj"
+  if [ -n "$release_channel" ]; then
+    echo "Baked PLOZZ_RELEASE_CHANNEL = ${release_channel} into ${proj}"
   fi
+else
+  echo "warning: $proj not found; skipping release-channel bake"
+fi
+
+# --- Release-notes id bake ---------------------------------------------------
+# Distribution lanes select one committed ReleaseNotes.json entry. Baking that
+# stable id into Info.plist lets the app distinguish real shipped releases from
+# local builds and from another TestFlight build using the same CalVer date.
+release_id="${PLOZZ_RELEASE_ID:-}"
+if [ -n "$release_id" ]; then
+  if ! printf '%s' "$release_id" | grep -Eq '^release/[0-9]{3,}$'; then
+    echo "error: PLOZZ_RELEASE_ID must match release/<build> (got '${release_id}')" >&2
+    exit 1
+  fi
+fi
+if [ -f "$proj" ]; then
+  esc_release_id=$(printf '%s' "$release_id" | sed -e 's/[\\&|]/\\&/g')
+  /usr/bin/sed -i '' -E "s|PLOZZ_RELEASE_ID = [^;]*;|PLOZZ_RELEASE_ID = \"${esc_release_id}\";|g" "$proj"
+  if [ -n "$release_id" ]; then
+    echo "Baked PLOZZ_RELEASE_ID = ${release_id} into ${proj}"
+  fi
+else
+  echo "warning: $proj not found; skipping release-id bake"
 fi
 
 if [ -n "${PLOZZ_BUILD_NUMBER:-}" ]; then

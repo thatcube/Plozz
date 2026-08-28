@@ -40,6 +40,7 @@ public struct HeroLegibilityScrim: View {
     private let wash: Double
     private let edges: Edges
     private let sideDarkeningStart: Double
+    private let bottomFadeTop: Double
 
     /// - Parameters:
     ///   - tone: Mode-appropriate scrim colour (dark in dark mode, light in light).
@@ -52,18 +53,22 @@ public struct HeroLegibilityScrim: View {
     ///     ramps in, as a fraction of height. `0` darkens the full column
     ///     evenly (the symmetric default). A higher value keeps the upper
     ///     corners clean and brings the wash in only where content sits.
+    ///   - bottomFadeTop: The upper edge of the bottom-anchored fade. Lower values
+    ///     make the fade taller while leaving its bottom edge unchanged.
     public init(
         tone: Color,
         edgePeak: Double,
         wash: Double = 0.06,
         edges: Edges = .all,
-        sideDarkeningStart: Double = 0
+        sideDarkeningStart: Double = 0,
+        bottomFadeTop: Double = 0.58
     ) {
         self.tone = tone
         self.edgePeak = edgePeak
         self.wash = wash
         self.edges = edges
         self.sideDarkeningStart = sideDarkeningStart
+        self.bottomFadeTop = bottomFadeTop
     }
 
     public var body: some View {
@@ -83,7 +88,8 @@ public struct HeroLegibilityScrim: View {
                     startPoint: .top,
                     endPoint: .bottom,
                     startsDark: edges.contains(.top),
-                    endsDark: edges.contains(.bottom)
+                    endsDark: edges.contains(.bottom),
+                    bottomFadeTop: bottomFadeTop
                 )
             }
         }
@@ -119,18 +125,80 @@ public struct HeroLegibilityScrim: View {
         startPoint: UnitPoint,
         endPoint: UnitPoint,
         startsDark: Bool,
-        endsDark: Bool
+        endsDark: Bool,
+        bottomFadeTop: Double = 0.58
     ) -> some View {
         LinearGradient(
-            stops: [
-                .init(color: tone.opacity(startsDark ? edgePeak : 0), location: 0.0),
-                .init(color: .clear, location: 0.42),
-                .init(color: .clear, location: 0.58),
-                .init(color: tone.opacity(endsDark ? edgePeak : 0), location: 1.0)
-            ],
+            stops: edgeStops(
+                startsDark: startsDark,
+                endsDark: endsDark,
+                bottomFadeTop: bottomFadeTop
+            ),
             startPoint: startPoint,
             endPoint: endPoint
         )
+    }
+
+    private func edgeStops(
+        startsDark: Bool,
+        endsDark: Bool,
+        bottomFadeTop: Double
+    ) -> [Gradient.Stop] {
+        if startsDark, endsDark {
+            return [
+                .init(color: tone.opacity(edgePeak), location: 0),
+                .init(color: .clear, location: 0.42),
+                .init(color: .clear, location: 0.58),
+                .init(color: tone.opacity(edgePeak), location: 1)
+            ]
+        }
+        if startsDark {
+            return [
+                .init(color: tone.opacity(edgePeak), location: 0),
+                .init(color: .clear, location: 0.42),
+                .init(color: .clear, location: 1)
+            ]
+        }
+        guard endsDark else {
+            return [
+                .init(color: .clear, location: 0),
+                .init(color: .clear, location: 1)
+            ]
+        }
+
+        let span = 1 - bottomFadeTop
+        return [
+            .init(color: .clear, location: 0),
+            .init(
+                color: .clear,
+                location: max(0, bottomFadeTop - span * 0.10)
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.01),
+                location: bottomFadeTop + span * 0.04
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.04),
+                location: bottomFadeTop + span * 0.18
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.12),
+                location: bottomFadeTop + span * 0.34
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.28),
+                location: bottomFadeTop + span * 0.54
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.52),
+                location: bottomFadeTop + span * 0.74
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.76),
+                location: bottomFadeTop + span * 0.90
+            ),
+            .init(color: tone.opacity(edgePeak), location: 1)
+        ]
     }
 }
 #endif

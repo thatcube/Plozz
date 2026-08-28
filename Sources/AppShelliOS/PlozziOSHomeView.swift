@@ -6,6 +6,7 @@ import FeatureHomeCore
 import HeroUI
 import MediaDownloads
 import Observation
+import RatingsService
 import SwiftUI
 import UIKit
 
@@ -62,6 +63,7 @@ struct PlozziOSHomeView: View {
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
     private let onShowSettings: () -> Void
+    private let heroMetadataEnricher: HeroMetadataEnricher
 
     init(
         appModel: PlozziOSAppModel,
@@ -71,6 +73,19 @@ struct PlozziOSHomeView: View {
         self.appModel = appModel
         self.onAddServer = onAddServer
         self.onShowSettings = onShowSettings
+        let heroAccounts = appModel.accountsProviders.resolvedActiveAccounts
+        let identitySources = appModel.identityIndex.identitySourcesProvider
+        heroMetadataEnricher = HeroMetadataEnricher(
+            accounts: heroAccounts,
+            targetSelector: {
+                PlaybackSourceSelection.bestPlayItem(
+                    $0,
+                    accounts: heroAccounts,
+                    identitySources: identitySources
+                )
+            },
+            ratingsProvider: RatingsServiceFactory.make()
+        )
         _viewModel = State(
             initialValue: HomeViewModel(
                 accounts: appModel.accountsProviders.homeAccounts,
@@ -772,7 +787,12 @@ struct PlozziOSHomeView: View {
             }
         )
         guard !Task.isCancelled else { return }
-        let curated = result.items
+        // List records can carry an overview but omit their tagline. Publish only
+        // after the full hero metadata is ready, otherwise selecting a slide starts
+        // a detail fetch that visibly replaces the overview with the tagline.
+        let enriched = await heroMetadataEnricher.enrich(result.items)
+        guard !Task.isCancelled else { return }
+        let curated = curator.deduplicating(enriched)
         // Fold the fresh curation into what is already on screen rather than
         // replacing it, so a background refresh cannot reshuffle the carousel or
         // move the slide the viewer is looking at. Identical policy to tvOS,
@@ -814,7 +834,13 @@ struct PlozziOSHomeView: View {
         // including a transient failure right after a settings change, when
         // `showing` is deliberately empty — and deleting the snapshot there is the
         // very thing `saveHero`'s empty-write refusal exists to prevent.
-        let durable = HeroDurableSnapshot.filter(result.durableItems)
+        let enrichedByID = Dictionary(
+            curated.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let durable = HeroDurableSnapshot.filter(
+            result.durableItems.map { enrichedByID[$0.id] ?? $0 }
+        )
         if durable.isEmpty, freshIsAuthoritative {
             viewModel.clearCachedHeroItems()
         } else {
@@ -1624,7 +1650,12 @@ private struct PlozziOSPullResponsiveHomeBackdrop<Backdrop: View>: View {
         // lift. Applied after, the mask sits in the fixed parent space: the hero
         // slid under a stationary fade, so pulling down exposed the page
         // background above the image and left a hard unfaded edge below.
-        .mask { PlozziOSHeroFadeMask(extendsArtwork: extendsArtwork) }
+        .mask {
+            PlozziOSHeroFadeMask(
+                extendsArtwork: extendsArtwork,
+                upwardExtension: 0.20
+            )
+        }
         .offset(y: -pullDistance)
     }
 }

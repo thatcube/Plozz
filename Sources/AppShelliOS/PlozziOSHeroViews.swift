@@ -1039,9 +1039,9 @@ struct PlozziOSHeroLegibilityScrim: View {
             // layout puts the title in a left-hand column.
             edges: style == .landscape ? [.leading, .bottom] : [.bottom],
             sideDarkeningStart: 0.34,
-            // Raise the bottom protection slightly so the logo and teaser stay
-            // inside the fade, while also softening the reflected lower artwork.
-            bottomDarkeningStart: 0.52
+            // Keep the original fade onset, but reach full strength sooner so the
+            // protected region extends upward behind text and reflected artwork.
+            bottomDarkeningPeak: 0.90
         )
     }
 }

@@ -1059,7 +1059,10 @@ public struct SettingsView: View {
             syncSetupDetail
         case .syncTroubleshooting:
             if let syncRepair {
-                SyncTroubleshootingView(repair: syncRepair)
+                SyncTroubleshootingView(
+                    repair: syncRepair,
+                    statusProvider: syncStatusSummary
+                )
             }
         case let .seerUserPicker(profileID):
             if let profile = profiles.first(where: { $0.id == profileID }) {
@@ -1432,13 +1435,18 @@ public struct SettingsView: View {
 
 private struct SyncTroubleshootingView: View {
     let repair: SyncRepairActions
+    let statusProvider: SyncStatusProvider?
     @State private var confirmsReset = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 SettingsPageHeader("Troubleshooting")
+                if let statusProvider {
+                    SyncComparisonPanel(provider: statusProvider)
+                }
                 SettingsPanel(
+                    title: "Recovery",
                     footer: "Try Reload first. Reset only if changes are still missing.",
                     contentPadding: .settingsPanelRowContent
                 ) {
@@ -1482,6 +1490,25 @@ private struct SyncTroubleshootingView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Replaces iCloud data with this Apple TV’s copy. Other devices keep their logins.")
+        }
+    }
+}
+
+private struct SyncComparisonPanel: View {
+    let provider: SyncStatusProvider
+
+    var body: some View {
+        let status = provider.make()
+        SettingsPanel(
+            title: "Compare Devices",
+            footer: "These should match on every device."
+        ) {
+            LabeledSettingRow("iCloud items", labelWidth: 220) {
+                Text(verbatim: status.itemCount?.formatted() ?? "—")
+            }
+            LabeledSettingRow("iCloud account", labelWidth: 220) {
+                Text(verbatim: status.accountTag.map { "\($0)…" } ?? "—")
+            }
         }
     }
 }

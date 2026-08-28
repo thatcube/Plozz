@@ -4,10 +4,19 @@ import SwiftUI
 public struct SyncStatusPresentation {
     let summary: LocalizedStringResource
     let isSyncing: Bool
+    let itemCount: Int?
+    let accountTag: String?
 
-    public init(summary: LocalizedStringResource, isSyncing: Bool) {
+    public init(
+        summary: LocalizedStringResource,
+        isSyncing: Bool,
+        itemCount: Int? = nil,
+        accountTag: String? = nil
+    ) {
         self.summary = summary
         self.isSyncing = isSyncing
+        self.itemCount = itemCount
+        self.accountTag = accountTag
     }
 }
 

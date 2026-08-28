@@ -738,7 +738,9 @@ public struct RootView: View {
     ) -> SyncStatusPresentation {
         SyncStatusPresentation(
             summary: status.summary,
-            isSyncing: status.phase == .syncing
+            isSyncing: status.phase == .syncing,
+            itemCount: status.syncedRecordCount,
+            accountTag: status.accountTag
         )
     }
 }

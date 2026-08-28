@@ -512,6 +512,7 @@ public struct MediaRowView: View {
             }
         }
     }
+    }
 
     /// The card, plus whatever it takes to select it on this platform.
     ///

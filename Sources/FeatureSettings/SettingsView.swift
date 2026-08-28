@@ -45,7 +45,6 @@ public struct SettingsView: View {
     /// The shell's chrome model, present only under the custom navigation rail.
     @Environment(NavigationChromeModel.self) private var navigationChrome: NavigationChromeModel?
     @State private var confirmSignOutAll = false
-    @State private var showResetSyncConfirm = false
     @State private var confirmEraseICloud = false
     /// Hidden Developer Mode: reveals the diagnostic rows once unlocked by
     /// selecting the About/Version panel seven times. Off by default in every
@@ -1058,6 +1057,10 @@ public struct SettingsView: View {
             SeerDetailView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
         case .syncSetup:
             syncSetupDetail
+        case .syncTroubleshooting:
+            if let syncRepair {
+                SyncTroubleshootingView(repair: syncRepair)
+            }
         case let .seerUserPicker(profileID):
             if let profile = profiles.first(where: { $0.id == profileID }) {
                 SeerUserPickerView(seer: seer, profile: profile, onSelect: { onSetSeerrUser(profileID, $0) })
@@ -1227,23 +1230,9 @@ public struct SettingsView: View {
                     }
                 }
 
-                if syncEnabled, let syncRepair {
-                    SettingsPanel(
-                        title: "Fix Sync",
-                        contentPadding: .settingsPanelRowContent
-                    ) {
-                        HStack(spacing: 24) {
-                            Button("Reload From iCloud", action: syncRepair.redownload)
-                                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-                            Button("Reset Sync") { showResetSyncConfirm = true }
-                                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-                        }
-                    }
-                    .alert("Reset synced data?", isPresented: $showResetSyncConfirm) {
-                        Button("Reset", role: .destructive) { syncRepair.reset() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("Replaces iCloud data with this Apple TV’s copy. Other devices keep their logins.")
+                if let onSetUpAnotherDevice {
+                    SettingsPanel(contentPadding: .settingsPanelRowContent) {
+                        setUpAnotherDeviceRow(onSetUpAnotherDevice)
                     }
                 }
                 if !pendingSyncedServers.isEmpty {
@@ -1253,9 +1242,20 @@ public struct SettingsView: View {
                         }
                     }
                 }
-                if let onSetUpAnotherDevice {
+                if syncEnabled, syncRepair != nil {
                     SettingsPanel(contentPadding: .settingsPanelRowContent) {
-                        setUpAnotherDeviceRow(onSetUpAnotherDevice)
+                        NavigationLink(value: SettingsRoute.syncTroubleshooting) {
+                            SettingsRowLabel(
+                                icon: "wrench.and.screwdriver",
+                                title: "Troubleshooting",
+                                trailing: {
+                                    Image(systemName: "chevron.forward")
+                                        .font(.caption.weight(.semibold))
+                                        .settingsRowSecondary()
+                                }
+                            )
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
                     }
                 }
             }
@@ -1427,6 +1427,62 @@ public struct SettingsView: View {
             }
         }
         .buttonStyle(SettingsFocusButtonStyle())
+    }
+}
+
+private struct SyncTroubleshootingView: View {
+    let repair: SyncRepairActions
+    @State private var confirmsReset = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                SettingsPageHeader("Troubleshooting")
+                SettingsPanel(
+                    footer: "Try Reload first. Reset only if changes are still missing.",
+                    contentPadding: .settingsPanelRowContent
+                ) {
+                    VStack(spacing: 12) {
+                        Button(action: repair.redownload) {
+                            SettingsRowLabel(
+                                icon: "arrow.down.circle",
+                                title: "Reload From iCloud",
+                                secondary: {
+                                    Text("Download the latest shared settings.")
+                                        .font(.footnote)
+                                        .settingsRowSecondary()
+                                }
+                            )
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+
+                        Button { confirmsReset = true } label: {
+                            SettingsRowLabel(
+                                icon: "arrow.clockwise",
+                                title: "Reset Sync",
+                                secondary: {
+                                    Text("Replace iCloud data with this Apple TV’s copy.")
+                                        .font(.footnote)
+                                        .settingsRowSecondary()
+                                }
+                            )
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle())
+                    }
+                }
+            }
+            .frame(maxWidth: 1200, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, 40)
+        }
+        .scrollClipDisabled()
+        .alert("Reset synced data?", isPresented: $confirmsReset) {
+            Button("Reset", role: .destructive, action: repair.reset)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Replaces iCloud data with this Apple TV’s copy. Other devices keep their logins.")
+        }
     }
 }
 

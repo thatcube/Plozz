@@ -434,7 +434,9 @@ public struct RootView: View {
                         // subscribed the ROOT of the app to a model that ticks
                         // through every sync, and a root re-render dirties every
                         // view below it — the widest possible invalidation.
-                        syncStatusSummary: SyncStatusProvider { Self.syncStatusText(appState.cloudSyncStatus) },
+                        syncStatusSummary: SyncStatusProvider {
+                            Self.syncStatusPresentation(appState.cloudSyncStatus)
+                        },
                         onSyncNow: { appState.syncCloudNow() },
                         syncRepair: syncRepairActions,
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
@@ -729,10 +731,15 @@ public struct RootView: View {
         .installNightShiftOverlay(appState.profileSettings.nightShiftModel)
     }
 
-    /// Keeps the Settings status user-facing. Record counts, internal identities,
-    /// and CloudKit diagnostics belong in diagnostics, not the everyday sync page.
-    private static func syncStatusText(_ status: CloudSyncStatus) -> Text {
-        Text(status.summaryLineParts.summary)
+    /// Keeps status reads inside the leaf view that renders them. Reading the
+    /// observable phase at the app root would invalidate the entire app per tick.
+    private static func syncStatusPresentation(
+        _ status: CloudSyncStatus
+    ) -> SyncStatusPresentation {
+        SyncStatusPresentation(
+            summary: status.summary,
+            isSyncing: status.phase == .syncing
+        )
     }
 }
 

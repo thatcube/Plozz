@@ -5,6 +5,8 @@
 # Installs tools/launchd/com.thatcube.reclaim-disk.plist into
 # ~/Library/LaunchAgents with its ProgramArguments path rewritten to THIS
 # checkout's tools/reclaim-disk.sh, then (re)loads it so it runs daily at 03:30.
+# This is an alternative to the app workflow, not a second scheduler. The target
+# script owns the shared lock, build-quiet wait, and per-deletion safety checks.
 #
 # USAGE
 #   tools/install-reclaim-agent.sh            # install / update + load
@@ -48,6 +50,7 @@ case "$action" in
     load_agent
     echo "Installed $LABEL -> $DEST"
     echo "Runs daily 03:30 via: $SCRIPT --days 4"
+    echo "Use either this LaunchAgent or the app workflow; disable the other scheduler."
     echo "Log: ~/Library/Logs/reclaim-disk.log"
     ;;
   *) echo "usage: $0 [install|--uninstall|--status]" >&2; exit 1 ;;

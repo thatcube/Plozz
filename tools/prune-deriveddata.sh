@@ -12,8 +12,10 @@
 # WHAT IS *NOT* TOUCHED (the expensive, shared, reusable stuff)
 #   * ModuleCache.noindex — the Clang module cache, shared by every worktree.
 #     Only trimmed when you pass --module-cache AND it exceeds the size limit.
-#   * Any DerivedData folder modified in the last $ACTIVE_MIN minutes — assumed
-#     to be an in-progress build (protects parallel agents).
+#   * Any DerivedData folder modified in the last $ACTIVE_MIN minutes.
+#   * All deletion while Apple build processes are active. Apply runs take the
+#     shared maintenance lock, wait for a configurable process-quiet interval,
+#     then recheck process activity and open paths before each deletion.
 #   (Historical: ~/Library/Caches/plozz-mpv/mpv was the retired mpv/FFmpeg codec
 #    cache. mpv is gone; that cache is now an orphaned leftover this script never
 #    touches — safe to delete by hand if you want the ~78 MB back.)
@@ -39,6 +41,11 @@
 #   --dry-run        Print what would be deleted; delete nothing.
 #   -h | --help      Show this help.
 #
+# BUILD GUARD ENVIRONMENT
+#   APPLE_BUILD_QUIET_SECONDS  Required no-build interval before apply (default 120).
+#   APPLE_BUILD_MAX_WAIT_SECONDS  Maximum wait for quiet (default 900).
+#   See docs/disk-reclaim.md for lock/process/open-path details.
+#
 # EXAMPLES
 #   tools/prune-deriveddata.sh                 # safe periodic cleanup
 #   tools/prune-deriveddata.sh --dry-run       # preview the safe cleanup
@@ -50,6 +57,7 @@ set -euo pipefail
 DD="${DERIVED_DATA_DIR:-$HOME/Library/Developer/Xcode/DerivedData}"
 ACTIVE_MIN="${ACTIVE_MIN:-15}"                       # skip dirs touched within N min
 MODULE_CACHE_LIMIT_GB="${MODULE_CACHE_LIMIT_GB:-10}" # trim ModuleCache above this
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="orphans"
 TARGET=""
@@ -57,7 +65,7 @@ DRY=0
 TRIM_MODULE_CACHE=0
 STALE_DAYS="${STALE_DAYS:-0}"                        # >0: also prune idle live worktrees
 
-usage() { sed -n '2,52p' "$0"; }
+usage() { sed -n '2,54p' "$0"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -76,6 +84,8 @@ done
 
 [ -d "$DD" ] || { echo "No DerivedData dir at $DD — nothing to do."; exit 0; }
 
+source "$SELF_DIR/lib/apple-build-guard.sh"
+
 # Resolve a real absolute path (worktrees may be symlinked).
 realpath_safe() { /usr/bin/python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$1" 2>/dev/null || echo "$1"; }
 [ -n "$TARGET" ] && TARGET="$(realpath_safe "$TARGET")"
@@ -90,8 +100,11 @@ dir_recently_active() {  # 0 (true) if modified within ACTIVE_MIN minutes
 
 # --- idle-worktree detection (for --stale-days) --------------------------------
 STALE_REF=""
-cleanup_stale_ref() { [ -n "$STALE_REF" ] && rm -f "$STALE_REF"; }
-trap cleanup_stale_ref EXIT
+cleanup() {
+  [ -n "$STALE_REF" ] && rm -f "$STALE_REF"
+  release_maintenance_lock
+}
+trap cleanup EXIT
 ensure_stale_ref() {  # a marker file stamped exactly STALE_DAYS days ago
   [ -n "$STALE_REF" ] && return
   STALE_REF="$(mktemp -t ddprune)"
@@ -122,17 +135,35 @@ remove_dir() {  # $1 = path, $2 = reason
     echo "skip  (active <${ACTIVE_MIN}m)  $(basename "$d")  [$reason]"
     return
   fi
+  if [ "$DRY" -ne 1 ] && ! guard_cache_path_for_delete "$d"; then
+    destructive_aborted=1
+    return
+  fi
   local sz; sz="$(human "$d")"
   if [ "$DRY" -eq 1 ]; then
     echo "would delete  $sz  $(basename "$d")  [$reason]"
   else
-    rm -rf "$d" && echo "deleted  $sz  $(basename "$d")  [$reason]"
-    deleted=$((deleted+1))
+    if rm -rf "$d"; then
+      echo "deleted  $sz  $(basename "$d")  [$reason]"
+      deleted=$((deleted+1))
+    else
+      echo "Failed to delete $d; stopping destructive maintenance." >&2
+      destructive_aborted=1
+    fi
   fi
 }
 
+destructive_aborted=0
+if [ "$DRY" -ne 1 ] && ! validate_cache_container "$DD"; then
+  exit 75
+fi
+if [ "$DRY" -ne 1 ] && ! begin_destructive_maintenance; then
+  exit 75
+fi
+
 shopt -s nullglob
 for d in "$DD"/*/; do
+  [ "$destructive_aborted" -eq 0 ] || break
   d="${d%/}"
   base="$(basename "$d")"
   case "$base" in
@@ -168,10 +199,17 @@ if [ "$TRIM_MODULE_CACHE" -eq 1 ] && [ -d "$DD/ModuleCache.noindex" ]; then
   mc_kb="$(du -sk "$DD/ModuleCache.noindex" 2>/dev/null | awk '{print $1}')"
   limit_kb=$(( MODULE_CACHE_LIMIT_GB * 1024 * 1024 ))
   if [ "${mc_kb:-0}" -gt "$limit_kb" ]; then
-    remove_dir "$DD/ModuleCache.noindex" "ModuleCache > ${MODULE_CACHE_LIMIT_GB}GB"
+    [ "$destructive_aborted" -ne 0 ] ||
+      remove_dir "$DD/ModuleCache.noindex" "ModuleCache > ${MODULE_CACHE_LIMIT_GB}GB"
   else
     echo "ModuleCache.noindex under ${MODULE_CACHE_LIMIT_GB}GB ($(human "$DD/ModuleCache.noindex")) — kept."
   fi
+
+fi
+
+if [ "$destructive_aborted" -ne 0 ]; then
+  echo "Stopped: a build/open-path safety check failed; no further cache paths were deleted."
+  exit 75
 fi
 
 if [ "$DRY" -eq 1 ]; then

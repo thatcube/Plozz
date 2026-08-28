@@ -5,9 +5,10 @@
     <key>Label</key>
     <string>com.thatcube.reclaim-disk</string>
 
-    <!-- Runs the shared daily build-cache reclaim for Plozz/Mozz/Twozz.
+    <!-- Runs the shared, process-guarded build-cache reclaim for Plozz/Mozz/Twozz.
          Installed by tools/install-reclaim-agent.sh (which rewrites the
-         ProgramArguments path to this machine's checkout). -->
+         ProgramArguments path to this machine's checkout). Use instead of,
+         not alongside, the app's daily reclaim workflow. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
@@ -39,6 +40,10 @@
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>APPLE_BUILD_QUIET_SECONDS</key>
+        <string>120</string>
+        <key>APPLE_BUILD_MAX_WAIT_SECONDS</key>
+        <string>900</string>
     </dict>
 
     <key>StandardOutPath</key>

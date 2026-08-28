@@ -49,10 +49,19 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     private let mediaCredentialVault: MediaCredentialVault?
     private let credentialJournal: CredentialMutationJournal?
     private let lock = NSLock()
+    private struct CachedToken {
+        let value: String?
+        let isConfirmed: Bool
+    }
+    private var cachedVisibleAccounts: [Account]?
+    private var cachedTokens: [String: CachedToken] = [:]
+    private var observedCredentialCacheGeneration: UInt64 = 0
     /// Account metadata is one shared JSON value. Serialize complete mutations
     /// across AccountStore instances so two successful transactions cannot replace
     /// that value from stale snapshots and silently drop each other's accounts.
     private static let processMutationLock = NSLock()
+    private static let credentialCacheGenerationLock = NSLock()
+    nonisolated(unsafe) private static var credentialCacheGeneration: UInt64 = 0
 
     // This is intentionally a new, migration-free schema. The app is still in
     // tester-only distribution, so old account records are ignored and users
@@ -104,13 +113,27 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     public func loadAccounts() -> [Account] {
         lock.lock()
         defer { lock.unlock() }
-        return visibleAccountsLocked()
+        synchronizeCredentialCacheGenerationLocked()
+        let result = visibleAccountsResultLocked()
+        let accounts = result.accounts
+        cachedVisibleAccounts = result.complete ? accounts : nil
+        primeTokenCacheLocked(for: accounts)
+        return accounts
     }
 
     public func activeAccountIDs() -> [String] {
         lock.lock()
         defer { lock.unlock() }
-        let accounts = visibleAccountsLocked()
+        synchronizeCredentialCacheGenerationLocked()
+        let accounts: [Account]
+        if let cachedVisibleAccounts {
+            accounts = cachedVisibleAccounts
+        } else {
+            let result = visibleAccountsResultLocked()
+            accounts = result.accounts
+            self.cachedVisibleAccounts = result.complete ? accounts : nil
+            primeTokenCacheLocked(for: accounts)
+        }
         let known = Set(accounts.map(\.id))
         guard let ids = decodeIDs(secureStore.string(for: activeIDsKey)) else {
             return accounts.map(\.id)
@@ -127,18 +150,46 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         persistActiveLocked(ids.filter { known.contains($0) })
     }
 
-    public func token(for accountID: String) -> String? {
+    public func token(for accountID: String) -> String? {  // l10n:content — returns a credential; prose literals are diagnostic logs
         lock.lock()
         defer { lock.unlock() }
-        guard let account = persistedAccountsLocked().first(where: { $0.id == accountID }) else {
+        synchronizeCredentialCacheGenerationLocked()
+        if let cached = cachedTokens[accountID] {
+            return cached.value
+        }
+        do {
+            let accounts = try cachedVisibleAccounts
+                ?? persistedAccountsLockedThrowing()
+            guard let account = accounts.first(where: { $0.id == accountID }) else {
+                cachedTokens[accountID] = CachedToken(
+                    value: nil,
+                    isConfirmed: true
+                )
+                return nil
+            }
+            let token = try readTokenLocked(for: account)
+            cachedTokens[accountID] = CachedToken(
+                value: token,
+                isConfirmed: true
+            )
+            return token
+        } catch {
+            cachedTokens[accountID] = CachedToken(
+                value: nil,
+                isConfirmed: false
+            )
+            PlozzLog.auth.error(
+                "Account credential temporarily unavailable" // l10n:content — diagnostic log, not user-facing
+            )
             return nil
         }
+    }
+
+    private func readTokenLocked(for account: Account) throws -> String? {
         guard account.server.provider == .mediaShare else {
-            return secureStore.string(for: tokenKey(accountID))
+            return try secureStore.readString(for: tokenKey(account.id))
         }
-        guard let credential = try? mediaShareCredentialLocked(for: account) else {
-            return nil
-        }
+        let credential = try mediaShareCredentialLocked(for: account)
         switch credential.authentication {
         case .anonymous, .noCredentials:
             return ""
@@ -149,6 +200,57 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         case .generatedKey:
             return nil
         }
+    }
+
+    private func primeTokenCacheLocked(for accounts: [Account]) {
+        for account in accounts
+            where cachedTokens[account.id]?.isConfirmed != true {
+            do {
+                cachedTokens[account.id] = CachedToken(
+                    value: try readTokenLocked(for: account),
+                    isConfirmed: true
+                )
+            } catch {
+                // Keep synchronous provider resolution out of Keychain after
+                // launch. A later account reload retries this unconfirmed entry.
+                cachedTokens[account.id] = CachedToken(
+                    value: nil,
+                    isConfirmed: false
+                )
+                PlozzLog.auth.error(
+                    "Account credential priming temporarily unavailable" // l10n:content — diagnostic log, not user-facing
+                )
+            }
+        }
+    }
+
+    private func synchronizeCredentialCacheGenerationLocked() {
+        let generation = Self.currentCredentialCacheGeneration()
+        guard generation != observedCredentialCacheGeneration else { return }
+        cachedVisibleAccounts = nil
+        cachedTokens.removeAll(keepingCapacity: true)
+        observedCredentialCacheGeneration = generation
+    }
+
+    private func invalidateCredentialCacheAfterMutationLocked() {
+        cachedVisibleAccounts = nil
+        cachedTokens.removeAll(keepingCapacity: true)
+        observedCredentialCacheGeneration =
+            Self.advanceCredentialCacheGeneration()
+    }
+
+    private static func currentCredentialCacheGeneration() -> UInt64 {
+        credentialCacheGenerationLock.lock()
+        defer { credentialCacheGenerationLock.unlock() }
+        return credentialCacheGeneration
+    }
+
+    @discardableResult
+    private static func advanceCredentialCacheGeneration() -> UInt64 {
+        credentialCacheGenerationLock.lock()
+        defer { credentialCacheGenerationLock.unlock() }
+        credentialCacheGeneration &+= 1
+        return credentialCacheGeneration
     }
 
     public func mediaShareCredential(
@@ -184,6 +286,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
+        defer { invalidateCredentialCacheAfterMutationLocked() }
         if account.server.provider == .mediaShare {
             let credential = try legacySMBInputCredential(account: account, password: token)
             try addMediaShareLocked(
@@ -205,6 +308,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
+        defer { invalidateCredentialCacheAfterMutationLocked() }
         try addMediaShareLocked(
             account,
             credential: credential,
@@ -217,6 +321,10 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
+        guard try persistedAccountsLockedThrowing().contains(where: { $0.id == id }) else {
+            return
+        }
+        defer { invalidateCredentialCacheAfterMutationLocked() }
         try removeLocked(id: id)
     }
 
@@ -225,6 +333,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         defer { Self.processMutationLock.unlock() }
         lock.lock()
         defer { lock.unlock() }
+        defer { invalidateCredentialCacheAfterMutationLocked() }
         for account in try persistedAccountsLockedThrowing() {
             try removeLocked(id: account.id)
         }
@@ -241,7 +350,9 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         if mediaCredentialVault == nil, credentialJournal == nil {
             return
         }
-        try recoverCredentialMutationsLocked()
+        if try recoverCredentialMutationsLocked() {
+            invalidateCredentialCacheAfterMutationLocked()
+        }
     }
 
     private func addManagedAccountLocked(_ account: Account, token: String) throws {
@@ -714,9 +825,11 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         PlozzLog.auth.info("Removed account \(id)")
     }
 
-    private func recoverCredentialMutationsLocked() throws {
+    @discardableResult
+    private func recoverCredentialMutationsLocked() throws -> Bool {
         let infrastructure = try mediaShareInfrastructure()
-        for action in try infrastructure.journal.recoveryActions() {
+        let actions = try infrastructure.journal.recoveryActions()
+        for action in actions {
             switch action {
             case .rollbackPending(let entry):
                 try rollbackLocked(entry, infrastructure: infrastructure)
@@ -724,6 +837,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
                 try completeLocked(entry, infrastructure: infrastructure)
             }
         }
+        return !actions.isEmpty
     }
 
     private func rollbackLocked(
@@ -917,10 +1031,34 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     private func visibleAccountsLocked() -> [Account] {
-        persistedAccountsLocked().filter { account in
-            guard account.server.provider == .mediaShare else { return true }
-            return (try? mediaShareCredentialLocked(for: account)) != nil
+        visibleAccountsResultLocked().accounts
+    }
+
+    private func visibleAccountsResultLocked() -> (
+        accounts: [Account],
+        complete: Bool
+    ) {
+        let persisted: [Account]
+        do {
+            persisted = try persistedAccountsLockedThrowing()
+        } catch {
+            PlozzLog.auth.error(
+                "Account metadata unavailable; preserving stored value"
+            )
+            return ([], false)
         }
+        var complete = true
+        let visible = persisted.filter { account in
+            guard account.server.provider == .mediaShare else { return true }
+            do {
+                _ = try mediaShareCredentialLocked(for: account)
+                return true
+            } catch {
+                complete = false
+                return false
+            }
+        }
+        return (visible, complete)
     }
 
     private func isVisibleMediaShareRevisionLocked(

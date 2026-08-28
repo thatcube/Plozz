@@ -200,6 +200,70 @@ final class AccountStoreTests: XCTestCase {
         }
     }
 
+    private final class CountingSecureStore: SecureStore, @unchecked Sendable {
+        private enum Failure: Error {
+            case unavailable
+        }
+
+        private let base = InMemorySecureStore()
+        private let lock = NSLock()
+        private var tokenReads = 0
+        private var tokenReadsFail = false
+        private var metadataReadsFail = false
+
+        var tokenReadCount: Int {
+            lock.withLock { tokenReads }
+        }
+
+        func resetTokenReadCount() {
+            lock.withLock { tokenReads = 0 }
+        }
+
+        func setTokenReadFailure(_ value: Bool) {
+            lock.withLock { tokenReadsFail = value }
+        }
+
+        func setMetadataReadFailure(_ value: Bool) {
+            lock.withLock { metadataReadsFail = value }
+        }
+
+        func setString(_ value: String, for key: String) throws {
+            try base.setString(value, for: key)
+        }
+
+        func insertStringIfAbsent(
+            _ value: String,
+            for key: String
+        ) throws -> Bool {
+            try base.insertStringIfAbsent(value, for: key)
+        }
+
+        func string(for key: String) -> String? {
+            if key.hasPrefix("com.plozz.account.token.") {
+                lock.withLock { tokenReads += 1 }
+            }
+            return base.string(for: key)
+        }
+
+        func readString(for key: String) throws -> String? {
+            if key.hasPrefix("com.plozz.account.token.") {
+                let shouldFail = lock.withLock {
+                    tokenReads += 1
+                    return tokenReadsFail
+                }
+                if shouldFail { throw Failure.unavailable }
+            } else if key == "com.plozz.accounts.v2",
+                      lock.withLock({ metadataReadsFail }) {
+                throw Failure.unavailable
+            }
+            return try base.readString(for: key)
+        }
+
+        func removeValue(for key: String) throws {
+            try base.removeValue(for: key)
+        }
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suite = "test.\(UUID().uuidString)"
         return UserDefaults(suiteName: suite)!
@@ -303,6 +367,96 @@ final class AccountStoreTests: XCTestCase {
         ])
         XCTAssertEqual(store.token(for: "jellyfin-account"), "JF_TOKEN")
         XCTAssertEqual(store.token(for: "plex-account"), "PLEX_TOKEN")
+    }
+
+    func testAccountLoadPrimesTokenForSynchronousProviderResolution() throws {
+        let secure = CountingSecureStore()
+        let store = AccountStore(secureStore: secure)
+        try store.add(account("a1"), token: "TOKEN")
+        secure.resetTokenReadCount()
+
+        XCTAssertEqual(store.loadAccounts().map(\.id), ["a1"])
+        let readsAfterLoad = secure.tokenReadCount
+        XCTAssertEqual(readsAfterLoad, 1)
+
+        for _ in 0..<20 {
+            XCTAssertEqual(store.token(for: "a1"), "TOKEN")
+        }
+        XCTAssertEqual(
+            secure.tokenReadCount,
+            readsAfterLoad,
+            "Provider resolution must use the launch-time memory cache"
+        )
+    }
+
+    func testAnotherStoreMutationInvalidatesCachedToken() throws {
+        let secure = CountingSecureStore()
+        let first = AccountStore(secureStore: secure)
+        let second = AccountStore(secureStore: secure)
+        try first.add(account("a1"), token: "OLD")
+        _ = first.loadAccounts()
+        XCTAssertEqual(first.token(for: "a1"), "OLD")
+
+        try second.add(account("a1"), token: "NEW")
+
+        XCTAssertEqual(first.token(for: "a1"), "NEW")
+    }
+
+    func testTransientTokenReadFailureIsNotCachedAsMissing() throws {
+        let secure = CountingSecureStore()
+        let store = AccountStore(secureStore: secure)
+        try store.add(account("a1"), token: "TOKEN")
+        secure.resetTokenReadCount()
+        secure.setTokenReadFailure(true)
+
+        XCTAssertEqual(store.loadAccounts().map(\.id), ["a1"])
+        XCTAssertNil(store.token(for: "a1"))
+        XCTAssertEqual(secure.tokenReadCount, 1)
+
+        secure.setTokenReadFailure(false)
+        _ = store.loadAccounts()
+        XCTAssertEqual(store.token(for: "a1"), "TOKEN")
+        XCTAssertEqual(secure.tokenReadCount, 2)
+    }
+
+    func testTransientMetadataReadFailureIsNotCachedAsMissingToken() throws {
+        let secure = CountingSecureStore()
+        let store = AccountStore(secureStore: secure)
+        try store.add(account("a1"), token: "TOKEN")
+        secure.setMetadataReadFailure(true)
+
+        XCTAssertNil(store.token(for: "a1"))
+
+        secure.setMetadataReadFailure(false)
+        _ = store.loadAccounts()
+        XCTAssertEqual(store.token(for: "a1"), "TOKEN")
+    }
+
+    func testNoOpRemovalKeepsOtherStoreTokenCachePrimed() throws {
+        let secure = CountingSecureStore()
+        let first = AccountStore(secureStore: secure)
+        let second = AccountStore(secureStore: secure)
+        try first.add(account("a1"), token: "TOKEN")
+        _ = first.loadAccounts()
+        let readsAfterLoad = secure.tokenReadCount
+
+        try second.remove(id: "missing")
+
+        XCTAssertEqual(first.token(for: "a1"), "TOKEN")
+        XCTAssertEqual(secure.tokenReadCount, readsAfterLoad)
+    }
+
+    func testEmptyRecoveryKeepsPrimedTokenCache() throws {
+        let secure = CountingSecureStore()
+        let store = AccountStore(secureStore: secure)
+        try store.add(account("a1"), token: "TOKEN")
+        _ = store.loadAccounts()
+        let readsAfterLoad = secure.tokenReadCount
+
+        try store.recoverCredentialMutations()
+
+        XCTAssertEqual(store.token(for: "a1"), "TOKEN")
+        XCTAssertEqual(secure.tokenReadCount, readsAfterLoad)
     }
 
     private func shareAccount(

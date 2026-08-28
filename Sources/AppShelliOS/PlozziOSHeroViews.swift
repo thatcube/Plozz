@@ -987,17 +987,43 @@ struct PlozziOSHeroFadeMask: View {
     private func gradient(start: CGFloat) -> some View {
         let span = max(1 - start, 0.0001)
         return LinearGradient(
-            stops: [
-                .init(color: .black, location: 0),
-                .init(color: .black, location: start),
-                .init(color: .black.opacity(0.72), location: start + span * 0.32),
-                .init(color: .black.opacity(0.36), location: start + span * 0.60),
-                .init(color: .black.opacity(0.10), location: start + span * 0.83),
-                .init(color: .clear, location: 1)
-            ],
+            stops: colorScheme == .light
+                ? lightModeStops(start: start, span: span)
+                : darkModeStops(start: start, span: span),
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+
+    private func lightModeStops(
+        start: CGFloat,
+        span: CGFloat
+    ) -> [Gradient.Stop] {
+        [
+            .init(color: .black, location: 0),
+            .init(color: .black, location: start),
+            .init(color: .black.opacity(0.98), location: start + span * 0.12),
+            .init(color: .black.opacity(0.90), location: start + span * 0.28),
+            .init(color: .black.opacity(0.72), location: start + span * 0.47),
+            .init(color: .black.opacity(0.46), location: start + span * 0.67),
+            .init(color: .black.opacity(0.22), location: start + span * 0.84),
+            .init(color: .black.opacity(0.07), location: start + span * 0.94),
+            .init(color: .clear, location: 1)
+        ]
+    }
+
+    private func darkModeStops(
+        start: CGFloat,
+        span: CGFloat
+    ) -> [Gradient.Stop] {
+        [
+            .init(color: .black, location: 0),
+            .init(color: .black, location: start),
+            .init(color: .black.opacity(0.72), location: start + span * 0.32),
+            .init(color: .black.opacity(0.36), location: start + span * 0.60),
+            .init(color: .black.opacity(0.10), location: start + span * 0.83),
+            .init(color: .clear, location: 1)
+        ]
     }
 }
 

@@ -776,6 +776,7 @@ private struct PlozziOSHeroPictureLayout {
 }
 
 private struct PlozziOSHeroBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.themePalette) private var palette
 
     let presentation: HeroPresentation
@@ -831,7 +832,13 @@ private struct PlozziOSHeroBackdrop: View {
         // being painted over with an opaque grey that reads as muddy.
         .mask {
             if appliesFadeMask {
-                PlozziOSHeroFadeMask(extendsArtwork: extendsArtwork)
+                PlozziOSHeroFadeMask(
+                    extendsArtwork: extendsArtwork,
+                    // Detail is intentionally shorter than Home, so its light-mode
+                    // dissolve needs more runway to keep the white handoff subtle.
+                    upwardExtension:
+                        surfaceRole == .detail && colorScheme == .light ? 0.10 : 0
+                )
             } else {
                 Rectangle().fill(.white)
             }

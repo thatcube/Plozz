@@ -1190,18 +1190,18 @@ public struct SettingsView: View {
         }
     }
 
-    // MARK: - Enable profiles row (single-profile household)
+    // MARK: - iCloud sync and setup
 
     /// Level-2 "iCloud Sync" page: the sync opt-in plus the "set up another device"
     /// pairing action, combined into one place (matches iOS's Sync & Setup page).
     @ViewBuilder
     private var syncSetupDetail: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 48) {
                 if let onSetSyncEnabled {
                     SettingsPanel(
                         title: "iCloud Sync",
-                        footer: "Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device — sign in or pair each server once. Off by default."
+                        footer: "Syncs profiles, settings, and servers. Logins stay on each device."
                     ) {
                         Toggle("Sync With iCloud", isOn: Binding(
                             get: { syncEnabled }, set: { onSetSyncEnabled($0) }
@@ -1209,74 +1209,52 @@ public struct SettingsView: View {
                         .toggleStyle(SettingsSwitchToggleStyle())
 
                         if syncEnabled, let syncStatusSummary {
-                            LabeledSettingRow("Status", labelWidth: 160) {
-                                HStack(spacing: 16) {
-                                    // Evaluated HERE, inside a leaf view, not at
-                                    // the root. Building this line in
-                                    // `RootView.body` made the whole app a
-                                    // subscriber of `CloudSyncStatus`, so every
-                                    // sync tick dirtied the entire view tree.
-                                    SyncStatusLine(provider: syncStatusSummary)
-                                        .font(.callout)
-                                        .plozzForeground(.secondary)
-                                    Spacer(minLength: 0)
-                                    if let onSyncNow {
-                                        Button("Sync Now", action: onSyncNow)
-                                            .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-                                    }
+                            HStack(spacing: 24) {
+                                // Evaluated HERE, inside a leaf view, not at the
+                                // root, so sync ticks invalidate only this line.
+                                SyncStatusLine(provider: syncStatusSummary)
+                                    .font(.callout)
+                                    .plozzForeground(.secondary)
+                                Spacer(minLength: 0)
+                                if let onSyncNow {
+                                    Button("Sync Now", action: onSyncNow)
+                                        .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
                                 }
                             }
+                            .padding(.top, 12)
                             .tvOSFocusSection()
-                        }
-
-                        if syncEnabled, let syncRepair {
-                            LabeledSettingRow("Troubleshoot", labelWidth: 160) {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    HStack(spacing: 16) {
-                                        Text("Not seeing changes from your other devices? Pull a fresh copy from iCloud.")
-                                            .font(.footnote)
-                                            .plozzForeground(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        Spacer(minLength: 0)
-                                        Button("Re-download From iCloud", action: syncRepair.redownload)
-                                            .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-                                    }
-                                    HStack(spacing: 16) {
-                                        Text("Still wrong? Wipe the iCloud copy and re-upload from this Apple TV.")
-                                            .font(.footnote)
-                                            .plozzForeground(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        Spacer(minLength: 0)
-                                        Button("Reset Sync") { showResetSyncConfirm = true }
-                                            .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-                                    }
-                                }
-                            }
-                            .tvOSFocusSection()
-                            .alert("Reset synced data?", isPresented: $showResetSyncConfirm) {
-                                Button("Reset", role: .destructive) { syncRepair.reset() }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("Deletes the shared iCloud copy and re-uploads it from THIS Apple TV. Other devices keep their own logins. Use only if devices won't converge.")
-                            }
                         }
                     }
                 }
-                if !pendingSyncedServers.isEmpty {
+
+                if syncEnabled, let syncRepair {
                     SettingsPanel(
-                        title: "Servers From Your Other Devices",
-                        footer: "These servers are set up on another device on your iCloud account. Sign in to watch them here — your login stays private to each device."
+                        title: "Fix Sync",
+                        contentPadding: .settingsPanelRowContent
                     ) {
+                        HStack(spacing: 24) {
+                            Button("Reload From iCloud", action: syncRepair.redownload)
+                                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+                            Button("Reset Sync") { showResetSyncConfirm = true }
+                                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+                        }
+                    }
+                    .alert("Reset synced data?", isPresented: $showResetSyncConfirm) {
+                        Button("Reset", role: .destructive) { syncRepair.reset() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Replaces iCloud data with this Apple TV’s copy. Other devices keep their logins.")
+                    }
+                }
+                if !pendingSyncedServers.isEmpty {
+                    SettingsPanel(title: "Servers to Set Up") {
                         ForEach(pendingSyncedServers, id: \.id) { server in
                             pendingServerRow(server)
                         }
                     }
                 }
                 if let onSetUpAnotherDevice {
-                    SettingsPanel(
-                        title: "Set Up Another Device",
-                        footer: "Sign in a phone or tablet from this Apple TV over your local network."
-                    ) {
+                    SettingsPanel(contentPadding: .settingsPanelRowContent) {
                         setUpAnotherDeviceRow(onSetUpAnotherDevice)
                     }
                 }
@@ -1295,7 +1273,7 @@ public struct SettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(server.serverName)
                     .font(.callout.weight(.medium))
-                Text("Needs sign-in on this device")
+                Text("Needs sign-in")
                     .font(.footnote)
                     .settingsRowSecondary()
             }
@@ -1311,13 +1289,14 @@ public struct SettingsView: View {
         .tvOSFocusSection()
     }
 
-    private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {        Button(action: action) {
+    private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(alignment: .top, spacing: 16) {
                 rowIcon("qrcode")
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Set Up Another Device")
                         .font(.callout.weight(.medium))
-                    Text("Sign in a phone or tablet from this Apple TV.")
+                    Text("Connect an iPhone or iPad.")
                         .font(.footnote)
                         .settingsRowSecondary()
                         .fixedSize(horizontal: false, vertical: true)

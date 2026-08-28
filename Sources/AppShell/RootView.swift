@@ -729,19 +729,10 @@ public struct RootView: View {
         .installNightShiftOverlay(appState.profileSettings.nightShiftModel)
     }
 
-    /// Composes the sync status line as `Text` rather than a `String`. The
-    /// diagnostic is a raw CloudKit message, so it stays verbatim; the wording
-    /// around it stays a resource and is resolved at render time.
+    /// Keeps the Settings status user-facing. Record counts, internal identities,
+    /// and CloudKit diagnostics belong in diagnostics, not the everyday sync page.
     private static func syncStatusText(_ status: CloudSyncStatus) -> Text {
-        let parts = status.summaryLineParts
-        var text = Text(parts.summary)
-        if let diagnostic = parts.diagnostic {
-            text = text + Text(verbatim: " · \(diagnostic)")
-        }
-        if let detail = parts.detail {
-            text = text + Text(verbatim: "\n") + Text(detail)
-        }
-        return text
+        Text(status.summaryLineParts.summary)
     }
 }
 

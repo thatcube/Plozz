@@ -60,6 +60,11 @@ struct PlozziOSSettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background { SettingsPageBackground() }
+        .transientStatusOverlay(
+            presenter: appModel.transientStatusPresenter,
+            bottomPadding: 24,
+            isLightSurface: palette.isLight
+        )
         .environment(\.themePalette, palette)
         .environment(\.colorScheme, palette.isLight ? .light : .dark)
         .tint(palette.primaryText)

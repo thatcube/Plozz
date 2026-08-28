@@ -416,7 +416,7 @@ struct NavigationRailView: View {
                     .accessibilityHidden(true)
                 if isExpanded {
                     label
-                        .font(.headline.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }

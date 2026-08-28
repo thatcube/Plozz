@@ -214,6 +214,34 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         }
         XCTAssertEqual(content.watchlist.first?.posterURL, signed)
     }
+
+    func testNavigationDefersPendingWatchlistFoldUntilInputSettles() async {
+        let item = MediaItem(
+            id: "one",
+            title: "One",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let handler = UniversalWatchlistHomeHandler(items: [item])
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: UniversalWatchlistHomeStore(
+                content: .init(watchlist: [item])
+            ),
+            mediaItemActionHandler: handler
+        )
+        let initialCalls = handler.resolveCallCount
+
+        model.scheduleDurableWatchlistRefresh()
+        try? await Task.sleep(for: .milliseconds(150))
+        model.noteHomeNavigationInteraction()
+        try? await Task.sleep(for: .milliseconds(250))
+
+        XCTAssertEqual(handler.resolveCallCount, initialCalls)
+
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(handler.resolveCallCount, initialCalls + 1)
+    }
 }
 
 @MainActor
@@ -221,6 +249,7 @@ private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
     var items: [MediaItem]
     var ready: Bool
     var rehydrate: ([MediaItem]) -> [MediaItem]
+    private(set) var resolveCallCount = 0
     init(
         items: [MediaItem],
         ready: Bool = true,
@@ -240,7 +269,8 @@ private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
         context: MediaItemActionContext
     ) {}
     func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem] {
-        items
+        resolveCallCount += 1
+        return items
     }
     func isDurableWatchlistPresentationReady() -> Bool { ready }
     func rehydratePersistedArtwork(_ items: [MediaItem]) -> [MediaItem] {

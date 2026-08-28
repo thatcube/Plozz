@@ -627,11 +627,13 @@ public struct HomeView: View {
                 for: .universalWatchlistCacheDidLoad
             )
         ) { _ in
-            // Startup cache, not a user press. It is already in memory, and
-            // painting last-known ownership before the first network refresh is
-            // the entire reason it exists — do not put it through the 350ms
-            // interaction debounce above.
-            viewModel.refreshDurableWatchlist()
+            // Startup cache is already in memory, but it can arrive just after
+            // Home becomes interactive. Publishing it immediately rebuilt the row
+            // under someone who started holding RIGHT on the first frame: focus
+            // stopped, then the rail visibly reloaded. Use the same pending fold
+            // as ordinary Watchlist changes. With no input it still lands after
+            // 350ms; every move re-arms it until navigation settles.
+            viewModel.scheduleDurableWatchlistRefresh()
         }
         // New content that lands while the viewer sits on Home appears without a
         // navigation round trip. Zero-size and render-isolated — see the type.

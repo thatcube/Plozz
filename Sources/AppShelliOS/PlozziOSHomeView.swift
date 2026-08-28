@@ -1653,7 +1653,7 @@ private struct PlozziOSPullResponsiveHomeBackdrop<Backdrop: View>: View {
         .mask {
             PlozziOSHeroFadeMask(
                 extendsArtwork: extendsArtwork,
-                upwardExtension: 0.10
+                upwardExtension: 0.20
             )
         }
         .offset(y: -pullDistance)

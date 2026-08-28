@@ -40,7 +40,7 @@ public struct HeroLegibilityScrim: View {
     private let wash: Double
     private let edges: Edges
     private let sideDarkeningStart: Double
-    private let bottomDarkeningPeak: Double
+    private let bottomFadeTop: Double
 
     /// - Parameters:
     ///   - tone: Mode-appropriate scrim colour (dark in dark mode, light in light).
@@ -53,23 +53,22 @@ public struct HeroLegibilityScrim: View {
     ///     ramps in, as a fraction of height. `0` darkens the full column
     ///     evenly (the symmetric default). A higher value keeps the upper
     ///     corners clean and brings the wash in only where content sits.
-    ///   - bottomDarkeningPeak: Where the bottom vignette reaches full strength.
-    ///     Lower values extend the fully protected region upward without changing
-    ///     where the fade begins.
+    ///   - bottomFadeTop: The upper edge of the bottom-anchored fade. Lower values
+    ///     make the fade taller while leaving its bottom edge unchanged.
     public init(
         tone: Color,
         edgePeak: Double,
         wash: Double = 0.06,
         edges: Edges = .all,
         sideDarkeningStart: Double = 0,
-        bottomDarkeningPeak: Double = 1
+        bottomFadeTop: Double = 0.58
     ) {
         self.tone = tone
         self.edgePeak = edgePeak
         self.wash = wash
         self.edges = edges
         self.sideDarkeningStart = sideDarkeningStart
-        self.bottomDarkeningPeak = bottomDarkeningPeak
+        self.bottomFadeTop = bottomFadeTop
     }
 
     public var body: some View {
@@ -90,7 +89,7 @@ public struct HeroLegibilityScrim: View {
                     endPoint: .bottom,
                     startsDark: edges.contains(.top),
                     endsDark: edges.contains(.bottom),
-                    endDarkeningPeak: bottomDarkeningPeak
+                    bottomFadeTop: bottomFadeTop
                 )
             }
         }
@@ -127,35 +126,18 @@ public struct HeroLegibilityScrim: View {
         endPoint: UnitPoint,
         startsDark: Bool,
         endsDark: Bool,
-        endDarkeningPeak: Double = 1
+        bottomFadeTop: Double = 0.58
     ) -> some View {
         LinearGradient(
-            stops: edgeStops(
-                startsDark: startsDark,
-                endsDark: endsDark,
-                endDarkeningPeak: endDarkeningPeak
-            ),
+            stops: [
+                .init(color: tone.opacity(startsDark ? edgePeak : 0), location: 0),
+                .init(color: .clear, location: 0.42),
+                .init(color: .clear, location: bottomFadeTop),
+                .init(color: tone.opacity(endsDark ? edgePeak : 0), location: 1)
+            ],
             startPoint: startPoint,
             endPoint: endPoint
         )
-    }
-
-    private func edgeStops(
-        startsDark: Bool,
-        endsDark: Bool,
-        endDarkeningPeak: Double
-    ) -> [Gradient.Stop] {
-        let endColor = tone.opacity(endsDark ? edgePeak : 0)
-        var stops: [Gradient.Stop] = [
-            .init(color: tone.opacity(startsDark ? edgePeak : 0), location: 0),
-            .init(color: .clear, location: 0.42),
-            .init(color: .clear, location: 0.58)
-        ]
-        if endDarkeningPeak < 1 {
-            stops.append(.init(color: endColor, location: endDarkeningPeak))
-        }
-        stops.append(.init(color: endColor, location: 1))
-        return stops
     }
 }
 #endif

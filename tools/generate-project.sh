@@ -63,14 +63,41 @@ if [ ! -e "$secrets_file" ] && [ -f "$canonical_secrets" ]; then
   echo "Linked $secrets_file from $canonical_secrets"
 fi
 
+proj_dir="Plozz.xcodeproj"
+proj="${proj_dir}/project.pbxproj"
+generation_signature_file="${proj_dir}/.plozz-generation-signature"
+generation_signature="$(
+  {
+    shasum -a 256 project.yml Package.swift
+    printf '%s\n' \
+      "PLOZZ_ID_SUFFIX=${PLOZZ_ID_SUFFIX}" \
+      "PLOZZ_NAME_SUFFIX=${PLOZZ_NAME_SUFFIX}" \
+      "PLOZZ_TV_APP_ENTITLEMENTS=${PLOZZ_TV_APP_ENTITLEMENTS}" \
+      "PLOZZ_TV_TOPSHELF_ENTITLEMENTS=${PLOZZ_TV_TOPSHELF_ENTITLEMENTS}" \
+      "PLOZZ_IOS_APP_ENTITLEMENTS=${PLOZZ_IOS_APP_ENTITLEMENTS}"
+    # XcodeGen expands directory sources into concrete file references. Git pulls
+    # can change that set while leaving this ignored project behind, so paths are
+    # part of the signature even though ordinary source-content edits are not.
+    find App Sources Tests TopShelf -type f -print | LC_ALL=C sort
+  } | shasum -a 256 | awk '{print $1}'
+)"
+
+should_generate=0
 if [ "$BAKE_ONLY" != "1" ]; then
-  xcodegen generate
-elif [ ! -f "Plozz.xcodeproj/project.pbxproj" ]; then
+  should_generate=1
+elif [ ! -f "$proj" ]; then
   echo "error: --bake-only requires an existing Plozz.xcodeproj; run without it once" >&2
   exit 1
+elif [ ! -f "$generation_signature_file" ] \
+  || [ "$(cat "$generation_signature_file")" != "$generation_signature" ]; then
+  echo "Project inputs changed since the last XcodeGen run; regenerating automatically."
+  should_generate=1
 fi
 
-proj="Plozz.xcodeproj/project.pbxproj"
+if [ "$should_generate" = "1" ]; then
+  xcodegen generate
+  printf '%s\n' "$generation_signature" > "$generation_signature_file"
+fi
 
 # If PLOZZ_SENTRY_DSN wasn't provided in the environment, read it from a
 # gitignored env file so one file feeds both local device builds and `fastlane`

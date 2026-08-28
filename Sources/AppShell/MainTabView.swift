@@ -43,6 +43,25 @@ struct DebugSettingsActions {
     }
 }
 
+private struct RootNavigationTabLabel: View {
+    let title: Text
+    let systemImage: String
+    let usesCompactSidebarText: Bool
+
+    var body: some View {
+        Label {
+            if usesCompactSidebarText {
+                title
+                    .font(.system(size: 26, weight: .regular))
+            } else {
+                title
+            }
+        } icon: {
+            Image(systemName: systemImage)
+        }
+    }
+}
+
 struct MainTabView: View {
     /// Stable identifiers for the root tabs, used to persist and restore the
     /// selected tab across MainTabView being rebuilt (see `selectedTab`).
@@ -58,6 +77,38 @@ struct MainTabView: View {
 
     private enum MainTab: String {
         case home, search, music, settings
+    }
+
+    private var homeTabLabel: some View {
+        RootNavigationTabLabel(
+            title: Text("Home"),
+            systemImage: "house.fill",
+            usesCompactSidebarText: navigationStyle == .sidebar
+        )
+    }
+
+    private var searchTabLabel: some View {
+        RootNavigationTabLabel(
+            title: Text("Search"),
+            systemImage: "magnifyingglass",
+            usesCompactSidebarText: navigationStyle == .sidebar
+        )
+    }
+
+    private var musicTabLabel: some View {
+        RootNavigationTabLabel(
+            title: Text("Music"),
+            systemImage: "music.note",
+            usesCompactSidebarText: navigationStyle == .sidebar
+        )
+    }
+
+    private var settingsTabLabel: some View {
+        RootNavigationTabLabel(
+            title: Text("Settings"),
+            systemImage: "gearshape.fill",
+            usesCompactSidebarText: navigationStyle == .sidebar
+        )
     }
 
     /// Performs the capture rig's tab requests. See ``ScreenshotDirector``.
@@ -528,38 +579,46 @@ struct MainTabView: View {
         let _ = plozzPrintChanges { Self._printChanges() }
         let _ = PlozzBodyRate.tick("MainTabView")
         return TabView(selection: selectedTab) {
-            Tab("Home", systemImage: "house.fill", value: MainTab.home) {
-            homeTabContent
+            Tab(value: MainTab.home) {
+                homeTabContent
+            } label: {
+                homeTabLabel
             }
 
-            Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
-            searchTabContent
+            Tab(value: MainTab.search) {
+                searchTabContent
+            } label: {
+                searchTabLabel
             }
 
             // Conditional Music tab: present only when at least one signed-in
             // account exposes a music library. Video-only users see no tab and no
             // mini-player — the app is byte-for-byte unchanged for them.
             if musicAvailability.hasMusic {
-                Tab("Music", systemImage: "music.note", value: MainTab.music) {
-                // The availability model is handed over by REFERENCE and read
-                // inside the Music tab, not unpacked here. Reading
-                // `detectedAccounts` / `visibleLibraryIDs` in this body made the
-                // whole tab tree a subscriber of them, so the first cache seed
-                // after launch re-ran this body and took the Home tab's `@State`
-                // — and its entire in-flight four-account load — down with it.
-                MusicAvailabilityScope(
-                    availability: musicAvailability,
-                    controller: audioController,
-                    authenticatedHTTPResolver: authenticatedHTTPResolver,
-                    appTheme: themeModel.theme,
-                    musicPlayer: musicPlayerModel,
-                    showNowPlaying: $showNowPlaying
-                )
+                Tab(value: MainTab.music) {
+                    // The availability model is handed over by REFERENCE and read
+                    // inside the Music tab, not unpacked here. Reading
+                    // `detectedAccounts` / `visibleLibraryIDs` in this body made the
+                    // whole tab tree a subscriber of them, so the first cache seed
+                    // after launch re-ran this body and took the Home tab's `@State`
+                    // — and its entire in-flight four-account load — down with it.
+                    MusicAvailabilityScope(
+                        availability: musicAvailability,
+                        controller: audioController,
+                        authenticatedHTTPResolver: authenticatedHTTPResolver,
+                        appTheme: themeModel.theme,
+                        musicPlayer: musicPlayerModel,
+                        showNowPlaying: $showNowPlaying
+                    )
+                } label: {
+                    musicTabLabel
                 }
             }
 
-            Tab("Settings", systemImage: "gearshape.fill", value: MainTab.settings) {
-            settingsTabContent
+            Tab(value: MainTab.settings) {
+                settingsTabContent
+            } label: {
+                settingsTabLabel
             }
         }
         .plozzTabStyle(navigationStyle)

@@ -941,6 +941,9 @@ struct PlozziOSHeroFadeMask: View {
     /// background, which is what a fixed 0.62 produced on a hero this tall — and
     /// one that carries all the way behind the buttons and then melts.
     var extendsArtwork: Bool = false
+    /// Additional fraction of the hero covered by the bottom-anchored artwork
+    /// dissolve. Positive values move only its upper edge farther into the image.
+    var upwardExtension: CGFloat = 0
 
     /// Where the melt begins. Light mode starts higher because a light page
     /// swallows the artwork's edge sooner; dark mode holds the image longer so
@@ -970,13 +973,15 @@ struct PlozziOSHeroFadeMask: View {
     }
 
     private func start(in size: CGSize) -> CGFloat {
-        guard extendsArtwork else { return meltStart }
-        return HeroStageMetrics.meltStart(
-            width: size.width,
-            height: size.height,
-            mirrorScale: extendedMeltScale,
-            floor: meltStart
-        )
+        let baseStart = extendsArtwork
+            ? HeroStageMetrics.meltStart(
+                width: size.width,
+                height: size.height,
+                mirrorScale: extendedMeltScale,
+                floor: meltStart
+            )
+            : meltStart
+        return max(0, baseStart - upwardExtension)
     }
 
     private func gradient(start: CGFloat) -> some View {

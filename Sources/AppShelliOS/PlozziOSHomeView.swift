@@ -1650,7 +1650,12 @@ private struct PlozziOSPullResponsiveHomeBackdrop<Backdrop: View>: View {
         // lift. Applied after, the mask sits in the fixed parent space: the hero
         // slid under a stationary fade, so pulling down exposed the page
         // background above the image and left a hard unfaded edge below.
-        .mask { PlozziOSHeroFadeMask(extendsArtwork: extendsArtwork) }
+        .mask {
+            PlozziOSHeroFadeMask(
+                extendsArtwork: extendsArtwork,
+                upwardExtension: 0.05
+            )
+        }
         .offset(y: -pullDistance)
     }
 }

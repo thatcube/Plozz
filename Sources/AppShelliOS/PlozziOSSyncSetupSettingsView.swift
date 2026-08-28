@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreUI
+import FeatureSettings
 import SwiftUI
 import FeatureSyncSetup
 
@@ -13,7 +14,6 @@ struct PlozziOSSyncSetupSettingsView: View {
     @State private var showCodeEntry = false
     @State private var showReceive = false
     @State private var handled = false
-    @State private var showResetConfirm = false
 
     init(appModel: PlozziOSAppModel) {
         self.appModel = appModel
@@ -117,85 +117,24 @@ struct PlozziOSSyncSetupSettingsView: View {
                 }
                 if appModel.syncSetup.isEnabled {
                     HStack {
-                        Text(appModel.cloudSyncStatus.summary)
+                        SyncStatusLine(provider: syncStatusProvider)
                             .font(.footnote)
                             .plozzForeground(.secondary)
                         Spacer()
                         Button("Sync Now") { appModel.syncCloudNow() }
                             .font(.footnote.weight(.semibold))
                     }
-                    if let diag = appModel.cloudSyncStatus.lastDiagnostic {
-                        Text(diag)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                    if let tag = appModel.cloudSyncStatus.accountTag {
-                        Text("iCloud identity: \(tag)…  (must match on every device)")
-                            .font(.caption2)
-                            .plozzForeground(.secondary)
-                    }
-                    if let n = appModel.cloudSyncStatus.syncedRecordCount {
-                        Text("\(n) items in iCloud  (should match your other devices)")
-                            .font(.caption2)
-                            .plozzForeground(.secondary)
-                    }
-                    Button {
-                        appModel.redownloadCloudSync()
-                    } label: {
-                        Label("Re-download From iCloud", systemImage: "arrow.down.circle")
-                            .font(.footnote)
-                    }
-                    Button(role: .destructive) {
-                        showResetConfirm = true
-                    } label: {
-                        Label("Reset Synced Data", systemImage: "arrow.counterclockwise.icloud")
-                            .font(.footnote)
-                    }
-                    .confirmationDialog(
-                        "Reset synced data?",
-                        isPresented: $showResetConfirm,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Reset & Re-upload From This Device", role: .destructive) {
-                            appModel.resetCloudSync()
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("Deletes the shared iCloud copy and re-uploads it from THIS device. Your other devices keep their own logins. Use only if devices won't converge.")
-                    }
                 }
             } footer: {
-                Text("Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default. If a device stops receiving changes, tap Re-download From iCloud on it.")
+                Text("Syncs profiles, settings, and servers. Logins stay on each device.")
             }
 
-            if !appModel.pendingSyncedServers.isEmpty {
-                SettingsSectionGroup("Servers From Your Other Devices") {
-                    ForEach(appModel.pendingSyncedServers, id: \.id) { server in
-                        HStack(spacing: 12) {
-                            Image(systemName: "externaldrive.badge.person.crop")
-                                .font(.title3)
-                                .plozzForeground(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(server.serverName).fontWeight(.medium)
-                                Text("Set up on another device — sign in to watch here")
-                                    .font(.footnote).plozzForeground(.secondary)
-                            }
-                            Spacer()
-                            Button("Ignore") { appModel.ignorePendingSyncedServer(server.id) }
-                                .font(.footnote)
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                } footer: {
-                    Text("These are signed in on your iPad or Apple TV. To use them here without retyping anything, tap “Set up this device from another” below and confirm on that device.")
-                }
-            }
-
-            SettingsSectionGroup("Set up another device") {
+            SettingsSectionGroup("Set Up Another Device") {
                 if model.nearbyDevices.isEmpty {
                     HStack(spacing: 12) {
                         ProgressView()
-                        Text("Looking for a device to set up…").plozzForeground(.secondary)
+                        Text("Looking for nearby devices…")
+                            .plozzForeground(.secondary)
                     }
                 } else {
                     ForEach(model.nearbyDevices) { device in
@@ -219,28 +158,122 @@ struct PlozziOSSyncSetupSettingsView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            } footer: {
-                Text("On your Apple TV, iPad, or another device, open Plozz and choose “Set up from another device.” It’ll appear here — tap to sign it in. Both devices must be on the same Wi-Fi.")
-            }
-
-            SettingsSectionGroup {
                 Button { showScanner = true } label: {
-                    Label("Scan QR code", systemImage: "qrcode.viewfinder")
+                    Label("Scan QR Code", systemImage: "qrcode.viewfinder")
                 }
                 Button { showCodeEntry = true } label: {
-                    Label("Enter code manually", systemImage: "keyboard")
+                    Label("Enter Code", systemImage: "keyboard")
                 }
             } footer: {
-                Text("Not seeing it nearby? Scan the QR or type the short code shown on the other device.")
+                Text("Choose a nearby device, or scan its code.")
             }
 
-            SettingsSectionGroup("Set up this device") {
+            SettingsSectionGroup("This Device") {
                 Button { showReceive = true } label: {
-                    Label("Set up this device from another", systemImage: "qrcode")
+                    Label("Set Up From Another Device", systemImage: "qrcode")
+                }
+            }
+
+            if !appModel.pendingSyncedServers.isEmpty {
+                SettingsSectionGroup("Servers to Set Up") {
+                    ForEach(appModel.pendingSyncedServers, id: \.id) { server in
+                        HStack(spacing: 12) {
+                            Image(systemName: "externaldrive.badge.person.crop")
+                                .font(.title3)
+                                .plozzForeground(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.serverName).fontWeight(.medium)
+                                Text("Needs sign-in")
+                                    .font(.footnote)
+                                    .plozzForeground(.secondary)
+                            }
+                            Spacer()
+                            Button("Ignore") {
+                                appModel.ignorePendingSyncedServer(server.id)
+                            }
+                            .font(.footnote)
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+
+            if appModel.syncSetup.isEnabled {
+                SettingsSectionGroup {
+                    NavigationLink {
+                        PlozziOSSyncTroubleshootingView(appModel: appModel)
+                    } label: {
+                        Label(
+                            "Troubleshooting",
+                            systemImage: "wrench.and.screwdriver"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var syncStatusProvider: SyncStatusProvider {
+        SyncStatusProvider {
+            SyncStatusPresentation(
+                summary: appModel.cloudSyncStatus.summary,
+                isSyncing: appModel.cloudSyncStatus.phase == .syncing,
+                itemCount: appModel.cloudSyncStatus.syncedRecordCount,
+                accountTag: appModel.cloudSyncStatus.accountTag
+            )
+        }
+    }
+}
+
+private struct PlozziOSSyncTroubleshootingView: View {
+    let appModel: PlozziOSAppModel
+    @State private var showResetConfirm = false
+
+    var body: some View {
+        SettingsPageList {
+            SettingsSectionGroup("Compare Devices") {
+                LabeledContent("iCloud items") {
+                    Text(verbatim: appModel.cloudSyncStatus.syncedRecordCount?.formatted() ?? "—")
+                }
+                LabeledContent("iCloud account") {
+                    Text(
+                        verbatim: appModel.cloudSyncStatus.accountTag.map {
+                            "\($0)…"
+                        } ?? "—"
+                    )
                 }
             } footer: {
-                Text("Coming from a device that’s already signed in? Show a code here and scan it from your other phone, tablet, or Apple TV to sign this one in.")
+                Text("These should match on every device.")
             }
+
+            SettingsSectionGroup("Recovery") {
+                Button {
+                    appModel.redownloadCloudSync()
+                } label: {
+                    Label("Reload From iCloud", systemImage: "arrow.down.circle")
+                }
+                Button(role: .destructive) {
+                    showResetConfirm = true
+                } label: {
+                    Label("Reset Sync", systemImage: "arrow.counterclockwise.icloud")
+                }
+            } footer: {
+                Text("Try Reload first. Reset only if changes are still missing.")
+            }
+        }
+        .navigationTitle("Troubleshooting")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Reset synced data?",
+            isPresented: $showResetConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Reset & Re-upload From This Device", role: .destructive) {
+                appModel.resetCloudSync()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Replaces iCloud data with this device’s copy. Other devices keep their logins.")
         }
     }
 }

@@ -39,7 +39,7 @@ public struct SyncStatusProvider {
     public init(_ make: @escaping () -> SyncStatusPresentation) { self.make = make }
 }
 
-struct SyncStatusLine: View {
+public struct SyncStatusLine: View {
     let provider: SyncStatusProvider
     @State private var longSyncMessageIndex: Int?
 
@@ -56,7 +56,11 @@ struct SyncStatusLine: View {
         "Almost certainly syncing…"
     ]
 
-    var body: some View {
+    public init(provider: SyncStatusProvider) {
+        self.provider = provider
+    }
+
+    public var body: some View {
         let status = provider.make()
         let isSyncing = status.isSyncing
         HStack(spacing: 12) {

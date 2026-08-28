@@ -169,18 +169,33 @@ public struct HeroLegibilityScrim: View {
         let span = 1 - bottomFadeTop
         return [
             .init(color: .clear, location: 0),
-            .init(color: .clear, location: bottomFadeTop),
             .init(
-                color: tone.opacity(edgePeak * 0.06),
-                location: bottomFadeTop + span * 0.20
+                color: .clear,
+                location: max(0, bottomFadeTop - span * 0.10)
             ),
             .init(
-                color: tone.opacity(edgePeak * 0.24),
-                location: bottomFadeTop + span * 0.48
+                color: tone.opacity(edgePeak * 0.01),
+                location: bottomFadeTop + span * 0.04
             ),
             .init(
-                color: tone.opacity(edgePeak * 0.56),
+                color: tone.opacity(edgePeak * 0.04),
+                location: bottomFadeTop + span * 0.18
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.12),
+                location: bottomFadeTop + span * 0.34
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.28),
+                location: bottomFadeTop + span * 0.54
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.52),
                 location: bottomFadeTop + span * 0.74
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.76),
+                location: bottomFadeTop + span * 0.90
             ),
             .init(color: tone.opacity(edgePeak), location: 1)
         ]

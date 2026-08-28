@@ -469,7 +469,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         // watchlist toggle + cross-server discovery (which can still surface an
         // owned copy on another server) keep working.
         if let discoverID = PlexClient.discoverMetadataID(from: id) {
-            var item = map(
+            var item = mapDiscover(
                 metadata: try await client.discoverMetadata(
                     metadataID: discoverID
                 )
@@ -484,7 +484,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             // global Discover id (defensive) — retry against Discover if derivable,
             // otherwise surface the original notFound.
             guard let discoverID = PlexClient.discoverMetadataID(from: id) else { throw error }
-            var item = map(
+            var item = mapDiscover(
                 metadata: try await client.discoverMetadata(
                     metadataID: discoverID
                 )
@@ -1528,6 +1528,32 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         )
     }
 
+    /// Maps metadata returned by plex.tv Discover without routing its image paths
+    /// through the viewer's local Plex server.
+    private func mapDiscover(metadata dto: PlexMetadata) -> MediaItem {
+        var item = map(metadata: dto)
+        let isEpisode = item.kind == .episode
+        let posterPath = isEpisode
+            ? (dto.thumb ?? dto.grandparentThumb)
+            : dto.thumb
+        item.posterURL = client.discoverImageURL(path: posterPath)
+        item.seriesPosterURL = isEpisode
+            ? client.discoverImageURL(path: dto.grandparentThumb)
+            : nil
+        item.backdropURL = client.discoverImageURL(path: dto.art)
+        item.heroBackdropURL = item.backdropURL
+        item.fallbackArtworkURL = isEpisode
+            ? client.discoverImageURL(path: dto.art)
+            : nil
+        item.logoURL = logoURL(from: dto) {
+            client.discoverImageURL(path: $0)
+        }
+        item.artworkSelections = heroArtworkSelections(from: dto) {
+            client.discoverImageURL(path: $0)
+        }
+        return item
+    }
+
     /// The item's title logo (Plex "clearLogo") from its `Image` array, or `nil`
     /// when the item advertises none. Plex exposes the logo ONLY here — never via
     /// the top-level `thumb`/`art` attributes — so without reading this array the
@@ -1535,13 +1561,17 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// a transparent PNG, so it's loaded raw (no `/photo/:/transcode`, which would
     /// flatten transparency) via the same http-vs-server-path handling as person
     /// headshots; the hero logo pipeline downsamples it on device.
-    private func logoURL(from dto: PlexMetadata) -> URL? {
+    private func logoURL(
+        from dto: PlexMetadata,
+        relativeURL: ((String) -> URL?)? = nil
+    ) -> URL? {
         guard let entry = dto.Image?.first(where: {
             $0.type?.lowercased() == "clearlogo"
         }), let path = entry.url, !path.isEmpty else { return nil }
         if path.hasPrefix("http://") || path.hasPrefix("https://") {
             return URL(string: path)
         }
+        if let relativeURL { return relativeURL(path) }
         return client.imageURL(path: path, maxWidth: nil)
     }
 
@@ -1556,16 +1586,26 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// `art` leads, because it is the one Plex itself chose. Ranking and the
     /// home/detail split are ``HeroArtworkPlanner``'s, shared with Jellyfin/Emby and
     /// the share so a title behaves the same way on every backend.
-    private func heroArtworkSelections(from dto: PlexMetadata) -> [ArtworkSelection] {
+    private func heroArtworkSelections(
+        from dto: PlexMetadata,
+        relativeURL: ((String) -> URL?)? = nil
+    ) -> [ArtworkSelection] {
         var candidates: [HeroArtworkCandidate] = []
-        if let art = client.imageURL(path: dto.art, maxWidth: 3840) {
+        if let art = artworkURL(
+            dto.art,
+            maxWidth: 3840,
+            relativeURL: relativeURL
+        ) {
             candidates.append(
                 HeroArtworkCandidate(reference: .remote(art), origin: .server, text: .unknown, score: 0)
             )
         }
         for (index, entry) in (dto.Image ?? []).enumerated()
         where entry.type?.lowercased() == "background" {
-            guard let url = backgroundURL(entry) else { continue }
+            guard let url = backgroundURL(
+                entry,
+                relativeURL: relativeURL
+            ) else { continue }
             candidates.append(
                 HeroArtworkCandidate(
                     reference: .remote(url),
@@ -1595,12 +1635,32 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
 
     /// An `Image` entry's URL, handling the absolute-vs-server-path split the same
     /// way the logo and person headshots do.
-    private func backgroundURL(_ entry: PlexImage) -> URL? {
+    private func backgroundURL(
+        _ entry: PlexImage,
+        relativeURL: ((String) -> URL?)? = nil
+    ) -> URL? {
         guard let path = entry.url, !path.isEmpty else { return nil }
         if path.hasPrefix("http://") || path.hasPrefix("https://") {
             return URL(string: path)
         }
-        return client.imageURL(path: path, maxWidth: 3840)
+        return artworkURL(
+            path,
+            maxWidth: 3840,
+            relativeURL: relativeURL
+        )
+    }
+
+    private func artworkURL(
+        _ path: String?,
+        maxWidth: Int,
+        relativeURL: ((String) -> URL?)?
+    ) -> URL? {
+        guard let path, !path.isEmpty else { return nil }
+        if path.hasPrefix("http://") || path.hasPrefix("https://") {
+            return URL(string: path)
+        }
+        if let relativeURL { return relativeURL(path) }
+        return client.imageURL(path: path, maxWidth: maxWidth)
     }
 
     /// Maps Plex's `<Role>` (cast) plus `<Director>`/`<Writer>` (crew) elements
@@ -2271,25 +2331,11 @@ extension PlexProvider: WatchlistProviding {
     /// Reads the watchlist through a specific client, so the caller can supply
     /// one scoped to the plex.tv identity the active profile plays as.
     public func watchlist(using client: PlexClient) async throws -> [MediaItem] {
-        let items = try await client.watchlist()
+        let items =         try await client.watchlist()
             .map { dto -> MediaItem in
-                var copy = map(metadata: dto)
+                var copy = mapDiscover(metadata: dto)
                 copy.isFavorite = true
                 copy.locallyValidatedPlayableSource = false
-                // Re-point the artwork at the host it actually lives on.
-                //
-                // `map(metadata:)` builds image URLs for THIS server, which is
-                // right for everything that came from it and wrong for a
-                // watchlist: these rows were read from plex.tv Discover and their
-                // art is Discover's. Asked for a path it has never heard of, a
-                // Plex server answers with a placeholder instead of an error —
-                // the same placeholder every time — so half a watchlist row drew
-                // one show's poster under everybody else's title, captions
-                // perfectly correct, which is what made it read as an artwork bug
-                // rather than a URL one.
-                copy.posterURL = client.discoverImageURL(path: dto.thumb)
-                copy.backdropURL = client.discoverImageURL(path: dto.art)
-                copy.heroBackdropURL = copy.backdropURL
                 return copy
             }
         logWatchlistOrder(items)

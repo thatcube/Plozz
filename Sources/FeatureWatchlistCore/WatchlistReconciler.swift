@@ -109,7 +109,8 @@ public actor WatchlistReconciler {
     private let retryPolicy: WatchlistRetryPolicy
     private var activeProfileIDs: Set<String> = []
     private var inFlightKeys: Set<DestinationTitleKey> = []
-    private var isReadingNativeEntries = false
+    private var nativeReadTask:
+        Task<WatchlistNativeReadReport, Never>?
 
     public init(
         registry: WatchlistDestinationRegistry,
@@ -347,14 +348,24 @@ public actor WatchlistReconciler {
     }
 
     public func fetchNativeEntries() async -> WatchlistNativeReadReport {
-        guard !isReadingNativeEntries else {
-            return WatchlistNativeReadReport(successes: [], failures: [])
+        if let nativeReadTask {
+            return await nativeReadTask.value
         }
-        isReadingNativeEntries = true
-        defer { isReadingNativeEntries = false }
         let readable = registry.destinations.filter {
             $0.capabilities.read.isReadable
         }
+        let task = Task {
+            await Self.readNativeEntries(from: readable)
+        }
+        nativeReadTask = task
+        let report = await task.value
+        nativeReadTask = nil
+        return report
+    }
+
+    private nonisolated static func readNativeEntries(
+        from readable: [any WatchlistDestination]
+    ) async -> WatchlistNativeReadReport {
         var successes: [WatchlistNativeRead] = []
         var failures: [WatchlistNativeReadFailure] = []
         for start in stride(

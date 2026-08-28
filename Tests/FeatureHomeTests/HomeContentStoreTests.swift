@@ -358,6 +358,30 @@ final class HomeContentStoreTests: XCTestCase {
         XCTAssertEqual(reopened.loadHero(for: key)?.map(\.id), ["i0", "i1", "i2"])
     }
 
+    func testClearInvalidatesMemoizedHeroInCurrentProcess() {
+        let settings = HeroSettings(
+            isEnabled: true,
+            sources: [.featured],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: false,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        let key = HeroConfigurationKey(settings: settings)
+        let store = HomeContentStore(
+            namespace: "clear-memoized-hero",
+            directory: tempDir
+        )
+        store.saveHero(makeItems(2), for: key)
+        XCTAssertNotNil(store.loadHero(for: key))
+
+        store.clear()
+
+        XCTAssertNil(store.loadHero(for: key))
+    }
+
     func testCuratedHeroDoesNotCrossSettingsOrProfile() {
         let featured = HeroSettings(
             isEnabled: true,

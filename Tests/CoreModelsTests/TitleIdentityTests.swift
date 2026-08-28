@@ -52,6 +52,26 @@ final class TitleIdentityTests: XCTestCase {
         return IdentityIndexSnapshot(byIdentity: byIdentity)
     }
 
+    func testPresentationIdentitySeparatesProviderLocalIDsAcrossAccounts() {
+        let first = item(
+            "same-local-id",
+            title: "First",
+            year: nil,
+            account: "account-a"
+        )
+        let second = item(
+            "same-local-id",
+            title: "Second",
+            year: nil,
+            account: "account-b"
+        )
+
+        XCTAssertNotEqual(
+            first.stablePresentationID,
+            second.stablePresentationID
+        )
+    }
+
     // MARK: - Component labelling
 
     /// The counter-example that killed the original per-item-walk design.

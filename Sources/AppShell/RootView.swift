@@ -662,6 +662,7 @@ public struct RootView: View {
                     appState.mediaShare.setBackgroundWorkAllowed(allowed)
                 },
                 onBecameActive: {
+                    appState.retryUnconfirmedCredentials()
                     appState.drainWatchOutbox()
                     // Pull the latest synced config when the app comes to the
                     // foreground (tvOS push is best-effort), so profile/setting

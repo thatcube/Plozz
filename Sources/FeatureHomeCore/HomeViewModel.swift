@@ -758,6 +758,7 @@ public final class HomeViewModel {
     /// Re-resolves the durable alias-ordered Watchlist against already-loaded
     /// presentation candidates. No provider creation, disk read, or network work.
     @ObservationIgnored private var durableWatchlistSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var durableWatchlistSaveGeneration: UInt64 = 0
     @ObservationIgnored private var durableWatchlistRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var durableWatchlistRefreshPending = false
 
@@ -840,11 +841,9 @@ public final class HomeViewModel {
                 lastKnown.isEmpty ? fetched : lastKnown
             )
         }
-        let resolved = handler.durableWatchlistItems(from: candidates)
-        let selected = resolved.isEmpty && !lastKnown.isEmpty
-            ? lastKnown
-            : resolved
-        return handler.rehydratePersistedArtwork(selected)
+        return handler.rehydratePersistedArtwork(
+            handler.durableWatchlistItems(from: candidates)
+        )
     }
 
     /// Restores credentials on cached library-tile art before first paint.
@@ -886,11 +885,18 @@ public final class HomeViewModel {
     /// be written during the gesture. Coalescing to the last change also means a
     /// burst writes once instead of once per press.
     private func scheduleDurableWatchlistSave(_ content: Content) {
+        durableWatchlistSaveGeneration &+= 1
+        let generation = durableWatchlistSaveGeneration
         durableWatchlistSaveTask?.cancel()
         durableWatchlistSaveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(1200))
-            guard !Task.isCancelled, let self else { return }
-            self.saveSnapshot(content)
+            guard !Task.isCancelled,
+                  let self,
+                  self.durableWatchlistSaveGeneration == generation else {
+                return
+            }
+            self.durableWatchlistSaveTask = nil
+            self.persistSnapshot(content)
         }
     }
 
@@ -989,6 +995,13 @@ public final class HomeViewModel {
     /// reason to expect it; it is not something to repaint from disk days later,
     /// when the reason has long since expired and no server ever agreed.
     private func saveSnapshot(_ content: Content) {
+        durableWatchlistSaveGeneration &+= 1
+        durableWatchlistSaveTask?.cancel()
+        durableWatchlistSaveTask = nil
+        persistSnapshot(content)
+    }
+
+    private func persistSnapshot(_ content: Content) {
         guard !unconfirmedContinueWatchingIDs.isEmpty else {
             contentStore.save(content)
             return

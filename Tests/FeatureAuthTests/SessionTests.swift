@@ -414,7 +414,7 @@ final class AccountStoreTests: XCTestCase {
         XCTAssertEqual(secure.tokenReadCount, 1)
 
         secure.setTokenReadFailure(false)
-        _ = store.loadAccounts()
+        XCTAssertTrue(store.retryUnconfirmedCredentials())
         XCTAssertEqual(store.token(for: "a1"), "TOKEN")
         XCTAssertEqual(secure.tokenReadCount, 2)
     }

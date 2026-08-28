@@ -10,6 +10,8 @@ public protocol AccountPersisting: Sendable {
     func activeAccountIDs() -> [String]
     func setActiveAccountIDs(_ ids: [String])
     func token(for accountID: String) -> String?
+    @discardableResult
+    func retryUnconfirmedCredentials() -> Bool
     func mediaShareCredential(for accountID: String) throws -> MediaShareCredentialEnvelope
     func mediaShareCredential(
         for accountID: String,
@@ -24,6 +26,11 @@ public protocol AccountPersisting: Sendable {
     func remove(id: String) throws
     func clearAll() throws
     func recoverCredentialMutations() throws
+}
+
+public extension AccountPersisting {
+    @discardableResult
+    func retryUnconfirmedCredentials() -> Bool { false }
 }
 
 public enum AccountStoreError: Error, Equatable, Sendable {
@@ -54,6 +61,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         let isConfirmed: Bool
     }
     private var cachedVisibleAccounts: [Account]?
+    private var lastVisibleAccountIDs: Set<String>?
     private var cachedTokens: [String: CachedToken] = [:]
     private var observedCredentialCacheGeneration: UInt64 = 0
     /// Account metadata is one shared JSON value. Serialize complete mutations
@@ -116,6 +124,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         synchronizeCredentialCacheGenerationLocked()
         let result = visibleAccountsResultLocked()
         let accounts = result.accounts
+        lastVisibleAccountIDs = Set(accounts.map(\.id))
         cachedVisibleAccounts = result.complete ? accounts : nil
         primeTokenCacheLocked(for: accounts)
         return accounts
@@ -131,6 +140,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         } else {
             let result = visibleAccountsResultLocked()
             accounts = result.accounts
+            lastVisibleAccountIDs = Set(accounts.map(\.id))
             self.cachedVisibleAccounts = result.complete ? accounts : nil
             primeTokenCacheLocked(for: accounts)
         }
@@ -222,6 +232,43 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
                 )
             }
         }
+    }
+
+    /// Retries only launch-time reads that failed transiently. Called from a safe
+    /// lifecycle point, never from synchronous provider resolution while browsing.
+    @discardableResult
+    public func retryUnconfirmedCredentials() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        synchronizeCredentialCacheGenerationLocked()
+        let pendingIDs = Set(
+            cachedTokens.compactMap { id, token in
+                token.isConfirmed ? nil : id
+            }
+        )
+        let visibilityWasIncomplete = cachedVisibleAccounts == nil
+        let previousVisibleAccountIDs = lastVisibleAccountIDs
+        guard visibilityWasIncomplete || !pendingIDs.isEmpty else {
+            return false
+        }
+        let accounts: [Account]
+        var visibilityRecovered = false
+        if let cachedVisibleAccounts {
+            accounts = cachedVisibleAccounts
+        } else {
+            let result = visibleAccountsResultLocked()
+            accounts = result.accounts
+            lastVisibleAccountIDs = Set(accounts.map(\.id))
+            self.cachedVisibleAccounts = result.complete ? accounts : nil
+            visibilityRecovered = result.complete
+        }
+        primeTokenCacheLocked(for: accounts)
+        let tokenRecovered = pendingIDs.contains {
+            cachedTokens[$0]?.isConfirmed == true
+        }
+        let visibleAccountsChanged =
+            previousVisibleAccountIDs != Set(accounts.map(\.id))
+        return visibilityRecovered || visibleAccountsChanged || tokenRecovered
     }
 
     private func synchronizeCredentialCacheGenerationLocked() {

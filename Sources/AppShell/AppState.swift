@@ -127,6 +127,8 @@ public final class AppState {
     public var universalWatchlistDestinationIDs:
         Set<WatchlistDestinationID> = []
     @ObservationIgnored
+    public var universalWatchlistRefreshGeneration: UInt64 = 0
+    @ObservationIgnored
     public var universalWatchlistProfileID: String?
     @ObservationIgnored
     public var universalWatchlistRetryScheduler: WatchlistRetryScheduler?
@@ -258,7 +260,7 @@ public final class AppState {
                 self.resolvedUniversalWatchlistItems(candidates: items)
             },
             durableWatchlistPresentationReady: { [unowned self] in
-                self.universalWatchlistNativeViewLoaded
+                self.isUniversalWatchlistPresentationReady
             },
             rehydratePersistedArtworkItems: { [unowned self] items in
                 self.rehydratedPersistedArtwork(items)
@@ -2445,5 +2447,10 @@ public final class AppState {
     private func apply(_ event: SessionEvent) {
         machine.apply(event)
         state = machine.state
+    }
+
+    public func retryUnconfirmedCredentials() {
+        guard accountsProviders.retryUnconfirmedCredentials() else { return }
+        apply(.accountsChanged(accountsProviders.accounts))
     }
 }

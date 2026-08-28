@@ -174,6 +174,24 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         XCTAssertEqual(afterCache.map(\.id), ["discover"])
     }
 
+    func testReadyDurableWatchlistCanAuthoritativelyClearLastKnownRow() {
+        let cached = MediaItem(
+            id: "removed",
+            title: "Removed title",
+            kind: .movie
+        )
+        let handler = UniversalWatchlistHomeHandler(items: [], ready: true)
+
+        let resolved = HomeViewModel.resolvedWatchlist(
+            candidates: [cached],
+            fetched: [cached],
+            lastKnown: [cached],
+            handler: handler
+        )
+
+        XCTAssertTrue(resolved.isEmpty)
+    }
+
     func testFirstPaintRehydratesOwnedArtworkBeforePublishing() {
         let saved = MediaItem(
             id: "4407",

@@ -252,6 +252,15 @@ public final class AccountsProvidersModel {
         onActiveAccountsChanged(resolved, accounts)
     }
 
+    /// Retries credentials whose launch-time Keychain read failed, without
+    /// rebuilding accounts or providers during an interactive navigation path.
+    @discardableResult
+    public func retryUnconfirmedCredentials() -> Bool {
+        guard accountStore.retryUnconfirmedCredentials() else { return false }
+        reloadAccounts()
+        return true
+    }
+
     /// One-time self-heal for stale server names (shared by tvOS + iOS). Re-fetches
     /// each managed server's real name and, if any changed, reloads accounts so the UI
     /// updates. Runs in the background; offline servers are skipped and tokens are

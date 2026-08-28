@@ -57,4 +57,32 @@ final class MediaRowUniquingTests: XCTestCase {
         ])
         XCTAssertEqual(deduped.count, 2)
     }
+
+    func testDoesNotCollapseProviderLocalIDSharedAcrossAccounts() {
+        var first = item("same-id", "First server")
+        first.sourceAccountID = "account-a"
+        var second = item("same-id", "Second server")
+        second.sourceAccountID = "account-b"
+
+        let deduped = MediaRowView.uniqued([first, second])
+
+        XCTAssertEqual(deduped.count, 2)
+        XCTAssertNotEqual(
+            deduped[0].stablePresentationID,
+            deduped[1].stablePresentationID
+        )
+    }
+
+    func testRawFocusIDNormalizesToPresentationIdentity() {
+        var item = item("episode-8", "Episode")
+        item.sourceAccountID = "account-a"
+
+        XCTAssertEqual(
+            MediaRowView.presentationID(
+                matching: "episode-8",
+                in: [item]
+            ),
+            item.stablePresentationID
+        )
+    }
 }

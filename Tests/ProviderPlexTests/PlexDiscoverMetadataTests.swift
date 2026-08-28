@@ -23,7 +23,13 @@ final class PlexDiscoverMetadataTests: XCTestCase {
       {"ratingKey":"5d7768265af944001f1f6977","type":"movie",
        "title":"2 Fast 2 Furious","year":2003,
        "guid":"plex://movie/5d7768265af944001f1f6977",
+       "thumb":"/library/metadata/5d7768265af944001f1f6977/thumb/1",
+       "art":"/library/metadata/5d7768265af944001f1f6977/art/2",
        "summary":"Ex-cop Brian teams up with an old friend to bring down a drug lord.",
+       "Image":[
+         {"type":"clearLogo","url":"/library/metadata/5d7768265af944001f1f6977/logo/3"},
+         {"type":"background","url":"/library/metadata/5d7768265af944001f1f6977/art/4"}
+       ],
        "Genre":[{"tag":"Action"},{"tag":"Crime"}],
        "Role":[{"tag":"Paul Walker","role":"Brian O'Conner"},
                {"tag":"Tyrese Gibson","role":"Roman Pearce"}],
@@ -71,6 +77,18 @@ final class PlexDiscoverMetadataTests: XCTestCase {
         XCTAssertEqual(item.cast.map(\.name), ["Paul Walker", "Tyrese Gibson"])
         // Global guid preserved so the watchlist toggle + cross-server discovery work.
         XCTAssertEqual(item.providerIDs["PlexGuid"], "plex://movie/5d7768265af944001f1f6977")
+        XCTAssertEqual(item.posterURL?.host, "discover.provider.plex.tv")
+        XCTAssertEqual(item.backdropURL?.host, "discover.provider.plex.tv")
+        XCTAssertEqual(item.heroBackdropURL?.host, "discover.provider.plex.tv")
+        XCTAssertEqual(item.logoURL?.host, "discover.provider.plex.tv")
+        XCTAssertTrue(
+            item.artworkSelections
+                .flatMap(\.references)
+                .allSatisfy {
+                    guard case let .remote(url) = $0 else { return false }
+                    return url.host == "discover.provider.plex.tv"
+                }
+        )
         // The request hit the Discover host, not the per-server PMS.
         let host = stub.baseURL(forPathSuffix: "/library/metadata/5d7768265af944001f1f6977")?.host
         XCTAssertEqual(host, "discover.provider.plex.tv")

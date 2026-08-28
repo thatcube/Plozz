@@ -177,6 +177,8 @@ public protocol UniversalWatchlistHost: AnyObject {
     var universalWatchlistNativeViewLoaded: Bool { get set }
     var universalWatchlistDestinationIDs:
         Set<WatchlistDestinationID> { get set }
+    /// Invalidates an older same-profile refresh when a newer one starts.
+    var universalWatchlistRefreshGeneration: UInt64 { get set }
     /// Identity of the built reconciler: profile + Plex identity generation, so a
     /// "watching as" change rebuilds its destinations. Not just a profile id
     /// despite the name.
@@ -221,6 +223,11 @@ public protocol UniversalWatchlistHost: AnyObject {
 }
 
 public extension UniversalWatchlistHost {
+    var isUniversalWatchlistPresentationReady: Bool {
+        universalWatchlistNativeViewLoaded
+            && universalWatchlistProfileID?
+                .hasPrefix("\(profiles.activeProfileID)#") == true
+    }
 
     /// The accounts the NATIVE watchlist import may read from — see
     /// `NativeWatchlistAccounts.resolve(profiles:accountsProviders:)`.
@@ -936,6 +943,13 @@ public extension UniversalWatchlistHost {
     func refreshNativeWatchlistView() async {
         guard let reconciler = universalWatchlistReconciler else { return }
         let profileID = profiles.activeProfileID
+        universalWatchlistRefreshGeneration &+= 1
+        let refreshGeneration = universalWatchlistRefreshGeneration
+        func refreshIsCurrent() -> Bool {
+            profiles.activeProfileID == profileID
+                && universalWatchlistReconciler === reconciler
+                && universalWatchlistRefreshGeneration == refreshGeneration
+        }
         let started = Date()
         let report = await reconciler.fetchNativeEntries()
         // Belt to the caller's braces. Fetching is network work, and what comes
@@ -944,7 +958,7 @@ public extension UniversalWatchlistHost {
         // these are somebody else's entries and must not be recorded here.
         // Ordering the switch is the real fix — this makes a mistake there
         // fail closed instead of silently caching a stranger's watchlist.
-        guard profiles.activeProfileID == profileID else {
+        guard refreshIsCurrent() else {
             PlozzLog.app.info("Watchlist refresh dropped — profile changed mid-fetch")
             return
         }
@@ -960,6 +974,7 @@ public extension UniversalWatchlistHost {
         // evidence — mints two aliases for one show. The viewer then sees it
         // twice: once as the copy they own, once as one to request.
         let animeBridge = await universalWatchlistAnimeBridge.refreshIfNeeded()
+        guard refreshIsCurrent() else { return }
         for read in report.successes {
             for entry in read.entries {
                 guard let evidence = entry.mediaAliasEvidence else { continue }
@@ -973,6 +988,7 @@ public extension UniversalWatchlistHost {
         }
 
         let targetedKeys = await reconciler.targetedKeys(profileID: profileID)
+        guard refreshIsCurrent() else { return }
         var candidatesByDestination:
             [WatchlistDestinationID: [WatchlistNativeReconciliationCandidate]] = [:]
         var targetsByAlias: [MediaAliasID: WatchlistMutationTarget] = [:]
@@ -1019,6 +1035,10 @@ public extension UniversalWatchlistHost {
             }
         }
 
+        guard refreshIsCurrent() else {
+            PlozzLog.app.info("Watchlist refresh dropped — scope changed during identity resolution")
+            return
+        }
         var view = universalWatchlistNativeView
         var supersededCount = 0
         for read in report.successes {
@@ -1038,7 +1058,7 @@ public extension UniversalWatchlistHost {
             // known are asked, and the answer is persisted with the view, so a
             // steady watchlist costs nothing on later refreshes.
             let known = Dictionary(
-                universalWatchlistNativeView.bucket(for: read.destinationID)?
+                view.bucket(for: read.destinationID)?
                     .entries.compactMap { entry in
                         entry.ownedCopy.map { (entry.aliasID, $0) }
                     } ?? [],
@@ -1077,6 +1097,7 @@ public extension UniversalWatchlistHost {
                 ) else { continue }
                 entries.append(value)
             }
+            guard refreshIsCurrent() else { return }
             // A successful read REPLACES what this destination held, empty
             // included: the viewer clearing a server's watchlist is an answer,
             // not a blip. Home learned the same lesson the expensive way.
@@ -1112,22 +1133,37 @@ public extension UniversalWatchlistHost {
                 targets: reassertTargets,
                 destinationID: read.destinationID
             )
+            guard refreshIsCurrent() else { return }
         }
-        // A destination that could not be read keeps whatever it last told us,
-        // marked stale. Blanking the watchlist because one server is down for a
-        // moment is exactly the failure the cached-snapshot rules exist to stop.
+        // A transient destination failure keeps the last-known answer. An
+        // authentication failure does not: it means this profile is disconnected
+        // or its identity changed, so retaining that bucket could show the prior
+        // account's list indefinitely.
         for failure in report.failures {
-            view.applyFailure(destinationID: failure.destinationID)
+            if failure.classification == .authentication {
+                view.applySuccess(
+                    destinationID: failure.destinationID,
+                    entries: []
+                )
+            } else {
+                view.applyFailure(destinationID: failure.destinationID)
+            }
         }
         // And one that is no longer enabled contributes nothing at all. This is
         // the whole point: turning a server off retracts its titles, with
         // nothing left behind in the ledger to undo.
+        guard refreshIsCurrent() else {
+            PlozzLog.app.info("Watchlist refresh dropped — scope changed before persistence")
+            return
+        }
         view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
         persistUniversalWatchlistNativeView(view)
 
         announceUniversalWatchlistDidChange()
         _ = await reconciler.drain(profileID: profileID)
+        guard refreshIsCurrent() else { return }
         await universalWatchlistRetryScheduler?.reschedule()
+        guard refreshIsCurrent() else { return }
         // The aliases a native read just created have no provider bindings yet,
         // and nothing else triggers the identity pass now that native entries
         // aren't intents. Without this a title sits in the row unable to find
@@ -1203,6 +1239,7 @@ public extension UniversalWatchlistHost {
     /// read-time view exists to fix.
     func loadUniversalWatchlistNativeView(profileID: String, scope: String) {
         let previous = universalWatchlistNativeView
+        let wasLoaded = universalWatchlistNativeViewLoaded
         let store: (any NativeWatchlistViewStoring)?
         if let directory = universalWatchlistStorageDirectory {
             store = try? AtomicNativeWatchlistViewStore(
@@ -1237,7 +1274,8 @@ public extension UniversalWatchlistHost {
             )
         }
 
-        // Tell Home about a REAL cached answer immediately.
+        // Tell Home about the authoritative cached answer immediately, including
+        // an empty one that must clear a stale last-known row.
         //
         // `HomeViewModel` can paint its own content snapshot before this
         // preparation task reaches the native-view store. Its initializer then
@@ -1250,7 +1288,7 @@ public extension UniversalWatchlistHost {
         // Distinct from the ordinary watchlist notification because Home debounces
         // that one to keep a user press responsive. This is startup state already
         // in memory; it should be folded immediately.
-        if view != previous, !view.bucketsByDestinationID.isEmpty {
+        if !wasLoaded || view != previous {
             UniversalWatchlistMembershipCache.shared.invalidate()
             // The Home model can be constructed before its view has installed
             // the notification observer. Yield one main-actor turn: if Home was

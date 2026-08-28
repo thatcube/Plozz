@@ -106,6 +106,30 @@ final class ArtworkImageVariantTests: XCTestCase {
         XCTAssertEqual(ArtworkImageVariant.heroPreview.requestURL(for: source), source)
     }
 
+    func testPreviewIsNotDistinctForUnresizableArtworkEndpoint() {
+        let source = URL(string: "https://images.example.com/poster.jpg")!
+
+        XCTAssertFalse(
+            ArtworkImageVariant.posterPreview.hasDistinctRequestURL(
+                from: .posterCard,
+                for: source
+            )
+        )
+    }
+
+    func testPreviewIsDistinctForResizablePlexArtworkEndpoint() {
+        let source = URL(
+            string: "https://plex.example/photo/:/transcode?width=1280&height=1920"
+        )!
+
+        XCTAssertTrue(
+            ArtworkImageVariant.posterPreview.hasDistinctRequestURL(
+                from: .posterCard,
+                for: source
+            )
+        )
+    }
+
     #if canImport(UIKit)
     private struct ImmediateArtworkLoader: ArtworkNetworkFileLoading {
         let data: Data

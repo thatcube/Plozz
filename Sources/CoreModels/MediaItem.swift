@@ -138,7 +138,13 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// Provider addressing continues to use `id` and `sources`.
     public var watchlistAliasID: MediaAliasID?
     public var stablePresentationID: String {
-        watchlistAliasID.map { "watchlist:\($0)" } ?? id
+        if let watchlistAliasID {
+            return "watchlist:\(watchlistAliasID)"
+        }
+        if let sourceAccountID {
+            return "account:\(sourceAccountID):\(id)"
+        }
+        return id
     }
     public var title: String  // l10n:content — media title (server/provider content)
     /// The title in the work's original/production language, when the server

@@ -360,7 +360,7 @@ final class PlozziOSAppModel {
                 self.resolvedUniversalWatchlistItems(candidates: items)
             },
             durableWatchlistPresentationReady: { [unowned self] in
-                self.universalWatchlistNativeViewLoaded
+                self.isUniversalWatchlistPresentationReady
             },
             rehydratePersistedArtworkItems: { [unowned self] items in
                 self.rehydratedPersistedArtwork(items)
@@ -409,6 +409,7 @@ final class PlozziOSAppModel {
         (any NativeWatchlistViewStoring)?
     @ObservationIgnored var universalWatchlistDestinationIDs:
         Set<WatchlistDestinationID> = []
+    @ObservationIgnored var universalWatchlistRefreshGeneration: UInt64 = 0
     @ObservationIgnored var universalWatchlistNativeViewLoaded = false
     @ObservationIgnored var universalWatchlistProfileID: String?
     @ObservationIgnored var universalWatchlistRetryScheduler:

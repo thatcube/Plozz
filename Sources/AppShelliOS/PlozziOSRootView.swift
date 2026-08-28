@@ -167,7 +167,10 @@ public struct PlozziOSRootView: View {
             appModel.setBackgroundWorkAllowed(scenePhase == .active)
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { appModel.syncCloudOnForeground() }
+            if newPhase == .active {
+                appModel.accountsProviders.retryUnconfirmedCredentials()
+                appModel.syncCloudOnForeground()
+            }
         }
         .alert(
             syncSetupOfferTitle,

@@ -3,6 +3,26 @@ import XCTest
 @testable import FeatureWatchlistCore
 
 final class WatchlistReconcilerTests: XCTestCase {
+    func testConcurrentNativeReadsShareTheInFlightResult() async throws {
+        let destination = SlowReadableWatchlistDestination()
+        let store = try DurableWatchlistMutationStore(
+            store: InMemoryWatchlistMutationStateStore()
+        )
+        let reconciler = WatchlistReconciler(
+            registry: WatchlistDestinationRegistry([destination]),
+            mutationStore: store
+        )
+
+        async let first = reconciler.fetchNativeEntries()
+        async let second = reconciler.fetchNativeEntries()
+        let reports = await [first, second]
+        let fetchCount = await destination.fetchCount()
+
+        XCTAssertEqual(reports[0].successes.count, 1)
+        XCTAssertEqual(reports[1].successes.count, 1)
+        XCTAssertEqual(fetchCount, 1)
+    }
+
     func testAddRemoveAddCoalescesToLatestDesiredState() async throws {
         let fixture = try makeFixture()
         let target = makeTarget()
@@ -1024,6 +1044,37 @@ private actor FakeWatchlistDestination: WatchlistDestination {
 
     func appliedStates() -> [WatchlistDesiredState] { applied }
 
+}
+
+private actor SlowReadableWatchlistDestination: WatchlistDestination {
+    nonisolated let id = WatchlistDestinationID(rawValue: "slow-readable")!
+    nonisolated let capabilities = WatchlistDestinationCapabilities(
+        readable: true,
+        writable: false,
+        removable: false,
+        bindingRequirement: .globalExternalIdentity,
+        globalIdentityNamespaces: [.imdb]
+    )
+    private var reads = 0
+
+    func fetchEntries() async throws -> [WatchlistDestinationEntry] {
+        reads += 1
+        try await Task.sleep(for: .milliseconds(50))
+        return []
+    }
+
+    func resolve(
+        _ target: WatchlistMutationTarget
+    ) async throws -> WatchlistDestinationBinding? {
+        nil
+    }
+
+    func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding
+    ) async throws {}
+
+    func fetchCount() -> Int { reads }
 }
 
 private actor RetryingWatchlistDestination: WatchlistDestination {

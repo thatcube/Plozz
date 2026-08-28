@@ -312,6 +312,9 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         guard let fileURL else { return }
         Self.lock.lock()
         Self.memo[fileURL.path] = .some(nil)
+        if let heroFileURL {
+            Self.heroMemo[heroFileURL.path] = .some(nil)
+        }
         Self.lock.unlock()
         try? FileManager.default.removeItem(at: fileURL)
         if let heroFileURL { try? FileManager.default.removeItem(at: heroFileURL) }

@@ -191,6 +191,7 @@ private struct CardFocusLiftModifier: ViewModifier {
     private var measuresSize: Bool { isHighlight && outlineReach > 0 }
 
     private var scale: CGFloat {
+        guard !reduceMotion else { return 1 }
         guard isHighlight else { return outlineScale }
         return PlozzTheme.Metrics.highlightFocusScale(
             outlineScale: outlineScale,
@@ -446,7 +447,7 @@ private struct CardFocusTransitionModifier: ViewModifier {
     private var isHighlight: Bool { !focusStyle.drawsFocusOutline && !reduceMotion }
 
     private var animation: Animation? {
-        guard animates else { return nil }
+        guard animates, !reduceMotion else { return nil }
         return PlozzTheme.Metrics.cardFocusAnimation(
             isFocused: isFocused,
             focusStyle: focusStyle,

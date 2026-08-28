@@ -212,13 +212,23 @@ public struct MediaRowView: View {
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
-        self.items = Self.uniqued(items)
+        let uniqueItems = Self.uniqued(items)
+        self.items = uniqueItems
         self.presentation = presentation
         self.spoilerSettings = spoilerSettings
         self.showsSeriesArtwork = showsSeriesArtwork
-        self.initialFocusID = initialFocusID
-        self.initialScrollID = initialScrollID
-        self.defaultFocusID = defaultFocusID
+        self.initialFocusID = Self.presentationID(
+            matching: initialFocusID,
+            in: uniqueItems
+        )
+        self.initialScrollID = Self.presentationID(
+            matching: initialScrollID,
+            in: uniqueItems
+        )
+        self.defaultFocusID = Self.presentationID(
+            matching: defaultFocusID,
+            in: uniqueItems
+        )
         self.focusResetToken = focusResetToken
         self.isCovered = isCovered
         self.onRefocusComplete = onRefocusComplete
@@ -233,13 +243,12 @@ public struct MediaRowView: View {
         // pre-collapse offsets — with [A, A, B], B rendered at 1 but was recorded
         // at 2, which aborted artwork prefetch — and `byID` holding the *discarded*
         // duplicate, so focusing the surviving card reported the wrong item.
-        let uniqueItems = self.items
-        self.itemIDSet = Set(uniqueItems.map(\.id))
+        self.itemIDSet = Set(uniqueItems.map(\.stablePresentationID))
         var indexByID: [String: Int] = [:]
         var byID: [String: MediaItem] = [:]
         for (offset, item) in uniqueItems.enumerated() {
-            indexByID[item.id] = offset
-            byID[item.id] = item
+            indexByID[item.stablePresentationID] = offset
+            byID[item.stablePresentationID] = item
         }
         self.itemIndexByID = indexByID
         self.itemByID = byID
@@ -298,7 +307,9 @@ public struct MediaRowView: View {
         // will be restored to. The system re-establishes focus by geometry as
         // the page reappears, and leaving the other cards focusable let it land
         // on one of them (or the row below) visibly before we corrected it.
-        if let coveredFocusID { return item.id != coveredFocusID }
+        if let coveredFocusID {
+            return item.stablePresentationID != coveredFocusID
+        }
         // The gate stops disabling cards for good once the row has been browsed.
         //
         // Disabling exists ONLY to avoid a transient highlight on the
@@ -324,7 +335,7 @@ public struct MediaRowView: View {
         return gatesFocus
             && !focusEngaged
             && !hasBrowsedSinceTargetChange
-            && item.id != gateTarget
+            && item.stablePresentationID != gateTarget
     }
 
     /// First occurrence wins, order otherwise preserved: callers have already
@@ -332,7 +343,19 @@ public struct MediaRowView: View {
     /// the survivor must be the one the ordering chose.
     static func uniqued(_ items: [MediaItem]) -> [MediaItem] {
         var seen = Set<String>()
-        return items.filter { seen.insert($0.id).inserted }
+        return items.filter {
+            seen.insert($0.stablePresentationID).inserted
+        }
+    }
+
+    static func presentationID(
+        matching suppliedID: String?,
+        in items: [MediaItem]
+    ) -> String? {
+        guard let suppliedID else { return nil }
+        return items.first {
+            $0.stablePresentationID == suppliedID || $0.id == suppliedID
+        }?.stablePresentationID ?? suppliedID
     }
 
     public var body: some View {
@@ -453,6 +476,9 @@ public struct MediaRowView: View {
                     pendingReport?.cancel()
                     pendingReport = nil
                     artworkPrefetchTasks.cancelAll()
+                    prefetchedIDs.removeAll(keepingCapacity: true)
+                    prefetchedPreviewIDs.removeAll(keepingCapacity: true)
+                    lastArtworkPrefetchIndex = nil
                 }
             }
         }
@@ -541,15 +567,17 @@ public struct MediaRowView: View {
         // is a real gap and adjacent cards never overlap at rest.
         let card = content
             .frame(width: cardSlotWidth)
-            .id(item.id)
+            .id(item.stablePresentationID)
             .onAppear {
-                visibleIDs.insert(item.id)
+                visibleIDs.insert(item.stablePresentationID)
                 prefetchArtwork(around: item)
             }
-            .onDisappear { visibleIDs.remove(item.id) }
+            .onDisappear {
+                visibleIDs.remove(item.stablePresentationID)
+            }
         if tracksFocus {
             card
-                .focused($focusedID, equals: item.id)
+                .focused($focusedID, equals: item.stablePresentationID)
                 .disabled(cardIsDisabled(item))
         } else {
             card
@@ -589,7 +617,9 @@ public struct MediaRowView: View {
     /// return trip did no work until an evicted card was already visible.
     private func prefetchArtwork(around item: MediaItem) {
         #if canImport(UIKit)
-        guard let index = itemIndexByID[item.id] else { return }
+        guard let index = itemIndexByID[item.stablePresentationID] else {
+            return
+        }
         let lookahead = 8
         let direction = MediaRowPrefetchWindow.direction(
             from: lastArtworkPrefetchIndex,
@@ -627,11 +657,17 @@ public struct MediaRowView: View {
             // decode. One preview candidate is enough; if the primary is invalid,
             // the full two-candidate ladder below still handles the fallback.
             if presentation == .poster,
-               prefetchedPreviewIDs.insert(candidate.id).inserted,
-               let preview = candidates.first {
+               let preview = candidates.first,
+               ArtworkImageVariant.posterPreview.hasDistinctRequestURL(
+                   from: variant,
+                   for: preview
+               ),
+               prefetchedPreviewIDs.insert(
+                   candidate.stablePresentationID
+               ).inserted {
                 trackPrefetch(preview, variant: .posterPreview)
             }
-            if prefetchedIDs.insert(candidate.id).inserted {
+            if prefetchedIDs.insert(candidate.stablePresentationID).inserted {
                 for url in candidates.prefix(2) {
                     trackPrefetch(url, variant: variant)
                 }
@@ -664,13 +700,19 @@ public struct MediaRowView: View {
                 lookahead: 16
             ) where !near.contains(i) {
                 let candidate = items[i]
-                guard prefetchedPreviewIDs.insert(candidate.id).inserted,
-                      let preview = MediaArtworkPrefetchPolicy.candidates(
+                guard let preview = MediaArtworkPrefetchPolicy.candidates(
                           for: candidate,
                           style: artworkStyle,
                           spoilerSettings: spoilerSettings,
                           showsSeriesArtwork: showsSeriesArtwork
-                      ).first
+                      ).first,
+                      ArtworkImageVariant.posterPreview.hasDistinctRequestURL(
+                          from: .posterCard,
+                          for: preview
+                      ),
+                      prefetchedPreviewIDs.insert(
+                          candidate.stablePresentationID
+                      ).inserted
                 else { continue }
                 trackPrefetch(preview, variant: .posterPreview)
             }
@@ -839,10 +881,13 @@ public struct MediaRowView: View {
     /// costs nothing, where warming every candidate would cost on every card.
     private func prefetchHeroPreview(for item: MediaItem?) {
         #if canImport(UIKit)
-        guard let item, !prefetchedHeroIDs.contains(item.id) else { return }
+        guard let item,
+              !prefetchedHeroIDs.contains(item.stablePresentationID) else {
+            return
+        }
         let references = item.artworkReferences(for: .detailBackdrop)
         guard let reference = references.first else { return }
-        prefetchedHeroIDs.insert(item.id)
+        prefetchedHeroIDs.insert(item.stablePresentationID)
         ArtworkImageCache.shared.prefetch(reference, variant: .heroPreview)
         #endif
     }

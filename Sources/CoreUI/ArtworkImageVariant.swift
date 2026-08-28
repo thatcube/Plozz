@@ -94,6 +94,17 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
         return sourceURL
     }
 
+    /// Whether this variant asks the server for different bytes than another
+    /// variant. A progressive prefetch only helps when its smaller request can
+    /// arrive first; two concurrent variant tasks for one unchanged URL would
+    /// download the same payload twice.
+    public func hasDistinctRequestURL(
+        from other: ArtworkImageVariant,
+        for sourceURL: URL
+    ) -> Bool {
+        requestURL(for: sourceURL) != other.requestURL(for: sourceURL)
+    }
+
     /// Composite cache key for `url` under this variant, so one source URL can be
     /// cached at more than one variant at once (e.g. a show's backdrop cached small
     /// for an episode card *and* large for the detail hero) without the two

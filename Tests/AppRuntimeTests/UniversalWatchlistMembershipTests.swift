@@ -32,6 +32,35 @@ final class UniversalWatchlistMembershipTests: XCTestCase {
         )
     }
 
+    func testPresentationReadinessRejectsPreviousProfileScope() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        host.universalWatchlistNativeViewLoaded = true
+        host.universalWatchlistProfileID =
+            "\(host.profiles.activeProfileID)#0#accounts"
+
+        XCTAssertTrue(host.isUniversalWatchlistPresentationReady)
+
+        host.universalWatchlistProfileID = "another-profile#0#accounts"
+        XCTAssertFalse(host.isUniversalWatchlistPresentationReady)
+    }
+
+    func testEmptyNativeViewLoadStillNotifiesHomeThatCacheIsReady() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        let notification = expectation(
+            forNotification: .universalWatchlistCacheDidLoad,
+            object: nil
+        )
+
+        host.loadUniversalWatchlistNativeView(
+            profileID: host.profiles.activeProfileID,
+            scope: "empty-cache"
+        )
+
+        await fulfillment(of: [notification], timeout: 1)
+        XCTAssertTrue(host.universalWatchlistNativeViewLoaded)
+        XCTAssertTrue(host.universalWatchlistNativeView.bucketsByDestinationID.isEmpty)
+    }
+
     func testFirstAddOfPromotedSeriesReadsBackAsWatchlisted() async throws {
         let host = try await UniversalWatchlistHostDouble()
         let item = promotedSeries
@@ -427,6 +456,7 @@ final class UniversalWatchlistHostDouble: UniversalWatchlistHost {
     var universalWatchlistNativeViewStore: (any NativeWatchlistViewStoring)?
     var universalWatchlistNativeViewLoaded = false
     var universalWatchlistDestinationIDs: Set<WatchlistDestinationID> = []
+    var universalWatchlistRefreshGeneration: UInt64 = 0
     var universalWatchlistProfileID: String?
     let plexWatchlistIdentityGeneration = 0
     var universalWatchlistRetryScheduler: WatchlistRetryScheduler?

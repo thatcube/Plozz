@@ -129,15 +129,61 @@ public struct HeroLegibilityScrim: View {
         bottomFadeTop: Double = 0.58
     ) -> some View {
         LinearGradient(
-            stops: [
-                .init(color: tone.opacity(startsDark ? edgePeak : 0), location: 0),
-                .init(color: .clear, location: 0.42),
-                .init(color: .clear, location: bottomFadeTop),
-                .init(color: tone.opacity(endsDark ? edgePeak : 0), location: 1)
-            ],
+            stops: edgeStops(
+                startsDark: startsDark,
+                endsDark: endsDark,
+                bottomFadeTop: bottomFadeTop
+            ),
             startPoint: startPoint,
             endPoint: endPoint
         )
+    }
+
+    private func edgeStops(
+        startsDark: Bool,
+        endsDark: Bool,
+        bottomFadeTop: Double
+    ) -> [Gradient.Stop] {
+        if startsDark, endsDark {
+            return [
+                .init(color: tone.opacity(edgePeak), location: 0),
+                .init(color: .clear, location: 0.42),
+                .init(color: .clear, location: 0.58),
+                .init(color: tone.opacity(edgePeak), location: 1)
+            ]
+        }
+        if startsDark {
+            return [
+                .init(color: tone.opacity(edgePeak), location: 0),
+                .init(color: .clear, location: 0.42),
+                .init(color: .clear, location: 1)
+            ]
+        }
+        guard endsDark else {
+            return [
+                .init(color: .clear, location: 0),
+                .init(color: .clear, location: 1)
+            ]
+        }
+
+        let span = 1 - bottomFadeTop
+        return [
+            .init(color: .clear, location: 0),
+            .init(color: .clear, location: bottomFadeTop),
+            .init(
+                color: tone.opacity(edgePeak * 0.06),
+                location: bottomFadeTop + span * 0.20
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.24),
+                location: bottomFadeTop + span * 0.48
+            ),
+            .init(
+                color: tone.opacity(edgePeak * 0.56),
+                location: bottomFadeTop + span * 0.74
+            ),
+            .init(color: tone.opacity(edgePeak), location: 1)
+        ]
     }
 }
 #endif

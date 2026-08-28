@@ -2,6 +2,39 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "id": "release/030",
+      "version": "2026.8.28",
+      "build": 30,
+      "releasedAt": "2026-08-28",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Pinned Sidebar navigation with your libraries and an All Libraries view, now the default on Apple TV",
+            "Scrolling title marquee under cards for longer names",
+            "Remove titles directly from Continue Watching",
+            "Release history in Settings, with a What's New card after updates"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "New default focus state for cards",
+            "Continue Watching keeps more titles and retires stale next-episode suggestions",
+            "iPhone Home and detail hero artwork fades"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Home hero descriptions changing after swiping to a title",
+            "Watchlist ordering and sync bugs",
+            "Missing progress bars at the start of playback"
+          ]
+        }
+      ]
+    },
+    {
       "id": "release/029",
       "version": "2026.8.25",
       "build": 29,

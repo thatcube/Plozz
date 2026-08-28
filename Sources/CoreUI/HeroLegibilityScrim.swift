@@ -40,6 +40,7 @@ public struct HeroLegibilityScrim: View {
     private let wash: Double
     private let edges: Edges
     private let sideDarkeningStart: Double
+    private let bottomDarkeningStart: Double
 
     /// - Parameters:
     ///   - tone: Mode-appropriate scrim colour (dark in dark mode, light in light).
@@ -52,18 +53,22 @@ public struct HeroLegibilityScrim: View {
     ///     ramps in, as a fraction of height. `0` darkens the full column
     ///     evenly (the symmetric default). A higher value keeps the upper
     ///     corners clean and brings the wash in only where content sits.
+    ///   - bottomDarkeningStart: How far down the hero the bottom vignette remains
+    ///     clear. Lower values extend its protection farther behind foreground text.
     public init(
         tone: Color,
         edgePeak: Double,
         wash: Double = 0.06,
         edges: Edges = .all,
-        sideDarkeningStart: Double = 0
+        sideDarkeningStart: Double = 0,
+        bottomDarkeningStart: Double = 0.58
     ) {
         self.tone = tone
         self.edgePeak = edgePeak
         self.wash = wash
         self.edges = edges
         self.sideDarkeningStart = sideDarkeningStart
+        self.bottomDarkeningStart = bottomDarkeningStart
     }
 
     public var body: some View {
@@ -83,7 +88,8 @@ public struct HeroLegibilityScrim: View {
                     startPoint: .top,
                     endPoint: .bottom,
                     startsDark: edges.contains(.top),
-                    endsDark: edges.contains(.bottom)
+                    endsDark: edges.contains(.bottom),
+                    endDarkeningStart: bottomDarkeningStart
                 )
             }
         }
@@ -119,13 +125,14 @@ public struct HeroLegibilityScrim: View {
         startPoint: UnitPoint,
         endPoint: UnitPoint,
         startsDark: Bool,
-        endsDark: Bool
+        endsDark: Bool,
+        endDarkeningStart: Double = 0.58
     ) -> some View {
         LinearGradient(
             stops: [
                 .init(color: tone.opacity(startsDark ? edgePeak : 0), location: 0.0),
                 .init(color: .clear, location: 0.42),
-                .init(color: .clear, location: 0.58),
+                .init(color: .clear, location: endDarkeningStart),
                 .init(color: tone.opacity(endsDark ? edgePeak : 0), location: 1.0)
             ],
             startPoint: startPoint,

@@ -1038,7 +1038,10 @@ struct PlozziOSHeroLegibilityScrim: View {
             // A portrait hero has no room for a side wash; only the landscape
             // layout puts the title in a left-hand column.
             edges: style == .landscape ? [.leading, .bottom] : [.bottom],
-            sideDarkeningStart: 0.34
+            sideDarkeningStart: 0.34,
+            // Raise the bottom protection slightly so the logo and teaser stay
+            // inside the fade, while also softening the reflected lower artwork.
+            bottomDarkeningStart: 0.52
         )
     }
 }

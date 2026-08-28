@@ -1338,6 +1338,44 @@ private struct PlozziOSMirrorVideoLayer: UIViewRepresentable {
     }
 }
 
+private struct PlozziOSStableHomeHeroMetadata: View {
+    let presentation: HeroPresentation
+    let style: HeroArtworkStyle
+    let hidesRatings: Bool
+    let scheduleLine: LocalizedStringResource?
+    let logoFallback: (@Sendable () async -> URL?)?
+    @State private var descriptionText: String?
+
+    init(
+        presentation: HeroPresentation,
+        style: HeroArtworkStyle,
+        hidesRatings: Bool,
+        scheduleLine: LocalizedStringResource?,
+        logoFallback: (@Sendable () async -> URL?)?
+    ) {
+        self.presentation = presentation
+        self.style = style
+        self.hidesRatings = hidesRatings
+        self.scheduleLine = scheduleLine
+        self.logoFallback = logoFallback
+        _descriptionText = State(
+            initialValue: HeroContentPolicy.homeDescription(for: presentation)
+        )
+    }
+
+    var body: some View {
+        PlozziOSHeroMetadata(
+            presentation: presentation,
+            style: style,
+            mode: .home,
+            hidesRatings: hidesRatings,
+            scheduleLine: scheduleLine,
+            logoFallback: logoFallback,
+            descriptionOverride: .init(text: descriptionText)
+        )
+    }
+}
+
 struct PlozziOSHomeHeroForeground: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(PlozziOSAppModel.self) private var appModel
@@ -1360,10 +1398,9 @@ struct PlozziOSHomeHeroForeground: View {
             alignment: style == .compactPortrait ? .center : .leading,
             spacing: 12
         ) {
-            PlozziOSHeroMetadata(
+            PlozziOSStableHomeHeroMetadata(
                 presentation: presentation,
                 style: style,
-                mode: .home,
                 hidesRatings: appModel.settings.spoilers.settings
                     .shouldHideRatings(for: item),
                 scheduleLine: scheduleLine,
@@ -2350,6 +2387,14 @@ private struct PlozziOSHeroMetadata: View {
     /// visibly on a discovery item, which comes from Seerr/TMDb and so has no
     /// provider logo at all, while TMDb itself usually has one.
     var logoFallback: (@Sendable () async -> URL?)? = nil
+    /// A selected Home slide freezes its first fully prepared description. Later
+    /// payload refreshes may update other chrome, but must not replace a visible
+    /// overview with a newly arrived tagline.
+    var descriptionOverride: DescriptionOverride? = nil
+
+    struct DescriptionOverride {
+        let text: String?
+    }
 
     /// The same lookup tvOS's heroes use. Kinds that have no title art of their
     /// own are excluded rather than searched for one that cannot exist.
@@ -2520,7 +2565,10 @@ private struct PlozziOSHeroMetadata: View {
     }
 
     private var descriptionText: String? {
-        switch mode {
+        if let descriptionOverride {
+            return descriptionOverride.text
+        }
+        return switch mode {
         case .home:
             HeroContentPolicy.homeDescription(for: rootPresentation)
         case .detail:

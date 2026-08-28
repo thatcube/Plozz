@@ -53,6 +53,16 @@ export PLOZZ_TV_TOPSHELF_ENTITLEMENTS="${PLOZZ_TV_TOPSHELF_ENTITLEMENTS:-TopShel
 # canonical app's Push / iCloud / Associated Domains capabilities.
 export PLOZZ_IOS_APP_ENTITLEMENTS="${PLOZZ_IOS_APP_ENTITLEMENTS:-App/PlozziOS/PlozziOS.entitlements}"
 
+# Xcode resolves xcconfig includes before scheme pre-actions run, so linking the
+# local override from a scheme is one build too late. Restore it here before
+# either XcodeGen or the bake-only device-build path reads build settings.
+secrets_file="Config/Secrets.local.xcconfig"
+canonical_secrets="${XDG_CONFIG_HOME:-$HOME/.config}/plozz/Secrets.local.xcconfig"
+if [ ! -e "$secrets_file" ] && [ -f "$canonical_secrets" ]; then
+  ln -s "$canonical_secrets" "$secrets_file"
+  echo "Linked $secrets_file from $canonical_secrets"
+fi
+
 if [ "$BAKE_ONLY" != "1" ]; then
   xcodegen generate
 elif [ ! -f "Plozz.xcodeproj/project.pbxproj" ]; then

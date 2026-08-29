@@ -7,13 +7,80 @@ public enum ReleaseNotesCategory: String, Codable, CaseIterable, Sendable {
     case fixed = "Fixed"
 }
 
+public enum ReleaseNotesPlatform: String, Codable, CaseIterable, Sendable {
+    case tvOS
+    case iOS
+
+    public static var current: Self {
+        #if os(iOS)
+        .iOS
+        #else
+        .tvOS
+        #endif
+    }
+}
+
+public struct ReleaseNotesItem: Codable, Equatable, Identifiable, Sendable {
+    public let text: String
+    public let platforms: [ReleaseNotesPlatform]?
+
+    public var id: String { text }
+
+    public init(text: String, platforms: [ReleaseNotesPlatform]? = nil) {
+        self.text = text
+        self.platforms = platforms
+    }
+
+    public func applies(to platform: ReleaseNotesPlatform) -> Bool {
+        platforms?.contains(platform) ?? true
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            self.init(text: text)
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            text: try container.decode(String.self, forKey: .text),
+            platforms: try container.decodeIfPresent(
+                [ReleaseNotesPlatform].self,
+                forKey: .platforms
+            )
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        guard platforms != nil else {
+            var container = encoder.singleValueContainer()
+            try container.encode(text)
+            return
+        }
+
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encodeIfPresent(platforms, forKey: .platforms)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case platforms
+    }
+}
+
 public struct ReleaseNotesSection: Codable, Equatable, Identifiable, Sendable {
     public let category: ReleaseNotesCategory
-    public let items: [String]
+    public let items: [ReleaseNotesItem]
 
     public var id: ReleaseNotesCategory { category }
 
     public init(category: ReleaseNotesCategory, items: [String]) {
+        self.category = category
+        self.items = items.map { ReleaseNotesItem(text: $0) }
+    }
+
+    public init(category: ReleaseNotesCategory, items: [ReleaseNotesItem]) {
         self.category = category
         self.items = items
     }
@@ -62,6 +129,8 @@ public enum ReleaseNotesCatalogError: LocalizedError, Equatable {
     case emptySection(String, ReleaseNotesCategory)
     case emptyItem(String, ReleaseNotesCategory)
     case duplicateItem(String, ReleaseNotesCategory)
+    case emptyPlatforms(String, ReleaseNotesCategory)
+    case duplicatePlatforms(String, ReleaseNotesCategory)
     case versionsNotNewestFirst
 
     public var errorDescription: String? {
@@ -92,6 +161,10 @@ public enum ReleaseNotesCatalogError: LocalizedError, Equatable {
             return "Release \(id) has an empty item in \(category.rawValue)."
         case let .duplicateItem(id, category):
             return "Release \(id) repeats an item in \(category.rawValue)."
+        case let .emptyPlatforms(id, category):
+            return "Release \(id) has an item with no platforms in \(category.rawValue)."
+        case let .duplicatePlatforms(id, category):
+            return "Release \(id) repeats a platform on an item in \(category.rawValue)."
         case .versionsNotNewestFirst:
             return "ReleaseNotes.json versions must be ordered newest first."
         }
@@ -138,11 +211,29 @@ public struct ReleaseNotesCatalog: Codable, Equatable, Sendable {
         return releases.filter { $0.build > lastSeen.build && $0.build <= current.build }
     }
 
-    public func versionGroups(for releases: [ReleaseNotesRelease]? = nil) -> [ReleaseNotesVersionGroup] {
+    public func versionGroups(
+        for releases: [ReleaseNotesRelease]? = nil,
+        platform: ReleaseNotesPlatform? = nil
+    ) -> [ReleaseNotesVersionGroup] {
         let source = releases ?? self.releases
-        var grouped: [(version: String, items: [ReleaseNotesCategory: [String]])] = []
+        var grouped: [
+            (version: String, items: [ReleaseNotesCategory: [ReleaseNotesItem]])
+        ] = []
 
         for release in source {
+            let visibleSections: [ReleaseNotesSection] = release.sections.compactMap { section in
+                let visibleItems = section.items.filter { item in
+                    guard let platform else { return true }
+                    return item.applies(to: platform)
+                }
+                guard !visibleItems.isEmpty else { return nil }
+                return ReleaseNotesSection(
+                    category: section.category,
+                    items: visibleItems
+                )
+            }
+            guard !visibleSections.isEmpty else { continue }
+
             let index: Int
             if let existing = grouped.firstIndex(where: { $0.version == release.version }) {
                 index = existing
@@ -151,9 +242,11 @@ public struct ReleaseNotesCatalog: Codable, Equatable, Sendable {
                 index = grouped.endIndex - 1
             }
 
-            for section in release.sections {
+            for section in visibleSections {
                 var items = grouped[index].items[section.category, default: []]
-                for item in section.items where !items.contains(item) {
+                for item in section.items where !items.contains(where: {
+                    $0.text == item.text
+                }) {
                     items.append(item)
                 }
                 grouped[index].items[section.category] = items
@@ -228,11 +321,31 @@ public struct ReleaseNotesCatalog: Codable, Equatable, Sendable {
                 guard !section.items.isEmpty else {
                     throw ReleaseNotesCatalogError.emptySection(release.id, section.category)
                 }
-                guard section.items.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+                guard section.items.allSatisfy({
+                    !$0.text.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ).isEmpty
+                }) else {
                     throw ReleaseNotesCatalogError.emptyItem(release.id, section.category)
                 }
-                guard Set(section.items).count == section.items.count else {
+                guard Set(section.items.map(\.text)).count == section.items.count else {
                     throw ReleaseNotesCatalogError.duplicateItem(release.id, section.category)
+                }
+                for item in section.items {
+                    if let platforms = item.platforms {
+                        guard !platforms.isEmpty else {
+                            throw ReleaseNotesCatalogError.emptyPlatforms(
+                                release.id,
+                                section.category
+                            )
+                        }
+                        guard Set(platforms).count == platforms.count else {
+                            throw ReleaseNotesCatalogError.duplicatePlatforms(
+                                release.id,
+                                section.category
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -309,6 +422,7 @@ public final class ReleaseNotesModel {
 
     public let catalog: ReleaseNotesCatalog
     public let allVersionGroups: [ReleaseNotesVersionGroup]
+    public let platform: ReleaseNotesPlatform
     public let isAvailable: Bool
     public private(set) var showsOnStartup: Bool
     public private(set) var pendingReleases: [ReleaseNotesRelease] = []
@@ -326,10 +440,12 @@ public final class ReleaseNotesModel {
         catalog: ReleaseNotesCatalog,
         currentReleaseID: String?,
         store: ReleaseNotesStoring = ReleaseNotesStore(),
-        isAvailable: Bool = true
+        isAvailable: Bool = true,
+        platform: ReleaseNotesPlatform = .current
     ) {
         self.catalog = catalog
-        self.allVersionGroups = catalog.versionGroups()
+        self.platform = platform
+        self.allVersionGroups = catalog.versionGroups(platform: platform)
         self.isAvailable = isAvailable
         self.currentReleaseID = currentReleaseID?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.store = store
@@ -356,9 +472,21 @@ public final class ReleaseNotesModel {
         }
 
         let unseen = catalog.releases(after: lastSeenID, through: current.id)
-        guard !unseen.isEmpty else { return }
-        pendingReleases = unseen
-        pendingVersionGroups = catalog.versionGroups(for: unseen)
+        let relevant = unseen.filter { release in
+            !catalog.versionGroups(
+                for: [release],
+                platform: platform
+            ).isEmpty
+        }
+        guard !relevant.isEmpty else {
+            advanceLastSeen(to: current)
+            return
+        }
+        pendingReleases = relevant
+        pendingVersionGroups = catalog.versionGroups(
+            for: relevant,
+            platform: platform
+        )
     }
 
     public func dismissStartupNotes() {

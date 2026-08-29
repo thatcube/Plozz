@@ -14,10 +14,29 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CATALOG = ROOT / "App" / "Resources" / "ReleaseNotes.json"
 CATEGORIES = ("New", "Updated", "Fixed")
+PLATFORMS = ("tvOS", "iOS")
 
 
 def fail(message: str) -> None:
     raise ValueError(message)
+
+
+def normalized_item(item: Any, release_id: str) -> tuple[str, list[str] | None]:
+    if isinstance(item, str):
+        return item, None
+    if not isinstance(item, dict):
+        fail(f"{release_id} contains an invalid release-note item")
+
+    text = item.get("text")
+    platforms = item.get("platforms")
+    if platforms is not None:
+        if not isinstance(platforms, list) or not platforms:
+            fail(f"{release_id} contains an item with no platforms")
+        if any(platform not in PLATFORMS for platform in platforms):
+            fail(f"{release_id} contains an unknown platform")
+        if len(set(platforms)) != len(platforms):
+            fail(f"{release_id} repeats a platform on an item")
+    return text, platforms
 
 
 def load_catalog(path: Path) -> dict[str, Any]:
@@ -77,9 +96,13 @@ def load_catalog(path: Path) -> dict[str, Any]:
             items = section.get("items")
             if not isinstance(items, list) or not items:
                 fail(f"{release_id} {section.get('category')} section is empty")
-            if any(not isinstance(item, str) or not item.strip() for item in items):
+            normalized = [
+                normalized_item(item, release_id)
+                for item in items
+            ]
+            if any(not isinstance(text, str) or not text.strip() for text, _ in normalized):
                 fail(f"{release_id} contains an empty release-note item")
-            if len(set(items)) != len(items):
+            if len({text for text, _ in normalized}) != len(normalized):
                 fail(f"{release_id} repeats a release-note item")
 
         ids.add(release_id)
@@ -115,10 +138,17 @@ def selected_release(
     return release
 
 
-def render(release: dict[str, Any]) -> str:
+def render(release: dict[str, Any], platform: str | None = None) -> str:
     blocks = []
     for section in release["sections"]:
-        items = "\n".join(f"• {item}" for item in section["items"])
+        visible = []
+        for item in section["items"]:
+            text, platforms = normalized_item(item, release["id"])
+            if platform is None or platforms is None or platform in platforms:
+                visible.append(text)
+        if not visible:
+            continue
+        items = "\n".join(f"• {item}" for item in visible)
         blocks.append(f"{section['category']}\n{items}")
     return "\n\n".join(blocks)
 
@@ -135,6 +165,7 @@ def parser() -> argparse.ArgumentParser:
 
     render_command = subparsers.add_parser("render")
     render_command.add_argument("--release-id", required=True)
+    render_command.add_argument("--platform", choices=PLATFORMS)
     return result
 
 
@@ -158,7 +189,13 @@ def main() -> int:
                 print(f"Validated {len(catalog['releases'])} releases")
         else:
             release = selected_release(catalog, args.release_id, None, None)
-            print(render(release))
+            rendered = render(release, args.platform)
+            if args.platform is not None and not rendered:
+                print(
+                    f"warning: {release['id']} has no {args.platform} notes",
+                    file=sys.stderr,
+                )
+            print(rendered)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

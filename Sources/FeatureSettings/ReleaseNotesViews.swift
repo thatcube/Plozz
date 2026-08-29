@@ -250,8 +250,8 @@ private struct ReleaseNotesSectionView: View {
                         Text(verbatim: section.category.rawValue)
                             .font(.headline)
                     }
-                    ForEach(chunk.items, id: \.self) { item in
-                        ReleaseNotesBullet(item: item)
+                    ForEach(chunk.items) { item in
+                        ReleaseNotesBullet(item: item.text)
                     }
                 }
                 // tvOS scrolls by moving focus. Bounded multi-note chunks create
@@ -265,8 +265,8 @@ private struct ReleaseNotesSectionView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(verbatim: section.category.rawValue)
                 .font(.headline)
-            ForEach(section.items, id: \.self) { item in
-                ReleaseNotesBullet(item: item)
+            ForEach(section.items) { item in
+                ReleaseNotesBullet(item: item.text)
             }
         }
         #endif
@@ -302,7 +302,7 @@ private struct ReleaseNotesBullet: View {
 #if os(tvOS)
 private struct ReleaseNotesSectionChunk: Identifiable {
     let id: String
-    let items: [String]
+    let items: [ReleaseNotesItem]
     let showsHeading: Bool
 }
 #endif

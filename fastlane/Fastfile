@@ -31,6 +31,7 @@ RELEASE_TARGETS = [
     name: "tvOS",
     scheme: "Plozz",
     platform: "appletvos",
+    notes_platform: "tvOS",
     # The App Store Connect API's own platform name, which differs from the
     # xcodebuild/altool one above.
     asc_platform: "TV_OS",
@@ -41,6 +42,7 @@ RELEASE_TARGETS = [
     name: "iOS/iPadOS",
     scheme: "PlozziOS",
     platform: "ios",
+    notes_platform: "iOS",
     asc_platform: "IOS",
     output_name: "Plozz-iOS.ipa",
     archive_path: File.join(OUTPUT_DIR, "Plozz-iOS.xcarchive")
@@ -310,11 +312,40 @@ def release_notes_entry
   end
 end
 
-def release_notes_text(entry = release_notes_entry)
-  entry.fetch("sections").map do |section|
-    items = section.fetch("items").map { |item| "• #{item}" }.join("\n")
-    "#{section.fetch('category')}\n#{items}"
-  end.join("\n\n")
+def release_notes_text(entry, platform, empty_text: nil)
+  blocks = entry.fetch("sections").filter_map do |section|
+    visible = section.fetch("items").filter_map do |item|
+      if item.is_a?(String)
+        item
+      elsif item.is_a?(Hash)
+        platforms = item["platforms"]
+        item.fetch("text") if platforms.nil? || platforms.include?(platform)
+      end
+    end
+    next if visible.empty?
+
+    "#{section.fetch('category')}\n#{visible.map { |item| "• #{item}" }.join("\n")}"
+  end
+  return empty_text if blocks.empty?
+
+  blocks.join("\n\n")
+end
+
+def github_release_notes(entry)
+  notes = RELEASE_TARGETS.to_h do |target|
+    [
+      target[:name],
+      release_notes_text(
+        entry,
+        target[:notes_platform],
+        empty_text: "No changes for this platform in this build."
+      )
+    ]
+  end
+  distinct = notes.values.uniq
+  return distinct.first if distinct.one?
+
+  notes.map { |name, text| "## #{name}\n\n#{text}" }.join("\n\n")
 end
 
 def validate_release_notes_build(entry, build_number)
@@ -518,10 +549,23 @@ lane :beta do
   # TestFlight build read as production and default crash reporting OFF.
   ENV["PLOZZ_RELEASE_CHANNEL"] = "testflight"
   entry = release_notes_entry
-  notes = release_notes_text(entry)
   ENV["PLOZZ_RELEASE_ID"] = entry.fetch("id")
+  notes_by_target = RELEASE_TARGETS.to_h do |target|
+    authored = release_notes_text(entry, target[:notes_platform])
+    if authored.nil?
+      UI.important(
+        "#{target[:name]} has no notes in #{entry.fetch('id')}; " \
+        "using the TestFlight no-change fallback."
+      )
+    end
+    [
+      target[:name],
+      authored || "No changes for this platform in this build."
+    ]
+  end
   build
   RELEASE_TARGETS.each do |target|
+    notes = notes_by_target.fetch(target[:name])
     UI.header("Uploading #{target[:name]} to TestFlight")
     upload_to_testflight(
       api_key: api_key,
@@ -539,7 +583,11 @@ lane :beta do
 
   # Tag the shipped commit and open a GitHub PRE-release (TestFlight beta) with the
   # changelog + tester notes.
-  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes, true)
+  tag_github_release(
+    ENV["PLOZZ_BUILD_NUMBER"],
+    github_release_notes(entry),
+    true
+  )
   report_release_tagging_failures
 end
 
@@ -548,13 +596,24 @@ lane :release do
   api_key = asc_api_key
   ENV["PLOZZ_RELEASE_CHANNEL"] = "production"
   entry = release_notes_entry
-  notes = release_notes_text(entry)
   ENV["PLOZZ_RELEASE_ID"] = entry.fetch("id")
+  notes_by_target = RELEASE_TARGETS.to_h do |target|
+    notes = release_notes_text(entry, target[:notes_platform])
+    if notes.nil?
+      UI.user_error!(
+        "#{target[:name]} has no authored release notes in #{entry.fetch('id')}. " \
+        "Add a shared item or one targeted to #{target[:notes_platform]} before " \
+        "uploading to the App Store."
+      )
+    end
+    [target[:name], notes]
+  end
   build
   # Keep every platform's App Store version record in step with the binaries
   # being uploaded. Review rejects a mismatch, and CalVer moves on its own.
   sync_app_store_versions(marketing_version)
   RELEASE_TARGETS.each do |target|
+    notes = notes_by_target.fetch(target[:name])
     UI.header("Uploading #{target[:name]} to App Store Connect")
     upload_to_app_store(
       api_key: api_key,
@@ -572,6 +631,10 @@ lane :release do
 
   # Tag the shipped commit and open a full GitHub release (marked "Latest") with the
   # changelog and any notes — this is a production App Store ship, not a beta.
-  tag_github_release(ENV["PLOZZ_BUILD_NUMBER"], notes, false)
+  tag_github_release(
+    ENV["PLOZZ_BUILD_NUMBER"],
+    github_release_notes(entry),
+    false
+  )
   report_release_tagging_failures
 end

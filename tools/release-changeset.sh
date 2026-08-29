@@ -179,7 +179,9 @@ hr
 echo "Next: draft a short, plain-text, tester-facing 'What to Test' from the"
 echo "NET DIFF above — never from commit subjects alone, because history may include"
 echo "reverted or superseded work. Verify every claimed behavior exists in the target"
-echo "tree. Add it to App/Resources/ReleaseNotes.json under New / Updated / Fixed,"
+echo "tree. Add it to App/Resources/ReleaseNotes.json under New / Updated / Fixed."
+echo "Leave shared items as strings; give platform-only items a tvOS or iOS target,"
+echo 'for example: { "text": "Fixed sidebar focus", "platforms": ["tvOS"] }'
 echo "then validate and ship the selected entry:"
 echo "    tools/release-notes.py validate --release-id release/NNN --version YYYY.M.D --build NNN"
 echo "    PLOZZ_RELEASE_ID=release/NNN fastlane beta --env fastlane"

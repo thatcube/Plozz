@@ -18,6 +18,83 @@ final class ReleaseNotesTests: XCTestCase {
         )
     }
 
+    func testLegacyStringItemsAreSharedAcrossPlatforms() throws {
+        let catalog = try ReleaseNotesCatalog(data: Data("""
+        {
+          "schemaVersion": 1,
+          "releases": [{
+            "id": "release/001",
+            "version": "2026.8.1",
+            "build": 1,
+            "releasedAt": "2026-08-01",
+            "sections": [{ "category": "New", "items": ["Shared"] }]
+          }]
+        }
+        """.utf8))
+
+        XCTAssertEqual(
+            catalog.versionGroups(platform: .tvOS)[0].sections[0].items,
+            [ReleaseNotesItem(text: "Shared")]
+        )
+        XCTAssertEqual(
+            catalog.versionGroups(platform: .iOS)[0].sections[0].items,
+            [ReleaseNotesItem(text: "Shared")]
+        )
+    }
+
+    func testLegacySharedItemEncodesBackToAString() throws {
+        let item = ReleaseNotesItem(text: "Shared")
+
+        let encoded = try JSONEncoder().encode(item)
+
+        XCTAssertEqual(String(decoding: encoded, as: UTF8.self), "\"Shared\"")
+    }
+
+    func testPlatformItemsFilterAndKeepCategoryOrder() throws {
+        let catalog = try platformCatalog()
+        let tvGroup = try XCTUnwrap(
+            catalog.versionGroups(platform: .tvOS).first {
+                $0.version == "2026.8.1"
+            }
+        )
+        let phoneGroup = try XCTUnwrap(
+            catalog.versionGroups(platform: .iOS).first {
+                $0.version == "2026.8.1"
+            }
+        )
+
+        XCTAssertEqual(
+            tvGroup.sections,
+            [
+                ReleaseNotesSection(
+                    category: .new,
+                    items: [
+                        ReleaseNotesItem(text: "Shared"),
+                        ReleaseNotesItem(text: "TV only", platforms: [.tvOS])
+                    ]
+                )
+            ]
+        )
+        XCTAssertEqual(
+            phoneGroup.sections,
+            [
+                ReleaseNotesSection(
+                    category: .new,
+                    items: [
+                        ReleaseNotesItem(text: "Shared"),
+                        ReleaseNotesItem(text: "Phone only", platforms: [.iOS])
+                    ]
+                ),
+                ReleaseNotesSection(
+                    category: .fixed,
+                    items: [
+                        ReleaseNotesItem(text: "Phone fix", platforms: [.iOS])
+                    ]
+                )
+            ]
+        )
+    }
+
     func testFirstReleasedBuildEstablishesBaselineWithoutPresenting() throws {
         let store = TestReleaseNotesStore()
         let model = ReleaseNotesModel(
@@ -114,6 +191,39 @@ final class ReleaseNotesTests: XCTestCase {
         XCTAssertEqual(store.lastSeenReleaseID, "release/003")
     }
 
+    func testPlatformWithNoRelevantNotesAdvancesWithoutPresenting() throws {
+        let store = TestReleaseNotesStore(lastSeenReleaseID: "release/001")
+        let model = ReleaseNotesModel(
+            catalog: try platformCatalog(),
+            currentReleaseID: "release/002",
+            store: store,
+            platform: .iOS
+        )
+
+        model.prepareForStartup()
+
+        XCTAssertFalse(model.hasPendingStartupNotes)
+        XCTAssertEqual(store.lastSeenReleaseID, "release/002")
+    }
+
+    func testSkippedUpdatePresentsOnlyRelevantPlatformReleases() throws {
+        let store = TestReleaseNotesStore(lastSeenReleaseID: "release/001")
+        let model = ReleaseNotesModel(
+            catalog: try platformCatalog(),
+            currentReleaseID: "release/003",
+            store: store,
+            platform: .tvOS
+        )
+
+        model.prepareForStartup()
+
+        XCTAssertEqual(model.pendingReleases.map(\.id), ["release/002"])
+        XCTAssertEqual(
+            model.pendingVersionGroups[0].sections[0].items.map(\.text),
+            ["TV update"]
+        )
+    }
+
     func testBundledCatalogPassesRuntimeValidation() throws {
         let testFile = URL(fileURLWithPath: #filePath)
         let catalogURL = testFile
@@ -155,6 +265,33 @@ final class ReleaseNotesTests: XCTestCase {
         }
     }
 
+    func testCatalogRejectsEmptyPlatformTarget() {
+        let emptyPlatforms = """
+        {
+          "schemaVersion": 1,
+          "releases": [{
+            "id": "release/001",
+            "version": "2026.8.1",
+            "build": 1,
+            "releasedAt": "2026-08-01",
+            "sections": [{
+              "category": "New",
+              "items": [{ "text": "Nothing", "platforms": [] }]
+            }]
+          }]
+        }
+        """
+
+        XCTAssertThrowsError(
+            try ReleaseNotesCatalog(data: Data(emptyPlatforms.utf8))
+        ) { error in
+            XCTAssertEqual(
+                error as? ReleaseNotesCatalogError,
+                .emptyPlatforms("release/001", .new)
+            )
+        }
+    }
+
     private func makeCatalog() throws -> ReleaseNotesCatalog {
         try ReleaseNotesCatalog(
             releases: [
@@ -185,6 +322,78 @@ final class ReleaseNotesTests: XCTestCase {
                     releasedAt: "2026-08-01",
                     sections: [
                         ReleaseNotesSection(category: .new, items: ["New one"])
+                    ]
+                )
+            ]
+        )
+    }
+
+    private func platformCatalog() throws -> ReleaseNotesCatalog {
+        try ReleaseNotesCatalog(
+            releases: [
+                ReleaseNotesRelease(
+                    id: "release/003",
+                    version: "2026.8.3",
+                    build: 3,
+                    releasedAt: "2026-08-03",
+                    sections: [
+                        ReleaseNotesSection(
+                            category: .updated,
+                            items: [
+                                ReleaseNotesItem(
+                                    text: "Phone update",
+                                    platforms: [.iOS]
+                                )
+                            ]
+                        )
+                    ]
+                ),
+                ReleaseNotesRelease(
+                    id: "release/002",
+                    version: "2026.8.2",
+                    build: 2,
+                    releasedAt: "2026-08-02",
+                    sections: [
+                        ReleaseNotesSection(
+                            category: .updated,
+                            items: [
+                                ReleaseNotesItem(
+                                    text: "TV update",
+                                    platforms: [.tvOS]
+                                )
+                            ]
+                        )
+                    ]
+                ),
+                ReleaseNotesRelease(
+                    id: "release/001",
+                    version: "2026.8.1",
+                    build: 1,
+                    releasedAt: "2026-08-01",
+                    sections: [
+                        ReleaseNotesSection(
+                            category: .new,
+                            items: [
+                                ReleaseNotesItem(text: "Shared"),
+                                ReleaseNotesItem(
+                                    text: "TV only",
+                                    platforms: [.tvOS]
+                                ),
+                                ReleaseNotesItem(
+                                    text: "Phone only",
+                                    platforms: [.iOS]
+                                )
+                            ]
+                        ),
+                        ReleaseNotesSection(
+                            category: .fixed,
+                            items: [
+                                ReleaseNotesItem(
+                                    text: "Phone fix",
+                                    platforms: [.iOS]
+                                )
+                            ]
+                        )
                     ]
                 )
             ]

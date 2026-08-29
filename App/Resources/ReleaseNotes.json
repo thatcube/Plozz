@@ -10,8 +10,14 @@
         {
           "category": "New",
           "items": [
-            "Pinned Sidebar navigation with your libraries and an All Libraries view, now the default on Apple TV",
-            "Scrolling title marquee under cards for longer names",
+            {
+              "text": "Pinned Sidebar navigation with your libraries and an All Libraries view, now the default on Apple TV",
+              "platforms": ["tvOS"]
+            },
+            {
+              "text": "Scrolling title marquee under cards for longer names",
+              "platforms": ["tvOS"]
+            },
             "Remove titles directly from Continue Watching",
             "Release history in Settings, with a What's New card after updates"
           ]
@@ -19,15 +25,24 @@
         {
           "category": "Updated",
           "items": [
-            "New default focus state for cards",
+            {
+              "text": "New default focus state for cards",
+              "platforms": ["tvOS"]
+            },
             "Continue Watching keeps more titles and retires stale next-episode suggestions",
-            "iPhone Home and detail hero artwork fades"
+            {
+              "text": "iPhone Home and detail hero artwork fades",
+              "platforms": ["iOS"]
+            }
           ]
         },
         {
           "category": "Fixed",
           "items": [
-            "Home hero descriptions changing after swiping to a title",
+            {
+              "text": "Home hero descriptions changing after swiping to a title",
+              "platforms": ["iOS"]
+            },
             "Watchlist ordering and sync bugs",
             "Missing progress bars at the start of playback"
           ]
@@ -190,14 +205,20 @@
           "category": "New",
           "items": [
             "Watchlist is now a single list that follows you across Apple TV, iPhone, and iPad, and syncs to connected trackers (Simkl, AniList, MyAnimeList, Plex, and Jellyfin); anime is matched via AniDB/MAL/AniList ids",
-            "'New episode every Friday' now appears on Home on iPhone and iPad, matching the Apple TV"
+            {
+              "text": "'New episode every Friday' now appears on Home on iPhone and iPad, matching the Apple TV",
+              "platforms": ["iOS"]
+            }
           ]
         },
         {
           "category": "Updated",
           "items": [
             "Tracker sign-ins now sync across devices, so connecting a tracker like Simkl on one device no longer signs you out on others",
-            "iPhone/iPad: the trailer button now sits next to Play and is the last action to fold away"
+            {
+              "text": "iPhone/iPad: the trailer button now sits next to Play and is the last action to fold away",
+              "platforms": ["iOS"]
+            }
           ]
         },
         {
@@ -205,11 +226,23 @@
           "items": [
             "Saving a show from an episode page or from Continue Watching now saves the show, not the episode",
             "Watchlisted titles on a server you cannot currently reach now show their poster instead of a blank card",
-            "Home no longer keeps a CPU core busy while idle; battery use is now well under 1%",
+            {
+              "text": "Home no longer keeps a CPU core busy while idle; battery use is now well under 1%",
+              "platforms": ["iOS"]
+            },
             "The Home hero trailer now stops when you leave Home or the app, instead of continuing to play in the background",
-            "iPhone/iPad: the watchlist button is back on hero pages that front an episode",
-            "iPhone/iPad: heroes no longer drift sideways on titles with a wide logo",
-            "iPhone/iPad: the paging dots (including the progress bar inside them) now animate smoothly"
+            {
+              "text": "iPhone/iPad: the watchlist button is back on hero pages that front an episode",
+              "platforms": ["iOS"]
+            },
+            {
+              "text": "iPhone/iPad: heroes no longer drift sideways on titles with a wide logo",
+              "platforms": ["iOS"]
+            },
+            {
+              "text": "iPhone/iPad: the paging dots (including the progress bar inside them) now animate smoothly",
+              "platforms": ["iOS"]
+            }
           ]
         }
       ]
@@ -239,22 +272,34 @@
           "category": "New",
           "items": [
             "Playback now remembers which version of a show you picked and reuses it everywhere, including the next episode, and prefers the closest server when a title is on more than one",
-            "iOS: Downloads is now its own tab"
+            {
+              "text": "iOS: Downloads is now its own tab",
+              "platforms": ["iOS"]
+            }
           ]
         },
         {
           "category": "Updated",
           "items": [
-            "tvOS player controls redesigned: title and Subtitles/Audio/Speed buttons now sit on one line above the scrub bar, with Info as a tab below it (press Up from the scrub bar for the buttons, Down for the Info card)",
+            {
+              "text": "tvOS player controls redesigned: title and Subtitles/Audio/Speed buttons now sit on one line above the scrub bar, with Info as a tab below it (press Up from the scrub bar for the buttons, Down for the Info card)",
+              "platforms": ["tvOS"]
+            },
             "Series pages now load a whole season at once and scroll more smoothly",
-            "iOS: Search moved to the system search slot",
+            {
+              "text": "iOS: Search moved to the system search slot",
+              "platforms": ["iOS"]
+            },
             "Playback engine updated to AetherEngine 6.0.2"
           ]
         },
         {
           "category": "Fixed",
           "items": [
-            "tvOS: Back no longer quits the app when a context menu is closing"
+            {
+              "text": "tvOS: Back no longer quits the app when a context menu is closing",
+              "platforms": ["tvOS"]
+            }
           ]
         }
       ]
@@ -291,7 +336,10 @@
           "items": [
             "Related — a new rail above the cast on every movie and series page, listing other titles in your library connected to what you're viewing; anime pages lead with actual sequels and side stories, and everything listed is something you own and can play",
             "Media shares now show cast information for their titles",
-            "iPhone and iPad gained air-schedule badges, upcoming episodes in the rail, and the new Related row, matching the Apple TV"
+            {
+              "text": "iPhone and iPad gained air-schedule badges, upcoming episodes in the rail, and the new Related row, matching the Apple TV",
+              "platforms": ["iOS"]
+            }
           ]
         },
         {
@@ -547,7 +595,10 @@
             "Add both a Jellyfin and a Plex server and combine them into one multi-server library",
             "Browse Movies, TV, and Music",
             "Playback with resume and automatic skip of intros/credits",
-            "Switch between tvOS profiles",
+            {
+              "text": "Switch between tvOS profiles",
+              "platforms": ["tvOS"]
+            },
             "Themes, display-size settings, and night mode"
           ]
         }

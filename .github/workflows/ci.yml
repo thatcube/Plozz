@@ -52,6 +52,9 @@ jobs:
       - name: Localization importer regression tests
         run: python3 -m unittest discover -s tools/tests -p 'test_l10n_*.py'
 
+      - name: Release notes regression tests
+        run: python3 -m unittest discover -s tools/tests -p 'test_release_notes*.py'
+
       # Validates the artifact translators actually receive: brands marked
       # non-translatable, no keys without words in them, every counted string
       # carrying plural variations, and the permission prompts in each

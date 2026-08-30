@@ -650,7 +650,6 @@ public struct MediaRowView: View {
         guard let index = itemIndexByID[item.stablePresentationID] else {
             return
         }
-        let lookahead = 8
         let direction = MediaRowPrefetchWindow.direction(
             from: lastArtworkPrefetchIndex,
             to: index,
@@ -673,7 +672,7 @@ public struct MediaRowView: View {
             from: index,
             direction: direction,
             count: items.count,
-            lookahead: lookahead
+            lookahead: MediaRowPrefetchWindow.fullArtworkLookahead
         )
         for i in fullIndices {
             let candidate = items[i]
@@ -709,16 +708,10 @@ public struct MediaRowView: View {
             // under the viewer, which is the one thing a rail must not do. Warm
             // both, so the card is finished before it is reached.
             if showsSeriesArtwork {
-                HeroLogoPipeline.shared.prefetch(
-                    references: candidate.artworkReferences(for: .logo)
+                MediaArtworkPrefetchPolicy.warmSeriesPresentation(
+                    for: candidate,
+                    variant: variant
                 )
-                // ...and a clean, textless backdrop to draw that logo over, since
-                // the server's own art often has the title baked in and would
-                // print the name twice. Resolved here rather than at the card so
-                // it is already decoded when the card is reached — the store
-                // publishes nothing until it is, so a card can only ever see art
-                // it can draw on the same frame.
-                TextlessBackdropStore.shared.warm(for: candidate, variant: variant)
             }
         }
         if presentation == .poster {
@@ -727,7 +720,7 @@ public struct MediaRowView: View {
                 from: index,
                 direction: direction,
                 count: items.count,
-                lookahead: 16
+                lookahead: MediaRowPrefetchWindow.previewArtworkLookahead
             ) where !near.contains(i) {
                 let candidate = items[i]
                 guard let preview = MediaArtworkPrefetchPolicy.candidates(
@@ -948,8 +941,11 @@ public struct MediaRowView: View {
     }
 }
 
-enum MediaRowPrefetchWindow {
-    static func direction(
+public enum MediaRowPrefetchWindow {
+    public static let fullArtworkLookahead = 8
+    public static let previewArtworkLookahead = 16
+
+    public static func direction(
         from previousIndex: Int?,
         to index: Int,
         fallback: Int
@@ -960,7 +956,7 @@ enum MediaRowPrefetchWindow {
         return index < previousIndex ? -1 : 1
     }
 
-    static func indices(
+    public static func indices(
         from index: Int,
         direction: Int,
         count: Int,
@@ -1012,6 +1008,20 @@ enum MediaRowFocusPolicy {
 }
 
 public enum MediaArtworkPrefetchPolicy {
+    /// Warms both pieces of a Continue Watching card: its clean series backdrop
+    /// and the logo drawn over it. Shared by tvOS and iOS rails so one platform
+    /// cannot regress to on-demand loading while the other stays smooth.
+    @MainActor
+    public static func warmSeriesPresentation(
+        for item: MediaItem,
+        variant: ArtworkImageVariant
+    ) {
+        HeroLogoPipeline.shared.prefetch(
+            references: item.artworkReferences(for: .logo)
+        )
+        TextlessBackdropStore.shared.warm(for: item, variant: variant)
+    }
+
     public static func candidates(
         for item: MediaItem,
         style: PosterCardView.Style,

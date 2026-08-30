@@ -1862,6 +1862,7 @@ private struct PlozziOSHomeRowView: View {
                     // carry on watching, which is what tvOS already did. The
                     // context menu still reaches the detail page.
                     interaction: row.kind == .continueWatching ? .play : .openDetail,
+                    prefetchesArtwork: row.kind == .continueWatching,
                     // Continue Watching identifies cards by show art + logo unless
                     // the user has turned that off in Customize Home.
                     showsSeriesArtwork: row.kind == .continueWatching
@@ -1925,9 +1926,18 @@ private struct PlozziOSHomeMediaRail: View {
     /// from the card's shape — a landscape rail is a presentation choice, not a
     /// promise that the row is Continue Watching.
     var interaction: PlozziOSRailInteraction = .openDetail
+    /// Continue Watching opts in because its backdrop + logo composition costs
+    /// more than an ordinary card. Keeping this scoped avoids warming every Home
+    /// rail at launch when per-library rows are enabled.
+    var prefetchesArtwork: Bool = false
     /// Identify each card by its show — artwork plus logo — instead of by the
     /// item's own thumbnail.
     var showsSeriesArtwork: Bool = false
+    @State private var prefetchedIDs: Set<String> = []
+    @State private var prefetchedPreviewIDs: Set<String> = []
+    @State private var lastArtworkPrefetchIndex: Int?
+    @State private var artworkPrefetchDirection = 1
+    @State private var artworkPrefetchTasks = PlozziOSArtworkPrefetchTasks()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1955,6 +1965,11 @@ private struct PlozziOSHomeMediaRail: View {
                                 showsSeriesArtwork: showsSeriesArtwork
                             )
                         )
+                        .onAppear {
+                            if prefetchesArtwork {
+                                prefetchArtwork(around: item)
+                            }
+                        }
                     }
                 }
             }
@@ -1966,6 +1981,16 @@ private struct PlozziOSHomeMediaRail: View {
             .contentMargins(.vertical, 10, for: .scrollContent)
             .scrollIndicators(.hidden)
         }
+        .task(id: artworkPrefetchIdentity) {
+            guard prefetchesArtwork else { return }
+            resetArtworkPrefetch()
+            if let first = items.first {
+                prefetchArtwork(around: first)
+            }
+        }
+        .onDisappear {
+            artworkPrefetchTasks.cancelAll()
+        }
     }
 
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
@@ -1973,6 +1998,140 @@ private struct PlozziOSHomeMediaRail: View {
             return appModel.accountsProviders.provider(forAccountID: accountID)
         }
         return appModel.accountsProviders.primaryProvider
+    }
+
+    private var artworkPrefetchIdentity: String {
+        [
+            style == .poster ? "poster" : "landscape",
+            showsSeriesArtwork ? "series" : "item",
+            prefetchesArtwork ? "prefetch" : "on-demand",
+            appModel.settings.spoilers.settings.isEnabled ? "spoilers" : "visible",
+            appModel.settings.spoilers.settings.mode.rawValue,
+            items.map(\.stablePresentationID).joined(separator: "|"),
+        ].joined(separator: "\n")
+    }
+
+    private func resetArtworkPrefetch() {
+        artworkPrefetchTasks.cancelAll()
+        prefetchedIDs.removeAll(keepingCapacity: true)
+        prefetchedPreviewIDs.removeAll(keepingCapacity: true)
+        lastArtworkPrefetchIndex = nil
+        artworkPrefetchDirection = 1
+    }
+
+    /// Mirrors tvOS rail look-ahead. UIKit's lazy stack only creates nearby cards;
+    /// this warms the next window before touch scrolling realizes those views.
+    private func prefetchArtwork(around item: MediaItem) {
+        guard let index = items.firstIndex(where: {
+            $0.stablePresentationID == item.stablePresentationID
+        }) else {
+            return
+        }
+        let direction = MediaRowPrefetchWindow.direction(
+            from: lastArtworkPrefetchIndex,
+            to: index,
+            fallback: artworkPrefetchDirection
+        )
+        if direction != artworkPrefetchDirection {
+            artworkPrefetchTasks.cancelAll()
+            prefetchedIDs.removeAll(keepingCapacity: true)
+            prefetchedPreviewIDs.removeAll(keepingCapacity: true)
+        }
+        artworkPrefetchDirection = direction
+        lastArtworkPrefetchIndex = index
+
+        let variant: ArtworkImageVariant = style == .poster
+            ? .posterCard
+            : .landscapeCard
+        let fullIndices = MediaRowPrefetchWindow.indices(
+            from: index,
+            direction: direction,
+            count: items.count,
+            lookahead: MediaRowPrefetchWindow.fullArtworkLookahead
+        )
+        for candidateIndex in fullIndices {
+            let candidate = items[candidateIndex]
+            let candidates = MediaArtworkPrefetchPolicy.candidates(
+                for: candidate,
+                style: style,
+                spoilerSettings: appModel.settings.spoilers.settings,
+                showsSeriesArtwork: showsSeriesArtwork
+            )
+            if style == .poster,
+               let preview = candidates.first,
+               ArtworkImageVariant.posterPreview.hasDistinctRequestURL(
+                   from: variant,
+                   for: preview
+               ),
+               prefetchedPreviewIDs.insert(
+                   candidate.stablePresentationID
+               ).inserted {
+                trackPrefetch(preview, variant: .posterPreview)
+            }
+            if prefetchedIDs.insert(candidate.stablePresentationID).inserted {
+                for url in candidates.prefix(2) {
+                    trackPrefetch(url, variant: variant)
+                }
+            }
+            if showsSeriesArtwork {
+                MediaArtworkPrefetchPolicy.warmSeriesPresentation(
+                    for: candidate,
+                    variant: variant
+                )
+            }
+        }
+
+        guard style == .poster else { return }
+        let near = Set(fullIndices)
+        for candidateIndex in MediaRowPrefetchWindow.indices(
+            from: index,
+            direction: direction,
+            count: items.count,
+            lookahead: MediaRowPrefetchWindow.previewArtworkLookahead
+        ) where !near.contains(candidateIndex) {
+            let candidate = items[candidateIndex]
+            guard let preview = MediaArtworkPrefetchPolicy.candidates(
+                      for: candidate,
+                      style: style,
+                      spoilerSettings: appModel.settings.spoilers.settings,
+                      showsSeriesArtwork: showsSeriesArtwork
+                  ).first,
+                  ArtworkImageVariant.posterPreview.hasDistinctRequestURL(
+                      from: .posterCard,
+                      for: preview
+                  ),
+                  prefetchedPreviewIDs.insert(
+                      candidate.stablePresentationID
+                  ).inserted
+            else { continue }
+            trackPrefetch(preview, variant: .posterPreview)
+        }
+    }
+
+    private func trackPrefetch(
+        _ url: URL,
+        variant: ArtworkImageVariant
+    ) {
+        if let task = ArtworkImageCache.shared.prefetch(url, variant: variant) {
+            artworkPrefetchTasks.track(task)
+        }
+    }
+}
+
+private final class PlozziOSArtworkPrefetchTasks {
+    private var tasks: [Task<Void, Never>] = []
+
+    func track(_ task: Task<Void, Never>) {
+        tasks.append(task)
+    }
+
+    func cancelAll() {
+        tasks.forEach { $0.cancel() }
+        tasks.removeAll(keepingCapacity: true)
+    }
+
+    deinit {
+        tasks.forEach { $0.cancel() }
     }
 }
 

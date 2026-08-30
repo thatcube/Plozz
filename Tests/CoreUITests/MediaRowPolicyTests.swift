@@ -58,6 +58,20 @@ final class MediaRowPolicyTests: XCTestCase {
         )
     }
 
+    func testArtworkLookaheadKeepsFullImagesNearAndPreviewsFurtherAhead() {
+        XCTAssertEqual(MediaRowPrefetchWindow.fullArtworkLookahead, 8)
+        XCTAssertEqual(MediaRowPrefetchWindow.previewArtworkLookahead, 16)
+        XCTAssertEqual(
+            MediaRowPrefetchWindow.indices(
+                from: 0,
+                direction: 1,
+                count: 30,
+                lookahead: MediaRowPrefetchWindow.fullArtworkLookahead
+            ),
+            Array(0...8)
+        )
+    }
+
     func testEntryCallbackObservesFocusWithoutCreatingAnEntryGate() {
         XCTAssertTrue(MediaRowFocusPolicy.observesFocus(
             initialFocusID: nil,

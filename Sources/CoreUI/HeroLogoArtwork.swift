@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import MetadataKit
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -610,23 +611,45 @@ private func loadPreparedHeroLogo(
     priority: TaskPriority
 ) async -> PreparedLogo? {
     guard !Task.isCancelled else { return nil }
-    for reference in references {
-       guard !Task.isCancelled else { return nil }
-       if let prepared = await HeroLogoPipeline.shared.preparedLogo(
-           for: reference,
-           priority: priority
-       ) {
-           return prepared
-       }
+    let prefersOnline = MetadataProviderSettingsStore().load().preferOnlineArtwork
+    guard let firstPaint = await ArtworkFirstPaintResolver.resolve(
+        references: references,
+        variant: .original,
+        maxAspectRatio: nil,
+        asyncOnlineURL: asyncFallbackURL,
+        maximumOnlineWait: ArtworkFirstPaintResolver.focalArtworkWait,
+        prefersOnlineArtwork: prefersOnline
+    ), !Task.isCancelled else { return nil }
+    if let prepared = await HeroLogoPipeline.shared.preparedLogo(
+        for: firstPaint.reference,
+        priority: priority
+    ) {
+        return prepared
     }
+
+    for reference in references where reference != firstPaint.reference {
+        guard !Task.isCancelled else { return nil }
+        if let prepared = await HeroLogoPipeline.shared.preparedLogo(
+            for: reference,
+            priority: priority
+        ) {
+            return prepared
+        }
+    }
+
     guard !Task.isCancelled,
           let asyncFallbackURL,
-          let url = await asyncFallbackURL(),
+          let onlineURL = await asyncFallbackURL(),
           !Task.isCancelled
-    else {
-        return nil
-    }
-    return await HeroLogoPipeline.shared.preparedLogo(for: .remote(url), priority: priority)
+    else { return nil }
+    let onlineReference = ArtworkReference.remote(onlineURL)
+    guard onlineReference != firstPaint.reference,
+          !references.contains(onlineReference)
+    else { return nil }
+    return await HeroLogoPipeline.shared.preparedLogo(
+        for: onlineReference,
+        priority: priority
+    )
 }
 
 /// A logo after background removal/trim, carrying the mean luminance *and* mean

@@ -52,6 +52,7 @@ public struct HeroBackdropLayer<Video: View>: View {
     /// existing Home video remain visible through the navigation transition
     /// until the newly-mounted AVPlayerLayer presents its first frame.
     private let stillImageOpacity: Double
+    private let pinIdentity: String?
     /// Overlaid on the still image; empty today, hosts a faded-in trailer later.
     private let backgroundVideo: () -> Video
 
@@ -64,6 +65,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true,
         stillImageOpacity: Double = 1,
+        pinIdentity: String? = nil,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
         self.references = urls.map(ArtworkReference.remote)
@@ -74,6 +76,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         self.dissolveStart = dissolveStart
         self.ignoresOverscan = ignoresOverscan
         self.stillImageOpacity = stillImageOpacity
+        self.pinIdentity = pinIdentity
         self.backgroundVideo = backgroundVideo
     }
 
@@ -86,6 +89,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         dissolveStart: CGFloat = 0.33,
         ignoresOverscan: Bool = true,
         stillImageOpacity: Double = 1,
+        pinIdentity: String? = nil,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
         self.references = references
@@ -96,6 +100,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         self.dissolveStart = dissolveStart
         self.ignoresOverscan = ignoresOverscan
         self.stillImageOpacity = stillImageOpacity
+        self.pinIdentity = pinIdentity
         self.backgroundVideo = backgroundVideo
     }
 
@@ -107,7 +112,9 @@ public struct HeroBackdropLayer<Video: View>: View {
             // Put a real image up while the 2000px pass decodes. Home's hero has
             // always done this; the detail hero opened onto a scrim instead.
             previewVariant: .heroPreview,
-            asyncFallbackURL: asyncFallbackURL
+            asyncFallbackURL: asyncFallbackURL,
+            preferredArtworkWait: ArtworkFirstPaintResolver.focalArtworkWait,
+            pinIdentity: pinIdentity
         ) {
             placeholder
         }

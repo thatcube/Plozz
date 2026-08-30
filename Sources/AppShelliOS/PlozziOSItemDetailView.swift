@@ -2002,7 +2002,8 @@ private struct PlozziOSInlineEpisodeEntry: View {
         FallbackAsyncImage(
             references: episode.artworkReferences(for: .episodeThumbnail),
             variant: .landscapeCard,
-            asyncFallbackURL: { await ArtworkRouter.shared.artworkURL(.thumbnail, for: episode) }
+            asyncFallbackURL: { await ArtworkRouter.shared.artworkURL(.thumbnail, for: episode) },
+            pinIdentity: episode.stablePresentationID
         ) {
             // Shared with the tvOS cards so a missing episode still looks the same
             // on every platform; this was a bare filled rectangle with no glyph.

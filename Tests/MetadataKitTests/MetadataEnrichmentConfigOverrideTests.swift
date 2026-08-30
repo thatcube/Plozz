@@ -59,7 +59,10 @@ final class MetadataEnrichmentConfigOverrideTests: XCTestCase {
     }
 
     func testArtworkPreferenceOffKeepsLocalAheadOfOnline() throws {
-        let config = MetadataEnrichmentConfig(order: [.tvdb, .tmdb])
+        let config = MetadataEnrichmentConfig(
+            order: [.tvdb, .tmdb],
+            preferOnlineArtwork: false
+        )
         let sources = config.precedenceSources(for: .posterURL, query: makeQuery())
         XCTAssertLessThan(
             try XCTUnwrap(sources.firstIndex(of: .localArtwork)),

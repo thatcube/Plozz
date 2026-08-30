@@ -192,7 +192,8 @@ public struct EpisodeColumnCard: View, Equatable {
         FallbackAsyncImage(
             references: item.artworkReferences(for: .episodeThumbnail),
             variant: .landscapeCard,
-            asyncFallbackURL: asyncArtworkFallback
+            asyncFallbackURL: asyncArtworkFallback,
+            pinIdentity: item.stablePresentationID
         ) {
             neutralPlaceholder
         }
@@ -212,7 +213,8 @@ public struct EpisodeColumnCard: View, Equatable {
         FallbackAsyncImage(
             references: placeholderArtworkReferences,
             variant: .landscapeCard,
-            asyncFallbackURL: placeholderArtworkFallback
+            asyncFallbackURL: placeholderArtworkFallback,
+            pinIdentity: item.stablePresentationID
         ) {
             neutralPlaceholder
         }

@@ -36,7 +36,8 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
     /// Custom activates the saved single global order.
     public var orderMode: MetadataProviderOrderMode
 
-    /// When enabled, configured online providers may replace local/server artwork.
+    /// When enabled, configured online providers may replace local/server artwork
+    /// when they can produce a usable result within the presentation's wait budget.
     /// Text, identity, and all other metadata remain local-authoritative.
     public var preferOnlineArtwork: Bool
 
@@ -50,7 +51,7 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
 
     public init(
         orderMode: MetadataProviderOrderMode = .recommended,
-        preferOnlineArtwork: Bool = false,
+        preferOnlineArtwork: Bool = true,
         enabledOrder: [String] = [],
         disabledOrder: [String] = []
     ) {
@@ -63,7 +64,7 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
     /// Whether there is neither an active mode override nor a saved custom list.
     public var isEmpty: Bool {
         orderMode == .recommended
-            && !preferOnlineArtwork
+            && preferOnlineArtwork
             && enabledOrder.isEmpty
             && disabledOrder.isEmpty
     }
@@ -119,7 +120,7 @@ public struct MetadataProviderSettings: Codable, Equatable, Sendable {
         // decodes to its default instead of failing the whole decode.
         enabledOrder = try container.decodeIfPresent([String].self, forKey: .enabledOrder) ?? []
         disabledOrder = try container.decodeIfPresent([String].self, forKey: .disabledOrder) ?? []
-        preferOnlineArtwork = try container.decodeIfPresent(Bool.self, forKey: .preferOnlineArtwork) ?? false
+        preferOnlineArtwork = try container.decodeIfPresent(Bool.self, forKey: .preferOnlineArtwork) ?? true
         let persistedMode = try container.decodeIfPresent(String.self, forKey: .orderMode)
             .flatMap(MetadataProviderOrderMode.init(rawValue:))
 
@@ -193,6 +194,7 @@ public protocol MetadataProviderSettingsStoring: Sendable {
 public final class MetadataProviderSettingsStore: MetadataProviderSettingsStoring, @unchecked Sendable {
     private let defaults: UserDefaults
     private let key: String
+    private let artworkPreferenceMigrationKey: String
 
     /// - Parameter namespace: per-profile scope. `nil` (the default/primary
     ///   profile) uses the legacy un-suffixed key; other profiles pass their
@@ -200,20 +202,37 @@ public final class MetadataProviderSettingsStore: MetadataProviderSettingsStorin
     public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
         self.defaults = defaults
         self.key = SettingsKey.scoped("com.plozz.metadataProviderSettings", namespace: namespace)
+        self.artworkPreferenceMigrationKey = SettingsKey.scoped(
+            "com.plozz.metadataProviderSettings.curatedArtworkDefault.v1",
+            namespace: namespace
+        )
     }
 
     public func load() -> MetadataProviderSettings {
-        guard let data = defaults.data(forKey: key),
-              let settings = try? JSONDecoder().decode(MetadataProviderSettings.self, from: data) else {
-            return .default
+        var settings = defaults.data(forKey: key)
+            .flatMap { try? JSONDecoder().decode(MetadataProviderSettings.self, from: $0) }
+            ?? .default
+
+        // The old default was library-first, but the persisted Boolean cannot tell
+        // an explicit choice from that inherited default. Move every install to the
+        // new curated default once; a later user choice is then preserved normally.
+        if !defaults.bool(forKey: artworkPreferenceMigrationKey) {
+            settings.preferOnlineArtwork = true
+            persist(settings)
+            defaults.set(true, forKey: artworkPreferenceMigrationKey)
         }
         return settings
     }
 
     public func save(_ settings: MetadataProviderSettings) {
+        persist(settings)
+        defaults.set(true, forKey: artworkPreferenceMigrationKey)
+        NotificationCenter.default.post(name: .metadataProviderSettingsDidChange, object: nil)
+    }
+
+    private func persist(_ settings: MetadataProviderSettings) {
         if let data = try? JSONEncoder().encode(settings) {
             defaults.set(data, forKey: key)
-            NotificationCenter.default.post(name: .metadataProviderSettingsDidChange, object: nil)
         }
     }
 }

@@ -22,6 +22,7 @@ struct MusicArtworkImage: View {
     /// don't shift with the app theme.
     var showsMediaEdge: Bool = true
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+    var pinIdentity: String? = nil
     /// Optional override for the placeholder icon color — pass
     /// `PlozzCardCaption.subtitleColor(...)` so it flips with focus + reduced
     /// transparency. Falls back to `.secondary` when nil.
@@ -35,6 +36,7 @@ struct MusicArtworkImage: View {
         variant: ArtworkImageVariant = .original,
         showsMediaEdge: Bool = true,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        pinIdentity: String? = nil,
         placeholderColor: Color? = nil
     ) {
         self.url = url
@@ -43,6 +45,7 @@ struct MusicArtworkImage: View {
         self.variant = variant
         self.showsMediaEdge = showsMediaEdge
         self.asyncFallbackURL = asyncFallbackURL
+        self.pinIdentity = pinIdentity
         self.placeholderColor = placeholderColor
     }
 
@@ -53,7 +56,8 @@ struct MusicArtworkImage: View {
             FallbackAsyncImage(
                 urls: [url].compactMap { $0 },
                 variant: variant,
-                asyncFallbackURL: asyncFallbackURL
+                asyncFallbackURL: asyncFallbackURL,
+                pinIdentity: pinIdentity
             ) {
                 placeholder
             }
@@ -245,6 +249,7 @@ struct MusicCard: View {
             systemPlaceholder: systemPlaceholder,
             cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
             asyncFallbackURL: asyncFallbackURL,
+            pinIdentity: "\(title)\n\(subtitle ?? "")",
             placeholderColor: subtitleColor
         )
     }
@@ -258,6 +263,7 @@ struct MusicCard: View {
             systemPlaceholder: systemPlaceholder,
             cornerRadius: metrics.landscapeCardCornerRadius,
             asyncFallbackURL: asyncFallbackURL,
+            pinIdentity: "\(title)\n\(subtitle ?? "")",
             placeholderColor: .secondary
         )
     }
@@ -320,7 +326,8 @@ struct ArtistCard: View {
                     url: artist.artworkURL,
                     systemPlaceholder: "music.mic",
                     cornerRadius: diameter / 2,
-                    asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name)
+                    asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name),
+                    pinIdentity: artist.id
                 )
             },
             caption: { isFocused in

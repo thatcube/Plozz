@@ -55,18 +55,18 @@ final class MediaShareRuntimeFacetMetadataTests: XCTestCase {
             baseline: baseline,
             settingsStore: store
         )
-        XCTAssertFalse(cache.value().preferOnlineArtwork)
+        XCTAssertTrue(cache.value().preferOnlineArtwork)
         XCTAssertFalse(cache.value().usesGlobalOrder)
 
         store.save(
             MetadataProviderSettings(
                 orderMode: .custom,
-                preferOnlineArtwork: true,
+                preferOnlineArtwork: false,
                 enabledOrder: ["tmdb", "tvdb"]
             )
         )
 
-        XCTAssertTrue(cache.value().preferOnlineArtwork)
+        XCTAssertFalse(cache.value().preferOnlineArtwork)
         XCTAssertTrue(cache.value().usesGlobalOrder)
         XCTAssertEqual(cache.value().order, [.tmdb, .tvdb])
     }

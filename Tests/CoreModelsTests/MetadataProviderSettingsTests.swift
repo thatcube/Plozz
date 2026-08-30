@@ -8,7 +8,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
     func testDefaultIsEmpty() {
         XCTAssertTrue(MetadataProviderSettings.default.isEmpty)
         XCTAssertEqual(MetadataProviderSettings.default.orderMode, .recommended)
-        XCTAssertFalse(MetadataProviderSettings.default.preferOnlineArtwork)
+        XCTAssertTrue(MetadataProviderSettings.default.preferOnlineArtwork)
         XCTAssertTrue(MetadataProviderSettings().enabledOrder.isEmpty)
         XCTAssertTrue(MetadataProviderSettings().disabledOrder.isEmpty)
     }
@@ -39,7 +39,7 @@ final class MetadataProviderSettingsTests: XCTestCase {
         settings.setLists(enabled: [.tvdb], disabled: [.omdb])
         let json = String(data: try JSONEncoder().encode(settings), encoding: .utf8)!
         XCTAssertTrue(json.contains(#""orderMode":"recommended""#))
-        XCTAssertTrue(json.contains(#""preferOnlineArtwork":false"#))
+        XCTAssertTrue(json.contains(#""preferOnlineArtwork":true"#))
         XCTAssertTrue(json.contains("enabledOrder"))
         XCTAssertTrue(json.contains("disabledOrder"))
         XCTAssertFalse(json.contains("roleOverrides"), "legacy schema must not be re-emitted")
@@ -124,10 +124,10 @@ final class MetadataProviderSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.disabledOrder, ["tmdb"])
     }
 
-    func testMissingArtworkPreferenceMigratesOff() throws {
+    func testMissingArtworkPreferenceUsesCuratedDefault() throws {
         let data = Data(#"{"orderMode":"recommended","enabledOrder":[],"disabledOrder":[]}"#.utf8)
         let decoded = try JSONDecoder().decode(MetadataProviderSettings.self, from: data)
-        XCTAssertFalse(decoded.preferOnlineArtwork)
+        XCTAssertTrue(decoded.preferOnlineArtwork)
     }
 
     func testStoreRoundTripAndScoping() {
@@ -142,5 +142,20 @@ final class MetadataProviderSettingsTests: XCTestCase {
         // A namespaced (non-default profile) store is isolated from the default one.
         let scoped = MetadataProviderSettingsStore(defaults: defaults, namespace: "profile-2")
         XCTAssertTrue(scoped.load().isEmpty)
+    }
+
+    func testExistingInstallMigratesToCuratedArtworkOnce() throws {
+        let defaults = UserDefaults(suiteName: "provider-settings-\(UUID().uuidString)")!
+        let legacy = MetadataProviderSettings(preferOnlineArtwork: false)
+        defaults.set(
+            try JSONEncoder().encode(legacy),
+            forKey: "com.plozz.metadataProviderSettings"
+        )
+        let store = MetadataProviderSettingsStore(defaults: defaults)
+
+        XCTAssertTrue(store.load().preferOnlineArtwork)
+
+        store.save(MetadataProviderSettings(preferOnlineArtwork: false))
+        XCTAssertFalse(store.load().preferOnlineArtwork)
     }
 }

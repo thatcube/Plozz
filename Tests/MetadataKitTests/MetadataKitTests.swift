@@ -202,6 +202,44 @@ final class MetadataKitTests: XCTestCase {
         XCTAssertTrue(q.cacheKey(for: .thumbnail).contains("s2e5"))
     }
 
+    func testProviderArtworkCacheKeysPreserveSourceIdentity() {
+        let query = MetadataQuery(item(kind: .movie, providerIDs: ["Tmdb": "603"]))
+        let tmdb = ArtworkRouter.providerCacheKey(query: query, kind: .hero, source: .tmdb)
+        let tvdb = ArtworkRouter.providerCacheKey(query: query, kind: .hero, source: .tvdb)
+
+        XCTAssertNotEqual(tmdb, tvdb)
+        XCTAssertTrue(tmdb.hasSuffix("provider:tmdb"))
+        XCTAssertTrue(tvdb.hasSuffix("provider:tvdb"))
+    }
+
+    func testDetailHeroUsesDistinctCandidateWhenAvailable() {
+        let home = URL(string: "https://example.com/home.jpg")!
+        let detail = URL(string: "https://example.com/detail.jpg")!
+        let candidates = [
+            SourcedValue(value: home, source: .tmdb),
+            SourcedValue(value: detail, source: .tmdb),
+        ]
+
+        XCTAssertEqual(
+            ArtworkRouter.heroCandidate(from: candidates, placement: .homeHero),
+            home
+        )
+        XCTAssertEqual(
+            ArtworkRouter.heroCandidate(from: candidates, placement: .detailBackdrop),
+            detail
+        )
+    }
+
+    func testDetailHeroUsesOnlyCandidateRatherThanDiscardingOnlineFallback() {
+        let only = URL(string: "https://example.com/only.jpg")!
+        let candidates = [SourcedValue(value: only, source: .tmdb)]
+
+        XCTAssertEqual(
+            ArtworkRouter.heroCandidate(from: candidates, placement: .detailBackdrop),
+            only
+        )
+    }
+
     // MARK: - TMDb selection
 
     func testBestImagePrefersNeutralLanguageForHero() {

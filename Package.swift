@@ -356,7 +356,7 @@ let package = Package(
         ),
         .target(
             name: "HeroUI",
-            dependencies: ["CoreModels", "CoreUI", "FeatureHomeCore"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureHomeCore", "MetadataKit"]
         ),
         .target(
             name: "FeatureHome",

@@ -821,7 +821,8 @@ public struct PosterCardView: View {
             references: placeholderArtworkReferences,
             maxAspectRatio: posterAspectGuard,
             variant: artworkVariant,
-            asyncFallbackURL: placeholderArtworkFallback
+            asyncFallbackURL: placeholderArtworkFallback,
+            pinIdentity: item.stablePresentationID
         ) {
             neutralPlaceholder
         }

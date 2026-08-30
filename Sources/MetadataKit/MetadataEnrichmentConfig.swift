@@ -43,7 +43,7 @@ public struct MetadataEnrichmentConfig: Sendable {
         disabledSources: Set<MetadataSource> = [],
         order: [MetadataSource] = MetadataEnrichmentConfig.defaultBaseOrder,
         usesGlobalOrder: Bool = false,
-        preferOnlineArtwork: Bool = false,
+        preferOnlineArtwork: Bool = true,
         priority: MetadataPriorityPolicy = MetadataEnrichmentConfig.defaultPriority
     ) {
         self.disabledSources = disabledSources

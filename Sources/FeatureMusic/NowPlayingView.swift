@@ -551,7 +551,8 @@ public struct NowPlayingView: View {
                 systemPlaceholder: "music.note",
                 cornerRadius: 16,
                 showsMediaEdge: false,
-                asyncFallbackURL: trackFallback(controller.currentTrack)
+                asyncFallbackURL: trackFallback(controller.currentTrack),
+                pinIdentity: controller.currentTrack?.id
             )
                 .frame(width: 420, height: 420)
                 .shadow(radius: 30)

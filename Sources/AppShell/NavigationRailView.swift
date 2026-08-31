@@ -31,7 +31,16 @@ enum NavigationRailMetrics {
     static let contentInset: CGFloat = 64
 
     /// Width the rail grows to once focus enters it.
-    static let expandedWidth: CGFloat = 440
+    static let expandedWidth: CGFloat = 420
+    /// Floating-menu geometry. The first/last row sits exactly 18 points inside
+    /// the 32-point panel, so its 14-point corner shares the panel's corner centre.
+    static let expandedPanelCornerRadius: CGFloat = 32
+    static let expandedPanelContentInset: CGFloat = 18
+    static let expandedPanelHorizontalInset: CGFloat = leadingInset - expandedPanelContentInset
+    static let expandedPanelVerticalInset: CGFloat =
+        verticalPadding + bumperHeight - expandedPanelContentInset
+    static let expandedRowCornerRadius: CGFloat =
+        expandedPanelCornerRadius - expandedPanelContentInset
     static let itemSpacing: CGFloat = 10
     /// Matches ``iconColumnWidth`` exactly. Any larger and the avatar overflows the
     /// glyph column it shares with every other row, so it sits off the axis the
@@ -181,7 +190,7 @@ struct NavigationRailView: View {
         }
         .padding(.vertical, NavigationRailMetrics.verticalPadding)
         .padding(.leading, NavigationRailMetrics.leadingInset)
-        .padding(.trailing, isExpanded ? 16 : 0)
+        .padding(.trailing, isExpanded ? NavigationRailMetrics.leadingInset : 0)
         .frame(
             width: isExpanded ? NavigationRailMetrics.expandedWidth : NavigationRailMetrics.collapsedWidth,
             alignment: .leading
@@ -509,8 +518,12 @@ struct NavigationRailView: View {
 
     private var expandedBackdrop: some View {
         Color.clear
-            .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
-            .padding(.horizontal, 8)
+            .plozzGlassPanel(
+                cornerRadius: NavigationRailMetrics.expandedPanelCornerRadius,
+                scrimOpacity: 0.08
+            )
+            .padding(.horizontal, NavigationRailMetrics.expandedPanelHorizontalInset)
+            .padding(.vertical, NavigationRailMetrics.expandedPanelVerticalInset)
             .allowsHitTesting(false)
     }
 
@@ -612,7 +625,9 @@ private struct NavigationRailItemStyle: ButtonStyle {
                     ? accent.opacity(0.20)
                     : Color.clear
             )
-        let cornerRadius = isExpanded ? 18 : PlozzTheme.Metrics.Radius.content
+        let cornerRadius = isExpanded
+            ? NavigationRailMetrics.expandedRowCornerRadius
+            : PlozzTheme.Metrics.Radius.content
 
         return configuration.label
             // Horizontal stays tight: collapsed, the pill hugs the glyph and has to

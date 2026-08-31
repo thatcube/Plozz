@@ -116,7 +116,8 @@ private struct NowPlayingCardContent: View {
                     title: track.title,
                     album: track.albumTitle,
                     artist: track.artistName
-                )
+                ),
+                pinIdentity: track.id
             )
                 .frame(width: 64, height: 64)
                 .clipShape(RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous))

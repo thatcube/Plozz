@@ -220,6 +220,11 @@ public protocol VideoEngine: AnyObject {
     /// it (native/`AVPlayer`, whose facts come from provider metadata + the item).
     var probedSourceFacts: EngineProbedSourceFacts? { get }
 
+    /// Aspect ratio of the video image presented inside the engine's output view.
+    /// The player host uses this to align bitmap subtitles with aspect-fit video
+    /// instead of stretching them across the full window.
+    var videoAspectRatio: Double? { get }
+
     // MARK: Tracks
 
     /// Selectable audio tracks for the active stream.
@@ -325,6 +330,17 @@ public extension VideoEngine {
 
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
+
+    /// Default to independently probed dimensions when an engine exposes them.
+    var videoAspectRatio: Double? {
+        guard let width = probedSourceFacts?.videoWidth,
+              let height = probedSourceFacts?.videoHeight,
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+        return Double(width) / Double(height)
+    }
 
     /// Default: engines that don't program the panel just perform a normal stop —
     /// the `preserveDisplayMode` hint is only meaningful to the on-device engine,

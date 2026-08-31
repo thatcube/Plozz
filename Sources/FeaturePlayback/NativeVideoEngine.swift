@@ -161,6 +161,22 @@ public final class NativeVideoEngine: VideoEngine {
     /// best-effort and non-fatal).
     public var underlyingPlayer: AVPlayer? { player }
 
+    public var videoAspectRatio: Double? {
+        if let size = player?.currentItem?.presentationSize,
+           size.width > 0,
+           size.height > 0 {
+            return Double(abs(size.width / size.height))
+        }
+        guard let video = request?.sourceMetadata?.video,
+              let width = video.width,
+              let height = video.height,
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+        return Double(width) / Double(height)
+    }
+
     // MARK: - Lifecycle
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {

@@ -484,7 +484,8 @@ struct ArtistDetailView: View {
                         url: viewModel.artist.artworkURL,
                         systemPlaceholder: "music.mic",
                         cornerRadius: 130,
-                        asyncFallbackURL: MusicArtworkFallback.artistImage(name: viewModel.artist.name)
+                        asyncFallbackURL: MusicArtworkFallback.artistImage(name: viewModel.artist.name),
+                        pinIdentity: viewModel.artist.id
                     )
                         .clipShape(Circle())
                         .frame(width: 260, height: 260)
@@ -575,7 +576,8 @@ struct AlbumDetailView: View {
                 asyncFallbackURL: MusicArtworkFallback.albumCover(
                     title: viewModel.album.title,
                     artist: viewModel.album.artistName
-                )
+                ),
+                pinIdentity: viewModel.album.id
             )
                 .frame(width: columnWidth, height: columnWidth)
             Text(viewModel.album.title).font(.system(size: 40, weight: .bold)).lineLimit(3)
@@ -978,7 +980,8 @@ struct TrackListView: View {
                 url: track.artworkURL ?? artworkFallback,
                 systemPlaceholder: "music.note",
                 cornerRadius: 8,
-                variant: .musicThumbnail
+                variant: .musicThumbnail,
+                pinIdentity: track.id
             )
             .frame(width: 72, height: 72)
             .overlay {

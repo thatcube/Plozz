@@ -300,8 +300,10 @@ extension HomeHeroView {
         // primary backdrop URLs fail, so a title with real backdrop art is
         // unaffected.
         return {
-            if let hero = await ArtworkRouter.shared.artworkURL(.hero, for: item) { return hero }
-            return item.posterURL
+            await ArtworkRouter.shared.heroArtworkURL(
+                for: item,
+                placement: .homeHero
+            )
         }
     }
 

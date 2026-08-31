@@ -33106,12 +33106,6 @@
             "value" : "S’està alineant el teu univers de visualització…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Usklađujemo vaš svijet gledanja…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -33122,24 +33116,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Afstemmer dit seerunivers…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Je kijkuniversum afstemmen…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Säädetään katselumaailmaasi kohdalleen…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Alignement de votre univers de visionnage…"
           }
         },
         "de" : {
@@ -33154,6 +33130,30 @@
             "value" : "Ευθυγραμμίζουμε το σύμπαν παρακολούθησής σας…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poniendo en orden tu universo de contenido…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "دنیای تماشایتان را هماهنگ می‌کنیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Säädetään katselumaailmaasi kohdalleen…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alignement de votre univers de visionnage…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -33164,6 +33164,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "आपकी देखने की दुनिया को तालमेल में लाया जा रहा है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usklađujemo vaš svijet gledanja…"
           }
         },
         "hu" : {
@@ -33208,6 +33214,12 @@
             "value" : "Samkjører alt du ser på…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Je kijkuniversum afstemmen…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -33232,12 +33244,6 @@
             "value" : "Синхронизируем вашу вселенную просмотров…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Usklađujemo vaš svet gledanja…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -33250,10 +33256,10 @@
             "value" : "Usklajevanje vašega gledalskega sveta…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Poniendo en orden tu universo de contenido…"
+            "value" : "Usklađujemo vaš svet gledanja…"
           }
         },
         "sv" : {
@@ -33296,12 +33302,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在校準你的影音宇宙…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "دنیای تماشایتان را هماهنگ می‌کنیم…"
           }
         }
       }
@@ -34208,12 +34208,6 @@
             "value" : "Gairebé segur que s’està sincronitzant…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Gotovo sigurno sinkroniziramo…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -34224,24 +34218,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Synkroniserer næsten helt sikkert…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Bijna zeker aan het synchroniseren…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Synkronoidaan melkein varmasti…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Synchronisation en cours, presque sûrement…"
           }
         },
         "de" : {
@@ -34256,6 +34232,30 @@
             "value" : "Σχεδόν σίγουρα συγχρονίζουμε…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sincronizando, casi seguro…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تقریباً حتماً داریم همگام‌سازی می‌کنیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Synkronoidaan melkein varmasti…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Synchronisation en cours, presque sûrement…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -34266,6 +34266,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "लगभग पक्का, सिंक हो रहा है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gotovo sigurno sinkroniziramo…"
           }
         },
         "hu" : {
@@ -34310,6 +34316,12 @@
             "value" : "Nesten helt sikkert i gang med å synkronisere…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bijna zeker aan het synchroniseren…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -34334,12 +34346,6 @@
             "value" : "Почти наверняка синхронизируем…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Sinhronizacija je skoro sigurno u toku…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -34352,10 +34358,10 @@
             "value" : "Skoraj zagotovo sinhroniziramo…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sincronizando, casi seguro…"
+            "value" : "Sinhronizacija je skoro sigurno u toku…"
           }
         },
         "sv" : {
@@ -34398,12 +34404,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "八成正在同步…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "تقریباً حتماً داریم همگام‌سازی می‌کنیم…"
           }
         }
       }
@@ -57912,12 +57912,6 @@
             "value" : "S’està comprovant l’iCloud…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Provjera iClouda…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -57928,24 +57922,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Kontrollerer iCloud…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud controleren…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Tarkistetaan iCloudia…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vérification d’iCloud…"
           }
         },
         "de" : {
@@ -57960,6 +57936,30 @@
             "value" : "Ελέγχουμε το iCloud…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Comprobando iCloud…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud را بررسی می‌کنیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tarkistetaan iCloudia…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vérification d’iCloud…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -57970,6 +57970,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud जाँचा जा रहा है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Provjera iClouda…"
           }
         },
         "hu" : {
@@ -58014,6 +58020,12 @@
             "value" : "Kontrollerer iCloud…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud controleren…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -58038,12 +58050,6 @@
             "value" : "Проверяем iCloud…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Proveravamo iCloud…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -58056,10 +58062,10 @@
             "value" : "Preverjanje iClouda…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Comprobando iCloud…"
+            "value" : "Proveravamo iCloud…"
           }
         },
         "sv" : {
@@ -58102,12 +58108,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在檢查 iCloud…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud را بررسی می‌کنیم…"
           }
         }
       }
@@ -58353,12 +58353,6 @@
             "value" : "S’està comprovant l’altre sofà…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Provjeravamo drugi kauč…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -58369,24 +58363,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Tjekker den anden sofa…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "De andere bank controleren…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Tarkistetaan toisen sohvan alta…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Coup d’œil à l’autre canapé…"
           }
         },
         "de" : {
@@ -58401,6 +58377,30 @@
             "value" : "Ψάχνουμε στον άλλο καναπέ…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Revisando el otro sofá…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مبل آن یکی را هم می‌گردیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tarkistetaan toisen sohvan alta…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Coup d’œil à l’autre canapé…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -58411,6 +58411,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "दूसरे सोफ़े पर देख रहे हैं…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Provjeravamo drugi kauč…"
           }
         },
         "hu" : {
@@ -58455,6 +58461,12 @@
             "value" : "Sjekker den andre sofaen…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "De andere bank controleren…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -58479,12 +58491,6 @@
             "value" : "Заглядываем под другой диван…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Proveravamo drugi kauč…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -58497,10 +58503,10 @@
             "value" : "Preverjanje drugega kavča…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Revisando el otro sofá…"
+            "value" : "Proveravamo drugi kauč…"
           }
         },
         "sv" : {
@@ -58543,12 +58549,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在翻找另一張沙發…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "مبل آن یکی را هم می‌گردیم…"
           }
         }
       }
@@ -59674,12 +59674,6 @@
             "value" : "Tria un dispositiu proper o escaneja’n el codi."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Odaberite uređaj u blizini ili skenirajte njegov kôd."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -59690,24 +59684,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Vælg en enhed i nærheden, eller scan dens kode."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Kies een apparaat in de buurt of scan de code ervan."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Valitse lähellä oleva laite tai skannaa sen koodi."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Choisissez un appareil à proximité ou scannez son code."
           }
         },
         "de" : {
@@ -59722,6 +59698,30 @@
             "value" : "Επιλέξτε μια κοντινή συσκευή ή σαρώστε τον κωδικό της."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Elige un dispositivo cercano o escanea su código."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "یک دستگاه نزدیک را انتخاب کنید یا کدش را اسکن کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Valitse lähellä oleva laite tai skannaa sen koodi."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Choisissez un appareil à proximité ou scannez son code."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -59732,6 +59732,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "कोई आस-पास का डिवाइस चुनें या उसका कोड स्कैन करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odaberite uređaj u blizini ili skenirajte njegov kôd."
           }
         },
         "hu" : {
@@ -59776,6 +59782,12 @@
             "value" : "Velg en enhet i nærheten eller skann koden."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kies een apparaat in de buurt of scan de code ervan."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -59800,12 +59812,6 @@
             "value" : "Выберите устройство поблизости или отсканируйте его код."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Izaberite obližnji uređaj ili skenirajte njegov kod."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -59818,10 +59824,10 @@
             "value" : "Izberite bližnjo napravo ali optično preberite njeno kodo."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Elige un dispositivo cercano o escanea su código."
+            "value" : "Izaberite obližnji uređaj ili skenirajte njegov kod."
           }
         },
         "sv" : {
@@ -59864,12 +59870,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "選擇附近的裝置，或掃描它的代碼。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "یک دستگاه نزدیک را انتخاب کنید یا کدش را اسکن کنید."
           }
         }
       }
@@ -67922,12 +67922,6 @@
             "value" : "Compara els dispositius"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Usporedba uređaja"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -67938,24 +67932,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Sammenlign enheder"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Apparaten vergelijken"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vertaa laitteita"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Comparer les appareils"
           }
         },
         "de" : {
@@ -67970,6 +67946,30 @@
             "value" : "Σύγκριση συσκευών"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Comparar dispositivos"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مقایسهٔ دستگاه‌ها"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vertaa laitteita"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Comparer les appareils"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -67980,6 +67980,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "डिवाइसों की तुलना करें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usporedba uređaja"
           }
         },
         "hu" : {
@@ -68024,6 +68030,12 @@
             "value" : "Sammenlign enheter"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apparaten vergelijken"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -68048,12 +68060,6 @@
             "value" : "Сравнение устройств"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Poređenje uređaja"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -68066,10 +68072,10 @@
             "value" : "Primerjaj naprave"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Comparar dispositivos"
+            "value" : "Poređenje uređaja"
           }
         },
         "sv" : {
@@ -68113,12 +68119,6 @@
             "state" : "needs_review",
             "value" : "比對裝置"
           }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "مقایسهٔ دستگاه‌ها"
-          }
         }
       }
     },
@@ -68142,12 +68142,6 @@
             "value" : "S’estan contrastant notes amb els teus dispositius…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Uspoređujemo podatke s vašim uređajima…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -68158,24 +68152,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Sammenligner noter med dine enheder…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Overleggen met je apparaten…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vaihdetaan kuulumisia laitteidesi kanssa…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Comparaison des données avec vos appareils…"
           }
         },
         "de" : {
@@ -68190,6 +68166,30 @@
             "value" : "Συγκρίνουμε σημειώσεις με τις συσκευές σας…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Comparando notas con tus dispositivos…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "اطلاعات را با دستگاه‌هایتان تطبیق می‌دهیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vaihdetaan kuulumisia laitteidesi kanssa…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Comparaison des données avec vos appareils…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -68200,6 +68200,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "आपके डिवाइसों से जानकारी मिलाई जा रही है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uspoređujemo podatke s vašim uređajima…"
           }
         },
         "hu" : {
@@ -68244,6 +68250,12 @@
             "value" : "Sammenligner notater med enhetene dine…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Overleggen met je apparaten…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -68268,12 +68280,6 @@
             "value" : "Сверяемся с вашими устройствами…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Upoređujemo stanje sa vašim uređajima…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -68286,10 +68292,10 @@
             "value" : "Primerjava podatkov z vašimi napravami…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Comparando notas con tus dispositivos…"
+            "value" : "Upoređujemo stanje sa vašim uređajima…"
           }
         },
         "sv" : {
@@ -68332,12 +68338,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在跟你的裝置交換情報…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "اطلاعات را با دستگاه‌هایتان تطبیق می‌دهیم…"
           }
         }
       }
@@ -70570,12 +70570,6 @@
             "value" : "Connecta un iPhone o un iPad."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Povežite iPhone ili iPad."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -70586,24 +70580,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Forbind en iPhone eller iPad."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Koppel een iPhone of iPad."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Yhdistä iPhone tai iPad."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Connectez un iPhone ou un iPad."
           }
         },
         "de" : {
@@ -70618,6 +70594,30 @@
             "value" : "Συνδέστε ένα iPhone ή iPad."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Conecta un iPhone o un iPad."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "یک iPhone یا iPad را وصل کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Yhdistä iPhone tai iPad."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Connectez un iPhone ou un iPad."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -70628,6 +70628,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iPhone या iPad कनेक्ट करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Povežite iPhone ili iPad."
           }
         },
         "hu" : {
@@ -70672,6 +70678,12 @@
             "value" : "Koble til en iPhone eller iPad."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Koppel een iPhone of iPad."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -70696,12 +70708,6 @@
             "value" : "Подключите iPhone или iPad."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Povežite iPhone ili iPad."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -70714,10 +70720,10 @@
             "value" : "Povežite iPhone ali iPad."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Conecta un iPhone o un iPad."
+            "value" : "Povežite iPhone ili iPad."
           }
         },
         "sv" : {
@@ -70760,12 +70766,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "連接一部 iPhone 或 iPad。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "یک iPhone یا iPad را وصل کنید."
           }
         }
       }
@@ -82252,12 +82252,6 @@
             "value" : "S’estan comptant núvols…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Brojimo oblake…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -82268,24 +82262,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Tæller skyer…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Wolken tellen…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Lasketaan pilviä…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Comptage des nuages…"
           }
         },
         "de" : {
@@ -82300,6 +82276,30 @@
             "value" : "Μετράμε σύννεφα…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contando nubes…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ابرها را می‌شماریم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lasketaan pilviä…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Comptage des nuages…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -82310,6 +82310,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "बादल गिने जा रहे हैं…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Brojimo oblake…"
           }
         },
         "hu" : {
@@ -82354,6 +82360,12 @@
             "value" : "Teller skyer…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wolken tellen…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -82378,12 +82390,6 @@
             "value" : "Считаем облака…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Brojimo oblake…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -82396,10 +82402,10 @@
             "value" : "Preštevanje oblakov…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Contando nubes…"
+            "value" : "Brojimo oblake…"
           }
         },
         "sv" : {
@@ -82442,12 +82448,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在數雲朵…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "ابرها را می‌شماریم…"
           }
         }
       }
@@ -99691,12 +99691,6 @@
             "value" : "No ho tornis a mostrar"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Više ne prikazuj"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -99707,24 +99701,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Vis ikke igen"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Niet meer tonen"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Älä näytä uudelleen"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ne plus afficher"
           }
         },
         "de" : {
@@ -99739,6 +99715,30 @@
             "value" : "Να μην εμφανιστεί ξανά"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No volver a mostrar"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "دیگر نشان نده"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Älä näytä uudelleen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ne plus afficher"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -99749,6 +99749,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "फिर न दिखाएँ"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Više ne prikazuj"
           }
         },
         "hu" : {
@@ -99793,6 +99799,12 @@
             "value" : "Ikke vis igjen"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Niet meer tonen"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -99817,12 +99829,6 @@
             "value" : "Больше не показывать"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ne prikazuj ponovo"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -99835,10 +99841,10 @@
             "value" : "Ne prikaži več"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "No volver a mostrar"
+            "value" : "Ne prikazuj ponovo"
           }
         },
         "sv" : {
@@ -99882,12 +99888,6 @@
             "state" : "needs_review",
             "value" : "不再顯示"
           }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "دیگر نشان نده"
-          }
         }
       }
     },
@@ -99911,12 +99911,6 @@
             "value" : "Vols deixar de mostrar les notes de la versió?"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Prestati prikazivati napomene o izdanju?"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -99927,24 +99921,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Vis ikke udgivelsesnoter igen?"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Versienotities niet meer tonen?"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Piilotetaanko julkaisutiedot jatkossa?"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ne plus afficher les notes de version ?"
           }
         },
         "de" : {
@@ -99959,6 +99935,30 @@
             "value" : "Να μην εμφανίζονται ξανά οι σημειώσεις έκδοσης;"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "¿No mostrar de nuevo las notas de la versión?"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "دیگر یادداشت‌های انتشار را نشان ندهیم؟"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Piilotetaanko julkaisutiedot jatkossa?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ne plus afficher les notes de version ?"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -99969,6 +99969,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "रिलीज़ नोट्स फिर न दिखाएँ?"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prestati prikazivati napomene o izdanju?"
           }
         },
         "hu" : {
@@ -100013,6 +100019,12 @@
             "value" : "Ikke vis versjonsnotater igjen?"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Versienotities niet meer tonen?"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -100037,12 +100049,6 @@
             "value" : "Больше не показывать примечания к выпуску?"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Da se napomene o izdanju više ne prikazuju?"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -100055,10 +100061,10 @@
             "value" : "Ne prikazuj več opomb ob izdaji?"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "¿No mostrar de nuevo las notas de la versión?"
+            "value" : "Da se napomene o izdanju više ne prikazuju?"
           }
         },
         "sv" : {
@@ -100101,12 +100107,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "不要再顯示版本說明嗎？"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "دیگر یادداشت‌های انتشار را نشان ندهیم؟"
           }
         }
       }
@@ -103750,12 +103750,6 @@
             "value" : "Baixa la configuració compartida més recent."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Preuzmite najnovije zajedničke postavke."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -103766,24 +103760,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Hent de nyeste delte indstillinger."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Haal de nieuwste gedeelde instellingen op."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Lataa uusimmat jaetut asetukset."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Téléchargez les derniers réglages partagés."
           }
         },
         "de" : {
@@ -103798,6 +103774,30 @@
             "value" : "Λήψη των πιο πρόσφατων κοινόχρηστων ρυθμίσεων."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Descarga los ajustes compartidos más recientes."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تازه‌ترین تنظیمات مشترک را دانلود کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lataa uusimmat jaetut asetukset."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Téléchargez les derniers réglages partagés."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -103808,6 +103808,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "नवीनतम साझा सेटिंग्स डाउनलोड करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preuzmite najnovije zajedničke postavke."
           }
         },
         "hu" : {
@@ -103852,6 +103858,12 @@
             "value" : "Last ned de nyeste delte innstillingene."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Haal de nieuwste gedeelde instellingen op."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -103876,12 +103888,6 @@
             "value" : "Загрузить актуальные общие настройки."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Preuzmite najnovija zajednička podešavanja."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -103894,10 +103900,10 @@
             "value" : "Prenesite najnovejše skupne nastavitve."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Descarga los ajustes compartidos más recientes."
+            "value" : "Preuzmite najnovija zajednička podešavanja."
           }
         },
         "sv" : {
@@ -103940,12 +103946,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "下載最新的共用設定。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "تازه‌ترین تنظیمات مشترک را دانلود کنید."
           }
         }
       }
@@ -129227,12 +129227,6 @@
             "value" : "S’està donant una petita empenta a l’iCloud…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Lagano pogurujemo iCloud…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -129243,24 +129237,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Giver iCloud et lille skub…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud een zetje geven…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Tönäistään iCloudia kevyesti…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Petit coup de pouce à iCloud…"
           }
         },
         "de" : {
@@ -129275,6 +129251,30 @@
             "value" : "Δίνουμε ένα απαλό σκούντημα στο iCloud…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dándole un empujoncito a iCloud…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "یک تلنگر کوچک به iCloud می‌زنیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tönäistään iCloudia kevyesti…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Petit coup de pouce à iCloud…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -129285,6 +129285,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud को हल्के से जगाया जा रहा है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lagano pogurujemo iCloud…"
           }
         },
         "hu" : {
@@ -129329,6 +129335,12 @@
             "value" : "Gir iCloud et lite dytt…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud een zetje geven…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -129353,12 +129365,6 @@
             "value" : "Слегка подталкиваем iCloud…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Blago gurkamo iCloud…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -129371,10 +129377,10 @@
             "value" : "Nežno spodbujanje iClouda…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Dándole un empujoncito a iCloud…"
+            "value" : "Blago gurkamo iCloud…"
           }
         },
         "sv" : {
@@ -129417,12 +129423,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在輕推 iCloud 一下…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "یک تلنگر کوچک به iCloud می‌زنیم…"
           }
         }
       }
@@ -154829,12 +154829,6 @@
             "value" : "S’estan cercant dispositius propers…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Traže se uređaji u blizini…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -154845,24 +154839,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Leder efter enheder i nærheden…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Op zoek naar apparaten in de buurt…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Etsitään lähellä olevia laitteita…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Recherche d’appareils à proximité…"
           }
         },
         "de" : {
@@ -154877,6 +154853,30 @@
             "value" : "Αναζητούμε κοντινές συσκευές…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Buscando dispositivos cercanos…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "دنبال دستگاه‌های نزدیک می‌گردیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Etsitään lähellä olevia laitteita…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recherche d’appareils à proximité…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -154887,6 +154887,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "आस-पास के डिवाइस खोजे जा रहे हैं…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Traže se uređaji u blizini…"
           }
         },
         "hu" : {
@@ -154931,6 +154937,12 @@
             "value" : "Leter etter enheter i nærheten…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Op zoek naar apparaten in de buurt…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -154955,12 +154967,6 @@
             "value" : "Ищем устройства поблизости…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Tražimo obližnje uređaje…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -154973,10 +154979,10 @@
             "value" : "Iskanje bližnjih naprav…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Buscando dispositivos cercanos…"
+            "value" : "Tražimo obližnje uređaje…"
           }
         },
         "sv" : {
@@ -155019,12 +155025,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在尋找附近的裝置…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "دنبال دستگاه‌های نزدیک می‌گردیم…"
           }
         }
       }
@@ -157037,12 +157037,6 @@
             "value" : "S’estan posant d’acord totes les pantalles…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Usklađujemo sve zaslone…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -157053,24 +157047,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Får alle skærme til at blive enige…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Alle schermen op één lijn brengen…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Saadaan näytöt puhumaan samaa kieltä…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Harmonisation de tous les écrans…"
           }
         },
         "de" : {
@@ -157085,6 +157061,30 @@
             "value" : "Κάνουμε κάθε οθόνη να συμφωνεί…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poniendo de acuerdo todas las pantallas…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "همهٔ صفحه‌ها را هم‌نظر می‌کنیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Saadaan näytöt puhumaan samaa kieltä…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Harmonisation de tous les écrans…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -157095,6 +157095,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "हर स्क्रीन को एक जैसा किया जा रहा है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usklađujemo sve zaslone…"
           }
         },
         "hu" : {
@@ -157139,6 +157145,12 @@
             "value" : "Får alle skjermene til å bli enige…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle schermen op één lijn brengen…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -157163,12 +157175,6 @@
             "value" : "Согласуем все экраны…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Usklađujemo sve ekrane…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -157181,10 +157187,10 @@
             "value" : "Usklajevanje vseh zaslonov…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Poniendo de acuerdo todas las pantallas…"
+            "value" : "Usklađujemo sve ekrane…"
           }
         },
         "sv" : {
@@ -157227,12 +157233,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在讓每個螢幕達成共識…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "همهٔ صفحه‌ها را هم‌نظر می‌کنیم…"
           }
         }
       }
@@ -162422,12 +162422,6 @@
             "value" : "S’estan movent petits ajustos d’un costat a l’altre…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Preslagujemo sitne postavke…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -162438,24 +162432,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Flytter rundt på små indstillinger…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Kleine instellingen verplaatsen…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Siirrellään pieniä asetuksia…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Déplacement de petits réglages…"
           }
         },
         "de" : {
@@ -162470,6 +162446,30 @@
             "value" : "Μετακινούμε μικρές ρυθμίσεις…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Moviendo pequeños ajustes de un lado a otro…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تنظیمات ریز را جابه‌جا می‌کنیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Siirrellään pieniä asetuksia…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Déplacement de petits réglages…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -162480,6 +162480,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "छोटी-छोटी सेटिंग्स इधर-उधर की जा रही हैं…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preslagujemo sitne postavke…"
           }
         },
         "hu" : {
@@ -162524,6 +162530,12 @@
             "value" : "Flytter på små innstillinger…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kleine instellingen verplaatsen…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -162548,12 +162560,6 @@
             "value" : "Перекладываем крошечные настройки…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Premeštamo sitna podešavanja…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -162566,10 +162572,10 @@
             "value" : "Premikanje drobnih nastavitev…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Moviendo pequeños ajustes de un lado a otro…"
+            "value" : "Premeštamo sitna podešavanja…"
           }
         },
         "sv" : {
@@ -162612,12 +162618,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在搬運小小設定…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "تنظیمات ریز را جابه‌جا می‌کنیم…"
           }
         }
       }
@@ -165732,12 +165732,6 @@
             "value" : "Cal iniciar sessió"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Potrebna je prijava"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -165748,24 +165742,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Kræver login"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Aanmelden vereist"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vaatii kirjautumisen"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Connexion requise"
           }
         },
         "de" : {
@@ -165780,6 +165756,30 @@
             "value" : "Χρειάζεται σύνδεση"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Falta iniciar sesión"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "نیاز به ورود دارد"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vaatii kirjautumisen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Connexion requise"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -165790,6 +165790,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "साइन इन ज़रूरी है"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Potrebna je prijava"
           }
         },
         "hu" : {
@@ -165834,6 +165840,12 @@
             "value" : "Krever pålogging"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aanmelden vereist"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -165858,12 +165870,6 @@
             "value" : "Требуется вход"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Potrebna je prijava"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -165876,10 +165882,10 @@
             "value" : "Potrebna je prijava"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Falta iniciar sesión"
+            "value" : "Potrebna je prijava"
           }
         },
         "sv" : {
@@ -165922,12 +165928,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "需要登入"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "نیاز به ورود دارد"
           }
         }
       }
@@ -215814,7 +215814,228 @@
         }
       }
     },
+    "Prefer artwork from your library" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تفضيل صور مكتبتك"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Предпочитайте изображения от библиотеката си"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prioritza les imatges de la teva biblioteca"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Upřednostnit obrázky z knihovny"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Foretræk grafik fra dit bibliotek"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bilder aus deiner Mediathek bevorzugen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Προτίμηση γραφικών από τη βιβλιοθήκη σας"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Priorizar imágenes de tu biblioteca"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تصاویر کتابخانه‌تان در اولویت باشد"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Suosi oman kirjaston kuvitusta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Privilégier les illustrations de votre médiathèque"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "העדפת גרפיקה מהספרייה שלך"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "अपनी लाइब्रेरी के आर्टवर्क को प्राथमिकता दें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Daj prednost slikama iz svoje medijateke"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Médiatárbeli képek előnyben részesítése"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Utamakan gambar dari pustaka Anda"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dai priorità alle immagini della raccolta"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ライブラリ内のアートワークを優先"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "내 라이브러리 아트워크 우선"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Utamakan karya seni daripada pustaka anda"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Foretrekk grafikk fra biblioteket ditt"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Geef voorkeur aan afbeeldingen uit je bibliotheek"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preferuj grafiki z biblioteki"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preferir imagens da sua biblioteca"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preferă imaginile din biblioteca ta"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Предпочитать изображения из медиатеки"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uprednostniť obrázky z knižnice"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prednostno uporabi slikovno gradivo iz knjižnice"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Daj prednost slikama iz biblioteke"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Föredra bilder från ditt bibliotek"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เลือกภาพจากคลังของคุณก่อน"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kitaplığınızdaki görselleri tercih edin"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Віддавати перевагу зображенням із медіатеки"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ưu tiên hình ảnh từ thư viện của bạn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "优先使用媒体库图片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "優先使用媒體庫圖像"
+          }
+        }
+      }
+    },
     "Prefer local artwork" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -226880,12 +227101,6 @@
             "value" : "Recuperació"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Oporavak"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -226896,24 +227111,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Gendannelse"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Herstel"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Palautus"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Récupération"
           }
         },
         "de" : {
@@ -226928,6 +227125,30 @@
             "value" : "Ανάκτηση"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recuperación"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "بازیابی"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Palautus"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Récupération"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -226938,6 +227159,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "रिकवरी"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Oporavak"
           }
         },
         "hu" : {
@@ -226982,6 +227209,12 @@
             "value" : "Gjenoppretting"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Herstel"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -227006,12 +227239,6 @@
             "value" : "Восстановление"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Oporavak"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -227024,10 +227251,10 @@
             "value" : "Obnovitev"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Recuperación"
+            "value" : "Oporavak"
           }
         },
         "sv" : {
@@ -227070,12 +227297,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "復原"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "بازیابی"
           }
         }
       }
@@ -227983,12 +228204,6 @@
             "value" : "Notes de la versió"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Napomene o izdanju"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -227999,24 +228214,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Udgivelsesnoter"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Versienotities"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Julkaisutiedot"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Notes de version"
           }
         },
         "de" : {
@@ -228031,6 +228228,30 @@
             "value" : "Σημειώσεις έκδοσης"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Notas de la versión"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "یادداشت‌های انتشار"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Julkaisutiedot"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Notes de version"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -228041,6 +228262,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "रिलीज़ नोट्स"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Napomene o izdanju"
           }
         },
         "hu" : {
@@ -228085,6 +228312,12 @@
             "value" : "Versjonsnotater"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Versienotities"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -228109,12 +228342,6 @@
             "value" : "Примечания к выпуску"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Napomene o izdanju"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -228127,10 +228354,10 @@
             "value" : "Opombe ob izdaji"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Notas de la versión"
+            "value" : "Napomene o izdanju"
           }
         },
         "sv" : {
@@ -228173,12 +228400,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "版本說明"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "یادداشت‌های انتشار"
           }
         }
       }
@@ -229532,12 +229753,6 @@
             "value" : "Recarrega des de l’iCloud"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ponovno učitaj iz iClouda"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -229548,24 +229763,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Genindlæs fra iCloud"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Opnieuw laden vanuit iCloud"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Lataa uudelleen iCloudista"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Recharger depuis iCloud"
           }
         },
         "de" : {
@@ -229580,6 +229777,30 @@
             "value" : "Επαναφόρτωση από το iCloud"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recargar desde iCloud"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "بازخوانی از iCloud"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lataa uudelleen iCloudista"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Recharger depuis iCloud"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -229590,6 +229811,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud से फिर लोड करें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponovno učitaj iz iClouda"
           }
         },
         "hu" : {
@@ -229634,6 +229861,12 @@
             "value" : "Last inn på nytt fra iCloud"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opnieuw laden vanuit iCloud"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -229658,12 +229891,6 @@
             "value" : "Повторно загрузить из iCloud"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ponovo učitaj iz iCloud-a"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -229676,10 +229903,10 @@
             "value" : "Znova prenesi iz iClouda"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Recargar desde iCloud"
+            "value" : "Ponovo učitaj iz iCloud-a"
           }
         },
         "sv" : {
@@ -229722,12 +229949,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "從 iCloud 重新載入"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "بازخوانی از iCloud"
           }
         }
       }
@@ -236688,12 +236909,6 @@
             "value" : "Substitueix les dades de l’iCloud per la còpia d’aquest Apple TV."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Zamijeni podatke u iCloudu kopijom s ovog Apple TV-a."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -236704,24 +236919,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Erstat iCloud-data med kopien fra dette Apple TV."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vervang de iCloud-gegevens door de kopie op deze Apple TV."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Korvaa iCloud-tiedot tämän Apple TV:n kopiolla."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Remplacer les données iCloud par celles de cette Apple TV."
           }
         },
         "de" : {
@@ -236736,6 +236933,30 @@
             "value" : "Αντικατάσταση των δεδομένων iCloud με το αντίγραφο αυτού του Apple TV."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sustituye los datos de iCloud por la copia de este Apple TV."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "داده‌های iCloud را با نسخهٔ روی این Apple TV جایگزین کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Korvaa iCloud-tiedot tämän Apple TV:n kopiolla."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Remplacer les données iCloud par celles de cette Apple TV."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -236746,6 +236967,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud डेटा को इस Apple TV की कॉपी से बदलें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zamijeni podatke u iCloudu kopijom s ovog Apple TV-a."
           }
         },
         "hu" : {
@@ -236790,6 +237017,12 @@
             "value" : "Erstatt dataene i iCloud med kopien fra denne Apple TV-en."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vervang de iCloud-gegevens door de kopie op deze Apple TV."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -236814,12 +237047,6 @@
             "value" : "Заменить данные в iCloud копией с этого Apple TV."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Zameni iCloud podatke kopijom sa ovog Apple TV-a."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -236832,10 +237059,10 @@
             "value" : "Zamenjajte podatke v iCloudu s kopijo iz tega Apple TV-ja."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sustituye los datos de iCloud por la copia de este Apple TV."
+            "value" : "Zameni iCloud podatke kopijom sa ovog Apple TV-a."
           }
         },
         "sv" : {
@@ -236879,12 +237106,6 @@
             "state" : "needs_review",
             "value" : "用這部 Apple TV 的副本取代 iCloud 資料。"
           }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "داده‌های iCloud را با نسخهٔ روی این Apple TV جایگزین کنید."
-          }
         }
       }
     },
@@ -236908,12 +237129,6 @@
             "value" : "Substitueix les dades de l’iCloud per la còpia d’aquest Apple TV. Els altres dispositius conserven les seves credencials."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Zamjenjuje podatke u iCloudu kopijom s ovog Apple TV-a. Ostali uređaji zadržavaju vlastite prijave."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -236924,24 +237139,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Erstatter iCloud-data med kopien fra dette Apple TV. Andre enheder beholder deres egne logins."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vervangt de iCloud-gegevens door de kopie op deze Apple TV. Andere apparaten behouden hun aanmeldingen."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Korvaa iCloud-tiedot tämän Apple TV:n kopiolla. Muut laitteet säilyttävät kirjautumisensa."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Remplace les données iCloud par celles de cette Apple TV. Les autres appareils conservent leurs identifiants."
           }
         },
         "de" : {
@@ -236956,6 +237153,30 @@
             "value" : "Αντικαθιστά τα δεδομένα iCloud με το αντίγραφο αυτού του Apple TV. Οι άλλες συσκευές διατηρούν τα δικά τους στοιχεία σύνδεσης."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sustituye los datos de iCloud por la copia de este Apple TV. Los demás dispositivos conservan sus inicios de sesión."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "داده‌های iCloud را با نسخهٔ روی این Apple TV جایگزین می‌کند. اطلاعات ورود دستگاه‌های دیگر دست‌نخورده می‌ماند."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Korvaa iCloud-tiedot tämän Apple TV:n kopiolla. Muut laitteet säilyttävät kirjautumisensa."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Remplace les données iCloud par celles de cette Apple TV. Les autres appareils conservent leurs identifiants."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -236966,6 +237187,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "यह iCloud डेटा को इस Apple TV की कॉपी से बदल देता है। दूसरे डिवाइस अपने-अपने लॉगिन बनाए रखते हैं।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zamjenjuje podatke u iCloudu kopijom s ovog Apple TV-a. Ostali uređaji zadržavaju vlastite prijave."
           }
         },
         "hu" : {
@@ -237010,6 +237237,12 @@
             "value" : "Erstatter dataene i iCloud med kopien fra denne Apple TV-en. Andre enheter beholder påloggingene sine."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vervangt de iCloud-gegevens door de kopie op deze Apple TV. Andere apparaten behouden hun aanmeldingen."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -237034,12 +237267,6 @@
             "value" : "Заменяет данные в iCloud копией с этого Apple TV. Данные входа на других устройствах сохранятся."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Zamenjuje iCloud podatke kopijom sa ovog Apple TV-a. Drugi uređaji zadržavaju svoje prijave."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -237052,10 +237279,10 @@
             "value" : "Zamenja podatke v iCloudu s kopijo iz tega Apple TV-ja. Druge naprave obdržijo svoje prijave."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sustituye los datos de iCloud por la copia de este Apple TV. Los demás dispositivos conservan sus inicios de sesión."
+            "value" : "Zamenjuje iCloud podatke kopijom sa ovog Apple TV-a. Drugi uređaji zadržavaju svoje prijave."
           }
         },
         "sv" : {
@@ -237099,12 +237326,6 @@
             "state" : "needs_review",
             "value" : "用這部 Apple TV 的副本取代 iCloud 資料。其他裝置會保留各自的登入資訊。"
           }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "داده‌های iCloud را با نسخهٔ روی این Apple TV جایگزین می‌کند. اطلاعات ورود دستگاه‌های دیگر دست‌نخورده می‌ماند."
-          }
         }
       }
     },
@@ -237128,12 +237349,6 @@
             "value" : "Substitueix les dades de l’iCloud per la còpia d’aquest dispositiu. Els altres dispositius conserven les seves credencials."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Zamjenjuje podatke u iCloudu kopijom s ovog uređaja. Ostali uređaji zadržavaju vlastite prijave."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -237144,24 +237359,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Erstatter iCloud-data med kopien fra denne enhed. Andre enheder beholder deres egne logins."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vervangt de iCloud-gegevens door de kopie op dit apparaat. Andere apparaten behouden hun aanmeldingen."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Korvaa iCloud-tiedot tämän laitteen kopiolla. Muut laitteet säilyttävät kirjautumisensa."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Remplace les données iCloud par celles de cet appareil. Les autres appareils conservent leurs identifiants."
           }
         },
         "de" : {
@@ -237176,6 +237373,30 @@
             "value" : "Αντικαθιστά τα δεδομένα iCloud με το αντίγραφο αυτής της συσκευής. Οι άλλες συσκευές διατηρούν τα δικά τους στοιχεία σύνδεσης."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sustituye los datos de iCloud por la copia de este dispositivo. Los demás dispositivos conservan sus inicios de sesión."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "داده‌های iCloud را با نسخهٔ روی این دستگاه جایگزین می‌کند. اطلاعات ورود دستگاه‌های دیگر دست‌نخورده می‌ماند."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Korvaa iCloud-tiedot tämän laitteen kopiolla. Muut laitteet säilyttävät kirjautumisensa."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Remplace les données iCloud par celles de cet appareil. Les autres appareils conservent leurs identifiants."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -237186,6 +237407,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "यह iCloud डेटा को इस डिवाइस की कॉपी से बदल देता है। दूसरे डिवाइस अपने-अपने लॉगिन बनाए रखते हैं।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zamjenjuje podatke u iCloudu kopijom s ovog uređaja. Ostali uređaji zadržavaju vlastite prijave."
           }
         },
         "hu" : {
@@ -237230,6 +237457,12 @@
             "value" : "Erstatter dataene i iCloud med kopien fra denne enheten. Andre enheter beholder påloggingene sine."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vervangt de iCloud-gegevens door de kopie op dit apparaat. Andere apparaten behouden hun aanmeldingen."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -237254,12 +237487,6 @@
             "value" : "Заменяет данные в iCloud копией с этого устройства. Данные входа на других устройствах сохранятся."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Zamenjuje iCloud podatke kopijom sa ovog uređaja. Drugi uređaji zadržavaju svoje prijave."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -237272,10 +237499,10 @@
             "value" : "Zamenja podatke v iCloudu s kopijo iz te naprave. Druge naprave obdržijo svoje prijave."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sustituye los datos de iCloud por la copia de este dispositivo. Los demás dispositivos conservan sus inicios de sesión."
+            "value" : "Zamenjuje iCloud podatke kopijom sa ovog uređaja. Drugi uređaji zadržavaju svoje prijave."
           }
         },
         "sv" : {
@@ -237318,12 +237545,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "用這部裝置的副本取代 iCloud 資料。其他裝置會保留各自的登入資訊。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "داده‌های iCloud را با نسخهٔ روی این دستگاه جایگزین می‌کند. اطلاعات ورود دستگاه‌های دیگر دست‌نخورده می‌ماند."
           }
         }
       }
@@ -255219,12 +255440,6 @@
             "value" : "Escaneja el codi QR"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Skeniraj QR kod"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -255235,24 +255450,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Scan QR-kode"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "QR-code scannen"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Skannaa QR-koodi"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Scanner le code QR"
           }
         },
         "de" : {
@@ -255267,6 +255464,30 @@
             "value" : "Σάρωση κωδικού QR"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escanear código QR"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "اسکن کد QR"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skannaa QR-koodi"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scanner le code QR"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -255277,6 +255498,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "QR कोड स्कैन करें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skeniraj QR kod"
           }
         },
         "hu" : {
@@ -255321,6 +255548,12 @@
             "value" : "Skann QR-kode"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "QR-code scannen"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -255345,12 +255578,6 @@
             "value" : "Сканировать QR-код"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Skeniraj QR kod"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -255363,10 +255590,10 @@
             "value" : "Preberi kodo QR"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Escanear código QR"
+            "value" : "Skeniraj QR kod"
           }
         },
         "sv" : {
@@ -255409,12 +255636,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "掃描 QR 碼"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "اسکن کد QR"
           }
         }
       }
@@ -257421,12 +257642,6 @@
             "value" : "Escaneja per veure el repositori de GitHub de Plozz"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Skenirajte za prikaz GitHub repozitorija aplikacije Plozz"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -257437,24 +257652,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Scan for at se Plozz’ GitHub-arkiv"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Scan om de GitHub-repository van Plozz te bekijken"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Skannaa ja avaa Plozzin GitHub-repositorio"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Scannez pour consulter le dépôt GitHub de Plozz"
           }
         },
         "de" : {
@@ -257469,6 +257666,30 @@
             "value" : "Σαρώστε για να δείτε το αποθετήριο GitHub του Plozz"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escanea para ver el repositorio de Plozz en GitHub"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "برای دیدن مخزن Plozz در GitHub اسکن کنید"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skannaa ja avaa Plozzin GitHub-repositorio"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scannez pour consulter le dépôt GitHub de Plozz"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -257479,6 +257700,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Plozz GitHub रिपॉज़िटरी देखने के लिए स्कैन करें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skenirajte za prikaz GitHub repozitorija aplikacije Plozz"
           }
         },
         "hu" : {
@@ -257523,6 +257750,12 @@
             "value" : "Skann for å åpne Plozz-repositoriet på GitHub"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scan om de GitHub-repository van Plozz te bekijken"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -257547,12 +257780,6 @@
             "value" : "Отсканируйте, чтобы открыть репозиторий Plozz на GitHub"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Skenirajte da biste otvorili Plozz GitHub repozitorijum"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -257565,10 +257792,10 @@
             "value" : "Optično preberite za ogled repozitorija Plozz na GitHubu"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Escanea para ver el repositorio de Plozz en GitHub"
+            "value" : "Skenirajte da biste otvorili Plozz GitHub repozitorijum"
           }
         },
         "sv" : {
@@ -257611,12 +257838,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "掃描即可檢視 Plozz 的 GitHub 儲存庫"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "برای دیدن مخزن Plozz در GitHub اسکن کنید"
           }
         }
       }
@@ -268451,12 +268672,6 @@
             "value" : "Servidors per configurar"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Poslužitelji koje treba postaviti"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -268467,24 +268682,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Servere, der skal konfigureres"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "In te stellen servers"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Käyttöönotettavat palvelimet"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Serveurs à configurer"
           }
         },
         "de" : {
@@ -268499,6 +268696,30 @@
             "value" : "Διακομιστές προς ρύθμιση"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Servidores por configurar"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "سرورهای آمادهٔ راه‌اندازی"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Käyttöönotettavat palvelimet"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Serveurs à configurer"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -268509,6 +268730,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "सेट अप किए जाने वाले सर्वर"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poslužitelji koje treba postaviti"
           }
         },
         "hu" : {
@@ -268553,6 +268780,12 @@
             "value" : "Servere som må konfigureres"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "In te stellen servers"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -268577,12 +268810,6 @@
             "value" : "Серверы для настройки"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Serveri koje treba podesiti"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -268595,10 +268822,10 @@
             "value" : "Strežniki za nastavitev"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Servidores por configurar"
+            "value" : "Serveri koje treba podesiti"
           }
         },
         "sv" : {
@@ -268641,12 +268868,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "待設定的伺服器"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "سرورهای آمادهٔ راه‌اندازی"
           }
         }
       }
@@ -269553,12 +269774,6 @@
             "value" : "Configura des d’un altre dispositiu"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Postavi s drugog uređaja"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -269569,24 +269784,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Konfigurer fra en anden enhed"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Instellen vanaf ander apparaat"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ota käyttöön toiselta laitteelta"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Configurer depuis un autre appareil"
           }
         },
         "de" : {
@@ -269601,6 +269798,30 @@
             "value" : "Ρύθμιση από άλλη συσκευή"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Configurar desde otro dispositivo"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "راه‌اندازی از دستگاهی دیگر"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ota käyttöön toiselta laitteelta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Configurer depuis un autre appareil"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -269611,6 +269832,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "दूसरे डिवाइस से सेट अप करें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Postavi s drugog uređaja"
           }
         },
         "hu" : {
@@ -269655,6 +269882,12 @@
             "value" : "Konfigurer fra en annen enhet"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Instellen vanaf ander apparaat"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -269679,12 +269912,6 @@
             "value" : "Настроить с другого устройства"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Podesi sa drugog uređaja"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -269697,10 +269924,10 @@
             "value" : "Nastavi iz druge naprave"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Configurar desde otro dispositivo"
+            "value" : "Podesi sa drugog uređaja"
           }
         },
         "sv" : {
@@ -269743,12 +269970,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "從另一部裝置設定"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "راه‌اندازی از دستگاهی دیگر"
           }
         }
       }
@@ -279272,12 +279493,6 @@
             "value" : "Mostra les notes de la versió en iniciar si hi ha versions noves"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Prikazuj napomene o izdanju pri pokretanju za nove verzije"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -279288,24 +279503,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Vis udgivelsesnoter ved opstart for nye versioner"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Versienotities voor nieuwe versies tonen bij opstarten"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Näytä uusien versioiden julkaisutiedot käynnistyksessä"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Afficher les notes de version au démarrage pour les nouvelles versions"
           }
         },
         "de" : {
@@ -279320,6 +279517,30 @@
             "value" : "Εμφάνιση σημειώσεων έκδοσης κατά την εκκίνηση για νέες εκδόσεις"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mostrar las notas de la versión al iniciar cuando haya versiones nuevas"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "نمایش یادداشت‌های انتشار نسخه‌های جدید هنگام شروع برنامه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Näytä uusien versioiden julkaisutiedot käynnistyksessä"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Afficher les notes de version au démarrage pour les nouvelles versions"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -279330,6 +279551,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "नया वर्शन आने पर स्टार्टअप में रिलीज़ नोट्स दिखाएँ"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prikazuj napomene o izdanju pri pokretanju za nove verzije"
           }
         },
         "hu" : {
@@ -279374,6 +279601,12 @@
             "value" : "Vis versjonsnotater ved oppstart for nye versjoner"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Versienotities voor nieuwe versies tonen bij opstarten"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -279398,12 +279631,6 @@
             "value" : "При запуске показывать примечания к новым версиям"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Prikazuj napomene o izdanju pri pokretanju za nove verzije"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -279416,10 +279643,10 @@
             "value" : "Ob zagonu prikaži opombe ob izdaji za nove različice"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Mostrar las notas de la versión al iniciar cuando haya versiones nuevas"
+            "value" : "Prikazuj napomene o izdanju pri pokretanju za nove verzije"
           }
         },
         "sv" : {
@@ -279462,12 +279689,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "新版本啟動時顯示版本說明"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "نمایش یادداشت‌های انتشار نسخه‌های جدید هنگام شروع برنامه"
           }
         }
       }
@@ -299251,12 +299472,6 @@
             "value" : "En iniciar"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Pokretanje"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -299267,24 +299482,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Opstart"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Opstarten"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Käynnistys"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Démarrage"
           }
         },
         "de" : {
@@ -299299,6 +299496,30 @@
             "value" : "Εκκίνηση"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Inicio"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "شروع برنامه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Käynnistys"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Démarrage"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -299309,6 +299530,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "स्टार्टअप"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pokretanje"
           }
         },
         "hu" : {
@@ -299353,6 +299580,12 @@
             "value" : "Oppstart"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opstarten"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -299377,12 +299610,6 @@
             "value" : "Запуск"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Pokretanje"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -299395,10 +299622,10 @@
             "value" : "Zagon"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Inicio"
+            "value" : "Pokretanje"
           }
         },
         "sv" : {
@@ -299441,12 +299668,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "啟動"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "شروع برنامه"
           }
         }
       }
@@ -306979,12 +307200,6 @@
             "value" : "Sincronitza els perfils, la configuració i els servidors. Les credencials es mantenen a cada dispositiu."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Sinkronizira profile, postavke i poslužitelje. Prijave ostaju privatne na svakom uređaju."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -306995,24 +307210,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Synkroniserer profiler, indstillinger og servere. Logins forbliver på hver enhed."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Synchroniseert profielen, instellingen en servers. Aanmeldingen blijven op elk apparaat."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Synkronoi profiilit, asetukset ja palvelimet. Kirjautumistiedot pysyvät laitekohtaisina."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Synchronise les profils, réglages et serveurs. Les identifiants restent sur chaque appareil."
           }
         },
         "de" : {
@@ -307027,6 +307224,30 @@
             "value" : "Συγχρονίζει προφίλ, ρυθμίσεις και διακομιστές. Τα στοιχεία σύνδεσης παραμένουν σε κάθε συσκευή."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sincroniza perfiles, ajustes y servidores. Los inicios de sesión se quedan en cada dispositivo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "نمایه‌ها، تنظیمات و سرورها را همگام‌سازی می‌کند. اطلاعات ورود هر دستگاه روی خودش می‌ماند."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Synkronoi profiilit, asetukset ja palvelimet. Kirjautumistiedot pysyvät laitekohtaisina."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Synchronise les profils, réglages et serveurs. Les identifiants restent sur chaque appareil."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -307037,6 +307258,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "प्रोफ़ाइल, सेटिंग्स और सर्वर सिंक होते हैं। लॉगिन हर डिवाइस पर ही रहते हैं।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sinkronizira profile, postavke i poslužitelje. Prijave ostaju privatne na svakom uređaju."
           }
         },
         "hu" : {
@@ -307081,6 +307308,12 @@
             "value" : "Synkroniserer profiler, innstillinger og servere. Påloggingene blir værende på hver enhet."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Synchroniseert profielen, instellingen en servers. Aanmeldingen blijven op elk apparaat."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -307105,12 +307338,6 @@
             "value" : "Синхронизирует профили, настройки и серверы. Данные входа остаются на каждом устройстве отдельно."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Sinhronizuje profile, podešavanja i servere. Prijave ostaju na svakom uređaju."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -307123,10 +307350,10 @@
             "value" : "Sinhronizira profile, nastavitve in strežnike. Prijave ostanejo na vsaki napravi."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sincroniza perfiles, ajustes y servidores. Los inicios de sesión se quedan en cada dispositivo."
+            "value" : "Sinhronizuje profile, podešavanja i servere. Prijave ostaju na svakom uređaju."
           }
         },
         "sv" : {
@@ -307169,12 +307396,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "同步個人檔案、設定與伺服器。登入資訊留在每部裝置上。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "نمایه‌ها، تنظیمات و سرورها را همگام‌سازی می‌کند. اطلاعات ورود هر دستگاه روی خودش می‌ماند."
           }
         }
       }
@@ -309844,12 +310065,6 @@
             "value" : "S’està ensenyant als dispositius a compartir…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Učimo uređaje dijeljenju…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -309860,24 +310075,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Lærer enhederne at dele…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Apparaten leren delen…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Opetetaan laitteita jakamaan…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Les appareils apprennent à partager…"
           }
         },
         "de" : {
@@ -309892,6 +310089,30 @@
             "value" : "Μαθαίνουμε στις συσκευές να μοιράζονται…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Enseñando a los dispositivos a compartir…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "اشتراک‌گذاری را به دستگاه‌ها یاد می‌دهیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opetetaan laitteita jakamaan…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Les appareils apprennent à partager…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -309902,6 +310123,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "डिवाइसों को साझा करना सिखाया जा रहा है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Učimo uređaje dijeljenju…"
           }
         },
         "hu" : {
@@ -309946,6 +310173,12 @@
             "value" : "Lærer enhetene å dele…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Apparaten leren delen…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -309970,12 +310203,6 @@
             "value" : "Учим устройства делиться…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Učimo uređaje da dele podatke…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -309988,10 +310215,10 @@
             "value" : "Naprave učimo deliti…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Enseñando a los dispositivos a compartir…"
+            "value" : "Učimo uređaje da dele podatke…"
           }
         },
         "sv" : {
@@ -310034,12 +310261,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在教裝置一起分享…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "اشتراک‌گذاری را به دستگاه‌ها یاد می‌دهیم…"
           }
         }
       }
@@ -323496,12 +323717,6 @@
             "value" : "Aquests valors haurien de coincidir en tots els dispositius."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ovo bi trebalo biti isto na svakom uređaju."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -323512,24 +323727,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Disse bør stemme overens på alle enheder."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Deze moeten op elk apparaat overeenkomen."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Näiden pitäisi täsmätä jokaisella laitteella."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ces valeurs devraient correspondre sur chaque appareil."
           }
         },
         "de" : {
@@ -323544,6 +323741,30 @@
             "value" : "Αυτά θα πρέπει να ταιριάζουν σε κάθε συσκευή."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Estos valores deberían coincidir en todos los dispositivos."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "این‌ها باید در همهٔ دستگاه‌ها یکسان باشند."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Näiden pitäisi täsmätä jokaisella laitteella."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ces valeurs devraient correspondre sur chaque appareil."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -323554,6 +323775,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "ये हर डिवाइस पर समान होने चाहिए।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovo bi trebalo biti isto na svakom uređaju."
           }
         },
         "hu" : {
@@ -323598,6 +323825,12 @@
             "value" : "Disse bør stemme overens på alle enheter."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Deze moeten op elk apparaat overeenkomen."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -323622,12 +323855,6 @@
             "value" : "Эти значения должны совпадать на всех устройствах."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ovi podaci treba da se podudaraju na svim uređajima."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -323640,10 +323867,10 @@
             "value" : "Ti podatki naj bodo enaki na vsaki napravi."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Estos valores deberían coincidir en todos los dispositivos."
+            "value" : "Ovi podaci treba da se podudaraju na svim uređajima."
           }
         },
         "sv" : {
@@ -323686,12 +323913,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "每部裝置上的這些內容都應一致。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "این‌ها باید در همهٔ دستگاه‌ها یکسان باشند."
           }
         }
       }
@@ -324820,12 +325041,6 @@
             "value" : "Aquest dispositiu"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ovaj uređaj"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -324836,24 +325051,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Denne enhed"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Dit apparaat"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Tämä laite"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Cet appareil"
           }
         },
         "de" : {
@@ -324868,6 +325065,30 @@
             "value" : "Αυτή η συσκευή"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Este dispositivo"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "این دستگاه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tämä laite"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cet appareil"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -324878,6 +325099,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "यह डिवाइस"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ovaj uređaj"
           }
         },
         "hu" : {
@@ -324922,6 +325149,12 @@
             "value" : "Denne enheten"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dit apparaat"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -324946,12 +325179,6 @@
             "value" : "Это устройство"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Ovaj uređaj"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -324964,10 +325191,10 @@
             "value" : "Ta naprava"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Este dispositivo"
+            "value" : "Ovaj uređaj"
           }
         },
         "sv" : {
@@ -325010,12 +325237,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "這部裝置"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "این دستگاه"
           }
         }
       }
@@ -342186,12 +342407,6 @@
             "value" : "Resolució de problemes"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Rješavanje problema"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -342202,24 +342417,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Fejlfinding"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Probleemoplossing"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vianmääritys"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Dépannage"
           }
         },
         "de" : {
@@ -342234,6 +342431,30 @@
             "value" : "Αντιμετώπιση προβλημάτων"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Solución de problemas"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "عیب‌یابی"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vianmääritys"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dépannage"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -342244,6 +342465,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "समस्या निवारण"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rješavanje problema"
           }
         },
         "hu" : {
@@ -342288,6 +342515,12 @@
             "value" : "Feilsøking"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Probleemoplossing"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -342312,12 +342545,6 @@
             "value" : "Устранение неполадок"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Otklanjanje problema"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -342330,10 +342557,10 @@
             "value" : "Odpravljanje težav"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Solución de problemas"
+            "value" : "Otklanjanje problema"
           }
         },
         "sv" : {
@@ -342376,12 +342603,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "疑難排解"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "عیب‌یابی"
           }
         }
       }
@@ -344387,12 +344608,6 @@
             "value" : "Primer prova de recarregar. Restableix només si encara falten canvis."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Prvo pokušajte ponovno učitati. Resetirajte samo ako promjene i dalje nedostaju."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -344403,24 +344618,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Prøv at genindlæse først. Nulstil kun, hvis ændringerne stadig mangler."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Probeer eerst ‘Opnieuw laden’. Stel alleen opnieuw in als wijzigingen nog steeds ontbreken."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Kokeile ensin ”Lataa uudelleen” -toimintoa. Nollaa vain, jos muutokset puuttuvat edelleen."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Essayez d’abord « Recharger ». Réinitialisez uniquement si des modifications manquent encore."
           }
         },
         "de" : {
@@ -344435,6 +344632,30 @@
             "value" : "Δοκιμάστε πρώτα την επαναφόρτωση. Κάντε επαναφορά μόνο αν εξακολουθούν να λείπουν αλλαγές."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Intenta recargar primero. Restablece solo si aún faltan cambios."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ابتدا «بازخوانی» را امتحان کنید. فقط اگر تغییرات هنوز دیده نمی‌شوند، بازنشانی کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kokeile ensin ”Lataa uudelleen” -toimintoa. Nollaa vain, jos muutokset puuttuvat edelleen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Essayez d’abord « Recharger ». Réinitialisez uniquement si des modifications manquent encore."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -344445,6 +344666,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "पहले iCloud से फिर लोड करें। बदलाव अब भी न दिखें तभी रीसेट करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prvo pokušajte ponovno učitati. Resetirajte samo ako promjene i dalje nedostaju."
           }
         },
         "hu" : {
@@ -344489,6 +344716,12 @@
             "value" : "Prøv «Last inn på nytt» først. Tilbakestill bare hvis endringene fortsatt mangler."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Probeer eerst ‘Opnieuw laden’. Stel alleen opnieuw in als wijzigingen nog steeds ontbreken."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -344513,12 +344746,6 @@
             "value" : "Сначала попробуйте «Повторно загрузить из iCloud». Сброс — только если изменения всё ещё не появились."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Prvo probajte ponovno učitavanje. Resetujte samo ako promene i dalje nedostaju."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -344531,10 +344758,10 @@
             "value" : "Najprej poskusite »Znova prenesi«. Ponastavite le, če spremembe še vedno manjkajo."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Intenta recargar primero. Restablece solo si aún faltan cambios."
+            "value" : "Prvo probajte ponovno učitavanje. Resetujte samo ako promene i dalje nedostaju."
           }
         },
         "sv" : {
@@ -344577,12 +344804,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "請先試「重新載入」。變更仍未出現時才用「重設」。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "ابتدا «بازخوانی» را امتحان کنید. فقط اگر تغییرات هنوز دیده نمی‌شوند، بازنشانی کنید."
           }
         }
       }
@@ -350342,12 +350563,6 @@
             "value" : "S’està desembolicant el núvol…"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Raspetljavamo oblak…"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -350358,24 +350573,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Reder trådene ud i skyen…"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "De cloud ontwarren…"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Selvitetään pilven sotkuja…"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Démêlage d’iCloud…"
           }
         },
         "de" : {
@@ -350390,6 +350587,30 @@
             "value" : "Ξεμπερδεύουμε το σύννεφο…"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Desenredando la nube…"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "گره‌های ابر را باز می‌کنیم…"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Selvitetään pilven sotkuja…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Démêlage d’iCloud…"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -350400,6 +350621,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "क्लाउड की उलझन सुलझाई जा रही है…"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Raspetljavamo oblak…"
           }
         },
         "hu" : {
@@ -350444,6 +350671,12 @@
             "value" : "Løser opp skyfloken…"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "De cloud ontwarren…"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -350468,12 +350701,6 @@
             "value" : "Распутываем облако…"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Raspetljavamo oblak…"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -350486,10 +350713,10 @@
             "value" : "Razvozlavanje oblaka…"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Desenredando la nube…"
+            "value" : "Raspetljavamo oblak…"
           }
         },
         "sv" : {
@@ -350532,12 +350759,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "正在梳理雲端…"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "گره‌های ابر را باز می‌کنیم…"
           }
         }
       }
@@ -354379,6 +354600,226 @@
         }
       }
     },
+    "Use artwork from your media server or files before online providers." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "استخدم صور خادم الوسائط أو الملفات قبل مزوّدي الصور عبر الإنترنت."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Използвайте първо изображения от медийния си сървър или файлове, а след това от онлайн доставчици."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prioritza les imatges del servidor multimèdia o dels fitxers abans que les de proveïdors en línia."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Upřednostnit obrázky z mediálního serveru nebo souborů před online poskytovateli."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Brug grafik fra din medieserver eller dine filer før onlineudbydere."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verwende Bilder vom Medienserver oder aus Dateien, bevor du auf Online-Anbieter zurückgreifst."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Χρήση γραφικών από τον διακομιστή πολυμέσων ή τα αρχεία σας πριν από διαδικτυακές υπηρεσίες."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usa imágenes de tu servidor multimedia o de tus archivos antes que las de proveedores en línea."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "پیش از منابع آنلاین، از تصاویر سرور رسانه یا فایل‌هایتان استفاده شود."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Käytä mediapalvelimen tai tiedostojen kuvitusta ennen verkkopalveluja."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Utiliser les illustrations de votre serveur multimédia ou de vos fichiers avant celles des fournisseurs en ligne."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "העדפת גרפיקה משרת המדיה או מהקבצים על פני ספקים מקוונים."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ऑनलाइन प्रदाताओं से पहले अपने मीडिया सर्वर या फ़ाइलों का आर्टवर्क इस्तेमाल करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prije mrežnih pružatelja koristi slike s medijskog poslužitelja ili iz datoteka."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Először a médiaszerver vagy a fájlok képeit használja, csak utána az online szolgáltatókét."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gunakan gambar dari server media atau file Anda sebelum penyedia online."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usa le immagini del server multimediale o dei file prima di quelle dei provider online."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "オンラインプロバイダより、メディアサーバーやファイルのアートワークを優先します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "온라인 제공업체보다 미디어 서버 또는 파일의 아트워크를 우선 사용합니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gunakan karya seni daripada pelayan media atau fail anda sebelum penyedia dalam talian."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bruk grafikk fra medieserveren eller filene dine før grafikk fra nettbaserte leverandører."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gebruik eerst afbeeldingen van je mediaserver of uit bestanden, vóór online aanbieders."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Najpierw używaj grafik z serwera multimediów lub plików, a potem od dostawców online."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usar imagens do seu servidor de mídia ou dos seus arquivos antes das imagens de provedores online."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Folosește imaginile de pe serverul media sau din fișiere înaintea furnizorilor online."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сначала использовать изображения с медиасервера или из файлов, а затем — от онлайн-провайдеров."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pred online službami použiť obrázky z mediálneho servera alebo súborov."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pred spletnimi ponudniki uporabi slikovno gradivo iz medijskega strežnika ali datotek."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Najpre koristi slike sa medijskog servera ili iz datoteka, pa tek onda sa onlajn izvora."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Använd bilder från din medieserver eller dina filer före onlinetjänster."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ใช้ภาพจากเซิร์ฟเวอร์สื่อหรือไฟล์ของคุณก่อนผู้ให้บริการออนไลน์"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Çevrimiçi sağlayıcılardan önce medya sunucunuzdaki veya dosyalarınızdaki görselleri kullanın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Спочатку використовувати зображення з медіасервера або файлів, а потім — від онлайн-постачальників."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ưu tiên hình ảnh từ máy chủ đa phương tiện hoặc tệp của bạn hơn hình ảnh từ các nhà cung cấp trực tuyến."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "优先使用媒体服务器或文件中的图片，再使用在线提供商。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "優先使用媒體伺服器或檔案中的圖像，再使用線上提供者的圖像。"
+          }
+        }
+      }
+    },
     "Use profiles on this Apple TV?" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -358136,12 +358577,6 @@
     },
     "Version %@, build %@" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Version %1$@, build %2$@"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -358160,12 +358595,6 @@
             "value" : "Versió %1$@, compilació %2$@"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Verzija %1$@, međuverzija %2$@"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -358176,24 +358605,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Version %1$@, build %2$@"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Versie %1$@, build %2$@"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Versio %1$@, koontiversio %2$@"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Version %1$@, compilation %2$@"
           }
         },
         "de" : {
@@ -358208,6 +358619,36 @@
             "value" : "Έκδοση %1$@, αριθμός build %2$@"
           }
         },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Version %1$@, build %2$@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Versión %1$@, compilación %2$@"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "نسخهٔ %1$@، ساخت %2$@"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Versio %1$@, koontiversio %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Version %1$@, compilation %2$@"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -358218,6 +358659,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "वर्शन %1$@, बिल्ड %2$@"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verzija %1$@, međuverzija %2$@"
           }
         },
         "hu" : {
@@ -358262,6 +358709,12 @@
             "value" : "Versjon %1$@, bygg %2$@"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Versie %1$@, build %2$@"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -358286,12 +358739,6 @@
             "value" : "Версия %1$@, сборка %2$@"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Verzija %1$@, izdanje %2$@"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -358304,10 +358751,10 @@
             "value" : "Različica %1$@, delovna različica %2$@"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Versión %1$@, compilación %2$@"
+            "value" : "Verzija %1$@, izdanje %2$@"
           }
         },
         "sv" : {
@@ -358350,12 +358797,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "版本 %1$@，組建 %2$@"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "نسخهٔ %1$@، ساخت %2$@"
           }
         }
       }
@@ -364784,12 +365225,6 @@
             "value" : "Novetats del Plozz"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Što je novo u aplikaciji Plozz"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -364800,24 +365235,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Nyheder i Plozz"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Nieuw in Plozz"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Uutta Plozzissa"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Nouveautés de Plozz"
           }
         },
         "de" : {
@@ -364832,6 +365249,30 @@
             "value" : "Τι νέο υπάρχει στο Plozz"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Novedades de Plozz"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تازه‌های Plozz"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uutta Plozzissa"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nouveautés de Plozz"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -364842,6 +365283,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Plozz में नया क्या है"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Što je novo u aplikaciji Plozz"
           }
         },
         "hu" : {
@@ -364886,6 +365333,12 @@
             "value" : "Nyheter i Plozz"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nieuw in Plozz"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -364910,12 +365363,6 @@
             "value" : "Что нового в Plozz"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Šta je novo u aplikaciji Plozz"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -364928,10 +365375,10 @@
             "value" : "Kaj je novega v aplikaciji Plozz"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Novedades de Plozz"
+            "value" : "Šta je novo u aplikaciji Plozz"
           }
         },
         "sv" : {
@@ -364974,12 +365421,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Plozz 新功能"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "تازه‌های Plozz"
           }
         }
       }
@@ -370739,12 +371180,6 @@
             "value" : "Encara pots veure totes les versions a Configuració."
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "I dalje možete pregledati napomene za sva izdanja u Postavkama."
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -370755,24 +371190,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Du kan stadig se alle udgivelser i Indstillinger."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Je kunt alle versienotities nog steeds bekijken in Instellingen."
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Löydät kaikkien julkaisujen tiedot yhä Asetuksista."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Vous pouvez toujours consulter toutes les notes de version dans Réglages."
           }
         },
         "de" : {
@@ -370787,6 +371204,30 @@
             "value" : "Μπορείτε ακόμη να δείτε κάθε έκδοση στις Ρυθμίσεις."
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aún puedes ver todas las versiones en Ajustes."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "همچنان می‌توانید همهٔ نسخه‌ها را در تنظیمات ببینید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Löydät kaikkien julkaisujen tiedot yhä Asetuksista."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vous pouvez toujours consulter toutes les notes de version dans Réglages."
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -370797,6 +371238,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "आप सेटिंग्स में हर रिलीज़ अब भी देख सकते हैं।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "I dalje možete pregledati napomene za sva izdanja u Postavkama."
           }
         },
         "hu" : {
@@ -370841,6 +371288,12 @@
             "value" : "Du kan fortsatt se alle utgivelsene i Innstillinger."
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Je kunt alle versienotities nog steeds bekijken in Instellingen."
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -370865,12 +371318,6 @@
             "value" : "Примечания ко всем выпускам всё равно доступны в Настройках."
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Napomene za svako izdanje i dalje možete da vidite u Podešavanjima."
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -370883,10 +371330,10 @@
             "value" : "Vse izdaje si lahko še vedno ogledate v Nastavitvah."
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Aún puedes ver todas las versiones en Ajustes."
+            "value" : "Napomene za svako izdanje i dalje možete da vidite u Podešavanjima."
           }
         },
         "sv" : {
@@ -370929,12 +371376,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "你仍可在「設定」中查看所有版本。"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "همچنان می‌توانید همهٔ نسخه‌ها را در تنظیمات ببینید."
           }
         }
       }
@@ -375378,12 +375819,6 @@
       "comment" : "One-line explanation shown under the card focus-style picker.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Grows and catches the light."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -375424,6 +375859,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Μεγαλώνει και αντανακλά το φως."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Grows and catches the light."
           }
         },
         "es" : {
@@ -375606,12 +376047,6 @@
       "comment" : "One-line explanation shown under the card focus-style picker.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Outlined in glass."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -375652,6 +376087,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Γυάλινο περίγραμμα."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Outlined in glass."
           }
         },
         "es" : {
@@ -375834,12 +376275,6 @@
       "comment" : "Card focus-style option in Settings > Appearance: the focused card grows and catches the light instead of being outlined.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Highlight"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -375880,6 +376315,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Επισήμανση"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Highlight"
           }
         },
         "es" : {
@@ -376062,12 +376503,6 @@
       "comment" : "Card focus-style option in Settings > Appearance: the focused card is framed by a glass outline.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Outline"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -376108,6 +376543,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Περίγραμμα"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Outline"
           }
         },
         "es" : {
@@ -390382,12 +390823,6 @@
             "value" : "Compte d’iCloud"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud račun"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390398,24 +390833,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud-konto"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud-account"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud-tili"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Compte iCloud"
           }
         },
         "de" : {
@@ -390430,6 +390847,30 @@
             "value" : "Λογαριασμός iCloud"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cuenta de iCloud"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "حساب iCloud"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud-tili"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Compte iCloud"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390440,6 +390881,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud खाता"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud račun"
           }
         },
         "hu" : {
@@ -390484,6 +390931,12 @@
             "value" : "iCloud-konto"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud-account"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390508,12 +390961,6 @@
             "value" : "Учётная запись iCloud"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud nalog"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390526,10 +390973,10 @@
             "value" : "Račun iCloud"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Cuenta de iCloud"
+            "value" : "iCloud nalog"
           }
         },
         "sv" : {
@@ -390572,12 +391019,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud 帳號"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "حساب iCloud"
           }
         }
       }
@@ -390824,12 +391265,6 @@
             "value" : "Elements a l’iCloud"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Stavke u iCloudu"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390840,24 +391275,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Elementer i iCloud"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud-items"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud-kohteet"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Éléments dans iCloud"
           }
         },
         "de" : {
@@ -390872,6 +391289,30 @@
             "value" : "Στοιχεία στο iCloud"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Elementos de iCloud"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "موارد iCloud"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud-kohteet"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Éléments dans iCloud"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390882,6 +391323,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud आइटम"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Stavke u iCloudu"
           }
         },
         "hu" : {
@@ -390926,6 +391373,12 @@
             "value" : "iCloud-elementer"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud-items"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390950,12 +391403,6 @@
             "value" : "Элементы iCloud"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Stavke u iCloud-u"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390968,10 +391415,10 @@
             "value" : "Elementi v iCloudu"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Elementos de iCloud"
+            "value" : "Stavke u iCloud-u"
           }
         },
         "sv" : {
@@ -391015,12 +391462,6 @@
             "state" : "needs_review",
             "value" : "iCloud 項目"
           }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "موارد iCloud"
-          }
         }
       }
     },
@@ -391044,12 +391485,6 @@
             "value" : "La sincronització d’iCloud no està disponible"
           }
         },
-        "hr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Sinkronizacija s iCloudom nije dostupna"
-          }
-        },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391060,24 +391495,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud-synkronisering er ikke tilgængelig"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud-synchronisatie is niet beschikbaar"
-          }
-        },
-        "fi" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud-synkronointi ei ole käytettävissä"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "Synchronisation iCloud indisponible"
           }
         },
         "de" : {
@@ -391092,6 +391509,30 @@
             "value" : "Ο συγχρονισμός iCloud δεν είναι διαθέσιμος"
           }
         },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "La sincronización de iCloud no está disponible"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "همگام‌سازی iCloud در دسترس نیست"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud-synkronointi ei ole käytettävissä"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Synchronisation iCloud indisponible"
+          }
+        },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391102,6 +391543,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud सिंक उपलब्ध नहीं है"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sinkronizacija s iCloudom nije dostupna"
           }
         },
         "hu" : {
@@ -391146,6 +391593,12 @@
             "value" : "iCloud-synkronisering er ikke tilgjengelig"
           }
         },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "iCloud-synchronisatie is niet beschikbaar"
+          }
+        },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391170,12 +391623,6 @@
             "value" : "Синхронизация iCloud недоступна"
           }
         },
-        "sr-Latn" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "iCloud sinhronizacija nije dostupna"
-          }
-        },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391188,10 +391635,10 @@
             "value" : "Sinhronizacija z iCloudom ni na voljo"
           }
         },
-        "es" : {
+        "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "La sincronización de iCloud no está disponible"
+            "value" : "iCloud sinhronizacija nije dostupna"
           }
         },
         "sv" : {
@@ -391234,12 +391681,6 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "iCloud 同步無法使用"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "همگام‌سازی iCloud در دسترس نیست"
           }
         }
       }
@@ -413241,12 +413682,6 @@
       "comment" : "Section header in tvOS Settings > Appearance > Cards, above the picker that chooses what a media card does when the remote's focus lands on it. Not camera focus and not a concentration/Focus mode — this is the on-screen selection highlight.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Focus"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -413287,6 +413722,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Επιλογή"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Focus"
           }
         },
         "es" : {

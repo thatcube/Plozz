@@ -4,6 +4,72 @@ import UIKit
 import CoreModels
 import CoreUI
 
+enum SubtitleOverlayGeometry {
+    static func aspectFitRect(
+        in bounds: CGRect,
+        aspectRatio: CGFloat?
+    ) -> CGRect? {
+        guard bounds.width > 0,
+              bounds.height > 0,
+              let aspectRatio,
+              aspectRatio.isFinite,
+              aspectRatio > 0 else {
+            return nil
+        }
+
+        let boundsAspectRatio = bounds.width / bounds.height
+        let size: CGSize
+        if aspectRatio >= boundsAspectRatio {
+            size = CGSize(
+                width: bounds.width,
+                height: bounds.width / aspectRatio
+            )
+        } else {
+            size = CGSize(
+                width: bounds.height * aspectRatio,
+                height: bounds.height
+            )
+        }
+
+        return CGRect(
+            x: bounds.midX - size.width / 2,
+            y: bounds.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    static func bitmapRect(
+        normalizedRect: CGRect,
+        canvasSize: CGSize,
+        videoRect: CGRect
+    ) -> CGRect {
+        let canvasRect: CGRect
+        if canvasSize.width > 0,
+           canvasSize.height > 0,
+           canvasSize.width.isFinite,
+           canvasSize.height.isFinite {
+            let scale = videoRect.width / canvasSize.width
+            let mappedHeight = canvasSize.height * scale
+            canvasRect = CGRect(
+                x: videoRect.minX,
+                y: videoRect.midY - mappedHeight / 2,
+                width: videoRect.width,
+                height: mappedHeight
+            )
+        } else {
+            canvasRect = videoRect
+        }
+
+        return CGRect(
+            x: canvasRect.minX + normalizedRect.minX * canvasRect.width,
+            y: canvasRect.minY + normalizedRect.minY * canvasRect.height,
+            width: normalizedRect.width * canvasRect.width,
+            height: normalizedRect.height * canvasRect.height
+        )
+    }
+}
+
 /// Plozz's **own** subtitle renderer: an engine-agnostic SwiftUI overlay that
 /// draws a normalized `[SubtitleCue]` stream with full styling.
 ///
@@ -93,16 +159,20 @@ public struct SubtitleOverlayView: View {
     private func bitmapLayer(in rect: CGRect) -> some View {
         ForEach(primary.filter(\.isImage)) { cue in
             if case .image(let img) = cue.body {
-                let r = img.normalizedRect
-                let w = max(1, r.width * rect.width)
-                let h = max(1, r.height * rect.height)
+                let frame = SubtitleOverlayGeometry.bitmapRect(
+                    normalizedRect: img.normalizedRect,
+                    canvasSize: img.canvasSize,
+                    videoRect: rect
+                )
+                let w = max(1, frame.width)
+                let h = max(1, frame.height)
                 Image(decorative: img.cgImage, scale: 1)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: w, height: h)
                     .position(
-                        x: rect.minX + (r.midX * rect.width),
-                        y: rect.minY + (r.midY * rect.height)
+                        x: frame.midX,
+                        y: frame.midY
                     )
                     // HDR-only luminance clamp on the bitmap (white-multiply dims).
                     .colorMultiply(Color(white: lumaScale))

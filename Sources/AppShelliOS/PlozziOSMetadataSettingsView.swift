@@ -79,11 +79,14 @@ struct PlozziOSMetadataSettingsView: View {
                     Text(orderModeTitle(mode)).tag(mode)
                 }
             }
-            Toggle("Prefer local artwork", isOn: preferLocalArtworkBinding)
+            Toggle("Prefer artwork from your library", isOn: preferLocalArtworkBinding)
         } footer: {
-            Text(providers.settings.orderMode == .recommended
-                ? "Plozz picks the best source for each field automatically."
-                : "Drag providers to set priority. Anything below the line is turned off.")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Use artwork from your media server or files before online providers.")
+                Text(providers.settings.orderMode == .recommended
+                    ? "Plozz picks the best source for each field automatically."
+                    : "Drag providers to set priority. Anything below the line is turned off.")
+            }
         }
     }
 

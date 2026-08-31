@@ -294,6 +294,11 @@ final class PlayerInputViewController: UIViewController {
         installGestures()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateSubtitleVideoRect()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // Make sure our input surface owns the focus so the Siri Remote's presses
@@ -396,6 +401,18 @@ final class PlayerInputViewController: UIViewController {
         subtitleOverlayHost = host
     }
 
+    private func updateSubtitleVideoRect() {
+        guard let subtitleModel else { return }
+        let aspectRatio = engine.videoAspectRatio.map { CGFloat($0) }
+        let rect = SubtitleOverlayGeometry.aspectFitRect(
+            in: CGRect(origin: .zero, size: view.bounds.size),
+            aspectRatio: aspectRatio
+        )
+        if subtitleModel.videoRect != rect {
+            subtitleModel.videoRect = rect
+        }
+    }
+
     /// Starts the per-frame subtitle clock. Cheap when no cues are loaded (the
     /// model no-ops) and when a line is held (no boundary crossing → no publish).
     private func startSubtitleClock() {
@@ -406,6 +423,7 @@ final class PlayerInputViewController: UIViewController {
     }
 
     @objc private func tickSubtitleClock() {
+        updateSubtitleVideoRect()
         subtitleModel?.tick(engine.currentTime)
     }
 

@@ -273,8 +273,11 @@ public struct MetadataSettingsDetailView: View {
                     title: orderModeTitle
                 )
 
-                Toggle("Prefer local artwork", isOn: preferLocalArtworkBinding)
+                Toggle("Prefer artwork from your library", isOn: preferLocalArtworkBinding)
                     .toggleStyle(SettingsSwitchToggleStyle())
+                Text("Use artwork from your media server or files before online providers.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if providers.settings.orderMode == .custom {
                     LiftableReorderList(

@@ -91,4 +91,23 @@ final class ArtworkResolveKeyTests: XCTestCase {
         XCTAssertNotEqual(poster, landscape)
         XCTAssertNotEqual(poster, stricterPoster)
     }
+
+    func testProviderPolicyParticipatesInSharedResolutionIdentity() {
+        let curated = ArtworkResolveKey.make(
+            references: [],
+            variant: .heroBackdrop,
+            maxAspectRatio: nil,
+            pinIdentity: "home:show",
+            providerPolicyIdentity: "recommended|online||"
+        )
+        let library = ArtworkResolveKey.make(
+            references: [],
+            variant: .heroBackdrop,
+            maxAspectRatio: nil,
+            pinIdentity: "home:show",
+            providerPolicyIdentity: "recommended|library||"
+        )
+
+        XCTAssertNotEqual(curated, library)
+    }
 }

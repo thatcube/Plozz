@@ -105,7 +105,7 @@ public actor MetadataDiskCache {
     /// Exposed so tests assert against the version actually in use rather than
     /// duplicating the literal — a bump is a routine part of changing artwork
     /// resolution and should not require editing tests that aren't about naming.
-    public static let cacheFileName = "plozz-metadata-cache-v4.json"
+    public static let cacheFileName = "plozz-metadata-cache-v5.json"
     /// Matches every versioned cache file (current and superseded) so a bump can
     /// delete its predecessors instead of orphaning them on disk.
     private static let cacheFilePrefix = "plozz-metadata-cache"

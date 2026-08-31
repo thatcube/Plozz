@@ -328,10 +328,6 @@ struct DetailHeroView: View, Equatable {
     /// Resolved into the ladder rather than left as `asyncFallbackURL`, because a
     /// fallback only fires when the ladder FAILS — and the ladder now always has
     /// the server's backdrop in it, so the distinct picture would never have been
-    /// reached. First paint still comes from the ladder and still costs no
-    /// request; this arrives after, and is memoised per process so returning to a
-    /// page shows it immediately with no second appearance.
-    @State private var distinctBackdrop: URL?
     /// Bumped when a watchlist press is accepted, purely to re-run `body`.
     ///
     /// `heroWatchlistAction` recomputes its add/remove state from
@@ -1126,7 +1122,8 @@ struct DetailHeroView: View, Equatable {
         FallbackAsyncImage(
             references: item.artworkReferences(for: .episodeThumbnail),
             variant: .landscapeCard,
-            asyncFallbackURL: episodeStillFallback
+            asyncFallbackURL: episodeStillFallback,
+            pinIdentity: item.stablePresentationID
         ) {
             MediaArtworkPlaceholder()
         }
@@ -1160,27 +1157,20 @@ struct DetailHeroView: View, Equatable {
         // render an identical backdrop. Hero artwork is never spoiler-blurred;
         // episode spoiler masking remains limited to episode text and cards.
         let ladder = backdrop.artworkReferences(for: .detailBackdrop)
-        // The distinct picture leads once it exists; the ladder is what draws
-        // instantly, and remains the fallback beneath it.
-        let references: [ArtworkReference] = {
-            guard let distinct = distinctBackdrop else { return ladder }
-            let lead = ArtworkReference.remote(distinct)
-            return [lead] + ladder.filter { $0 != lead }
-        }()
         HeroArtDiagnostics.emitOnce(
             stage: "detail-draw",
-            key: "\(backdrop.id)|\(distinctBackdrop?.absoluteString ?? "nil")"
+            key: backdrop.id
         ) {
-            "DETAIL \(backdrop.title) draws=\(HeroArtDiagnostics.brief(references.first)) "
-            + "distinct=\(HeroArtDiagnostics.brief(distinctBackdrop)) "
+            "DETAIL \(backdrop.title) draws=\(HeroArtDiagnostics.brief(ladder.first)) "
             + "ladder=[\(ladder.map(HeroArtDiagnostics.brief).joined(separator: " , "))] "
             + "selections=\(backdrop.artworkSelections.map(\.placement.rawValue).joined(separator: ",")) "
             + "legacyHero=\(HeroArtDiagnostics.brief(backdrop.heroBackdropURL)) "
             + "legacyBackdrop=\(HeroArtDiagnostics.brief(backdrop.backdropURL))"
         }
         return SeriesDetailHeroBackdrop(
-            references: references,
+            references: ladder,
             asyncFallbackURL: tmdbBackdropFallback,
+            itemID: backdrop.id,
             width: Self.screenWidth,
             height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
@@ -1190,40 +1180,6 @@ struct DetailHeroView: View, Equatable {
                 && heroTrailerController.isShowing((backdropItem ?? item).id)
                 && heroTrailerController.isPlaying
         )
-        .task(id: backdrop.id) { await resolveDistinctBackdrop() }
-    }
-
-    /// Asks the router for a backdrop that isn't the one Home drew.
-    ///
-    /// Runs off the first-paint path deliberately: the hero has already drawn from
-    /// the ladder by the time this starts, so a slow or empty answer costs the
-    /// viewer nothing. Clears first so a page reused for another title cannot show
-    /// the previous one's picture.
-    private func resolveDistinctBackdrop() async {
-        let source = backdrop
-        distinctBackdrop = nil
-        guard source.kind != .episode else { return }
-        let candidates = await ArtworkRouter.shared.sourcedArtworkURLs(.hero, for: source, limit: 4)
-        // Only a genuinely different picture is worth a second appearance. When the
-        // router has one image, the ladder already shows it.
-        let onScreen = source.heroBackdropURL ?? source.backdropURL
-        let usable = candidates.filter { $0.value != onScreen }
-        // Prefer a DIFFERENT SOURCE, then the furthest-ranked rather than the
-        // runner-up.
-        //
-        // A provider's candidates are ranked, and adjacent entries are usually the
-        // same shoot — often literally the same key art re-cropped, which reads as
-        // the picture shifting rather than changing. Reaching across sources, and
-        // failing that down the list, buys a visibly different image at no cost:
-        // they all arrived in the one response that was already fetched.
-        let homeSource = candidates.first?.source
-        let pick = usable.first(where: { $0.source != homeSource }) ?? usable.last
-        guard let distinct = pick?.value,
-              distinct != onScreen,
-              !Task.isCancelled,
-              source.id == backdrop.id
-        else { return }
-        distinctBackdrop = distinct
     }
 
     /// The hero Play button. Extracted so the optional initial-focus binding can
@@ -1814,23 +1770,10 @@ struct DetailHeroView: View, Equatable {
         // when the server backdrop URLs fail, so titles with real backdrop art are
         // unaffected.
         return {
-            // Ask for TWO candidates and take the SECOND when it exists.
-            //
-            // Home resolves this same `.hero` chain and takes the first, so asking
-            // for one here handed both screens the identical picture no matter how
-            // many the provider had found — TMDb fetches every backdrop a title
-            // has in one response and all but the best were discarded a layer up.
-            // Taking the runner-up costs no extra request (same chain, same
-            // response) and is the whole difference between two screens showing
-            // one image and two.
-            //
-            // The ranking is textless-first, so the picture the detail page ends
-            // up with is a clean backdrop rather than one with the title burned
-            // into it — which is what the hero's own logo is for.
-            let candidates = await ArtworkRouter.shared.sourcedArtworkURLs(.hero, for: source, limit: 2)
-            if let distinct = candidates.dropFirst().first?.value { return distinct }
-            if let only = candidates.first?.value { return only }
-            return source.posterURL
+            await ArtworkRouter.shared.heroArtworkURL(
+                for: source,
+                placement: .detailBackdrop
+            ) ?? source.posterURL
         }
     }
 
@@ -2084,6 +2027,7 @@ private struct SeriesHeroContentLiftModifier: ViewModifier {
 private struct SeriesDetailHeroBackdrop: View {
     let references: [ArtworkReference]
     let asyncFallbackURL: (@Sendable () async -> URL?)?
+    let itemID: String
     let width: CGFloat
     let height: CGFloat
     let scrimTone: Color
@@ -2100,7 +2044,8 @@ private struct SeriesDetailHeroBackdrop: View {
             scrimTone: scrimTone,
             verticalOffset: 0,
             ignoresOverscan: false,
-            stillImageOpacity: showsTrailer ? 0 : 1
+            stillImageOpacity: showsTrailer ? 0 : 1,
+            pinIdentity: "detail:\(itemID)"
         ) {
             if showsTrailer {
                 ZStack {

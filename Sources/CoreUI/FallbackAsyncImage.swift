@@ -30,8 +30,12 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
     private let variant: ArtworkImageVariant
     private let previewVariant: ArtworkImageVariant?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
+    private let preferredArtworkWait: TimeInterval
+    private let prefersOnlineArtwork: Bool
+    private let providerPolicyIdentity: String
     private let onResolveReference: ((ArtworkReference?) -> Void)?
     private let pinIdentity: String?
+    private let sharedResolutionIdentity: String?
     private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
 
@@ -41,8 +45,10 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         variant: ArtworkImageVariant = .original,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        preferredArtworkWait: TimeInterval = 0.5,
         onResolveReference: ((ArtworkReference?) -> Void)? = nil,
         pinIdentity: String? = nil,
+        sharedResolutionIdentity: String? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -51,8 +57,13 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.preferredArtworkWait = preferredArtworkWait
+        let settings = MetadataProviderSettingsStore().load()
+        self.prefersOnlineArtwork = settings.preferOnlineArtwork
+        self.providerPolicyIdentity = Self.policyIdentity(settings)
         self.onResolveReference = onResolveReference
         self.pinIdentity = pinIdentity
+        self.sharedResolutionIdentity = sharedResolutionIdentity
         self.content = content
         self.placeholder = placeholder
     }
@@ -65,8 +76,12 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            preferredArtworkWait: preferredArtworkWait,
+            prefersOnlineArtwork: prefersOnlineArtwork,
+            providerPolicyIdentity: providerPolicyIdentity,
             onResolveReference: onResolveReference,
             pinIdentity: pinIdentity,
+            sharedResolutionIdentity: sharedResolutionIdentity,
             content: content,
             placeholder: placeholder
         )
@@ -80,6 +95,15 @@ public struct FallbackAsyncImage<Content: View, Placeholder: View>: View {
             placeholder: placeholder
         )
         #endif
+    }
+
+    private static func policyIdentity(_ settings: MetadataProviderSettings) -> String {
+        [
+            settings.orderMode.rawValue,
+            settings.preferOnlineArtwork ? "online" : "library",
+            settings.enabledOrder.joined(separator: ","),
+            settings.disabledOrder.joined(separator: ","),
+        ].joined(separator: "|")
     }
 }
 
@@ -110,6 +134,9 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
         variant: ArtworkImageVariant = .original,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        preferredArtworkWait: TimeInterval = 0.5,
+        pinIdentity: String? = nil,
+        sharedResolutionIdentity: String? = nil,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.init(
@@ -118,7 +145,10 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            preferredArtworkWait: preferredArtworkWait,
             onResolveReference: nil,
+            pinIdentity: pinIdentity,
+            sharedResolutionIdentity: sharedResolutionIdentity,
             content: ArtworkFillImage.init,
             placeholder: placeholder
         )
@@ -130,7 +160,9 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
         variant: ArtworkImageVariant = .original,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        preferredArtworkWait: TimeInterval = 0.5,
         pinIdentity: String? = nil,
+        sharedResolutionIdentity: String? = nil,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.init(
@@ -139,8 +171,10 @@ extension FallbackAsyncImage where Content == ArtworkFillImage {
             variant: variant,
             previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
+            preferredArtworkWait: preferredArtworkWait,
             onResolveReference: nil,
             pinIdentity: pinIdentity,
+            sharedResolutionIdentity: sharedResolutionIdentity,
             content: ArtworkFillImage.init,
             placeholder: placeholder
         )
@@ -208,13 +242,15 @@ enum ArtworkResolveKey {
         references: [ArtworkReference],
         variant: ArtworkImageVariant,
         maxAspectRatio: CGFloat?,
-        pinIdentity: String?
+        pinIdentity: String?,
+        providerPolicyIdentity: String = "default"
     ) -> String {
         (
             [
                 variant.rawValue,
                 maxAspectRatio.map { "\($0)" } ?? "nil",
-                pinIdentity.map { "pin:\($0)" } ?? "pin:nil"
+                pinIdentity.map { "pin:\($0)" } ?? "pin:nil",
+                "policy:\(providerPolicyIdentity)"
             ]
             + references.map(\.privacySafeIdentity)
         )
@@ -284,6 +320,9 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// small, and a second decode there would cost more than it saves.
     let previewVariant: ArtworkImageVariant?
     let asyncFallbackURL: (@Sendable () async -> URL?)?
+    let preferredArtworkWait: TimeInterval
+    let prefersOnlineArtwork: Bool
+    let providerPolicyIdentity: String
     /// Reports which candidate actually won, so a caller can react to WHICH art it
     /// got and not merely that it got some. `nil` when the async fallback supplied
     /// it, which is outside the ordered list.
@@ -295,6 +334,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// replacement loads; the second must blank, or a recycled view would leave
     /// the previous show's art showing under the new one's title.
     let pinIdentity: String?
+    let sharedResolutionIdentity: String?
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
 
@@ -312,6 +352,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
     /// keeps a stable identity in the full-screen player, so its `@State` survives
     /// across track changes and must be refreshed when the artwork url changes.
     @State private var loadedKey: String?
+    @State private var displayedReference: ArtworkReference?
 
     init(
         references: [ArtworkReference],
@@ -319,8 +360,12 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         variant: ArtworkImageVariant,
         previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)?,
+        preferredArtworkWait: TimeInterval,
+        prefersOnlineArtwork: Bool,
+        providerPolicyIdentity: String,
         onResolveReference: ((ArtworkReference?) -> Void)? = nil,
         pinIdentity: String? = nil,
+        sharedResolutionIdentity: String? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -329,8 +374,12 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         self.variant = variant
         self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
+        self.preferredArtworkWait = preferredArtworkWait
+        self.prefersOnlineArtwork = prefersOnlineArtwork
+        self.providerPolicyIdentity = providerPolicyIdentity
         self.onResolveReference = onResolveReference
         self.pinIdentity = pinIdentity
+        self.sharedResolutionIdentity = sharedResolutionIdentity
         self.content = content
         self.placeholder = placeholder
         // Seed synchronously from the decoded-image cache so an already-warmed card
@@ -347,21 +396,25 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             references: references,
             variant: variant,
             maxAspectRatio: maxAspectRatio,
-            pinIdentity: pinIdentity
+            pinIdentity: pinIdentity,
+            providerPolicyIdentity: providerPolicyIdentity
         )
-        let seeded = Self.cachedUsableImage(
-            references: references,
-            maxAspectRatio: maxAspectRatio,
-            variant: variant,
-            stopAtPrimary: true
-        ) ?? ArtworkSeedMemo.value(for: memoKey).map { (image: $0, index: references.startIndex) }
+        let seeded = prefersOnlineArtwork && asyncFallbackURL != nil
+            ? nil
+            : Self.cachedUsableImage(
+                references: references,
+                maxAspectRatio: maxAspectRatio,
+                variant: variant,
+                stopAtPrimary: true
+            ) ?? ArtworkSeedMemo.value(for: memoKey).map { (image: $0, index: references.startIndex) }
         let previewReferences: [ArtworkReference]
         if let first = references.first, case .remote = first {
             previewReferences = [first]
         } else {
             previewReferences = []
         }
-        let seededPreview = seeded == nil ? previewVariant.flatMap {
+        let maySeedPreview = !prefersOnlineArtwork || asyncFallbackURL == nil
+        let seededPreview = seeded == nil && maySeedPreview ? previewVariant.flatMap {
             Self.cachedUsableImage(
                 references: previewReferences,
                 maxAspectRatio: maxAspectRatio,
@@ -376,10 +429,18 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 references: references,
                 variant: variant,
                 maxAspectRatio: maxAspectRatio,
-                pinIdentity: pinIdentity
+                pinIdentity: pinIdentity,
+                providerPolicyIdentity: providerPolicyIdentity
             )
             : nil)
         _pinnedIdentity = State(initialValue: seeded != nil ? pinIdentity : nil)
+        _displayedReference = State(
+            initialValue: seeded.flatMap {
+                references.indices.contains($0.index) ? references[$0.index] : nil
+            } ?? seededPreview.flatMap {
+                references.indices.contains($0.index) ? references[$0.index] : nil
+            }
+        )
     }
 
     private var taskKey: String {
@@ -387,7 +448,8 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             references: references,
             variant: variant,
             maxAspectRatio: maxAspectRatio,
-            pinIdentity: pinIdentity
+            pinIdentity: pinIdentity,
+            providerPolicyIdentity: providerPolicyIdentity
         )
     }
 
@@ -411,6 +473,25 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // Same inputs we already resolved for — keep the current result rather
         // than wiping it back to gray and re-resolving.
         if loadedKey == key, image != nil, !isPreviewQuality { return }
+        let isSameSubject = pinIdentity != nil && pinnedIdentity == pinIdentity
+        if isSameSubject, image != nil, !isPreviewQuality {
+            loadedKey = key
+            return
+        }
+        if isSameSubject, image != nil, isPreviewQuality,
+           let displayedReference,
+           let loaded = await ArtworkImageCache.shared.image(
+               for: displayedReference,
+               variant: variant
+           ),
+           Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil {
+            guard !Task.isCancelled else { return }
+            image = loaded
+            isPreviewQuality = false
+            loadedKey = key
+            ArtworkSeedMemo.store(loaded, for: key)
+            return
+        }
         // Same show, different candidates: a better picture has been found for
         // what is already on screen. Take it.
         //
@@ -426,20 +507,24 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
         // The swap costs nothing visually because the replacement is only ever
         // published after it has been fetched and decoded, so it is already in
         // cache: it lands in a single frame, with no loading state in between.
-        let isSameSubject = pinIdentity != nil && pinnedIdentity == pinIdentity
         // The urls changed (or this is the first run). Prefer a synchronous cache
         // hit for the *new* urls so a warmed image shows with no flash.
-        let seeded = Self.cachedUsableImage(
-            references: references,
-            maxAspectRatio: maxAspectRatio,
-            variant: variant,
-            stopAtPrimary: true
-        )
+        let seeded = prefersOnlineArtwork && asyncFallbackURL != nil
+            ? nil
+            : Self.cachedUsableImage(
+                references: references,
+                maxAspectRatio: maxAspectRatio,
+                variant: variant,
+                stopAtPrimary: true
+            )
         if let seeded {
             image = seeded.image
             resolved = true
             isPreviewQuality = false
             pinnedIdentity = pinIdentity
+            displayedReference = references.indices.contains(seeded.index)
+                ? references[seeded.index]
+                : nil
             onResolveReference?(references.indices.contains(seeded.index) ? references[seeded.index] : nil)
             if seeded.index == references.startIndex {
                 loadedKey = key
@@ -467,6 +552,40 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
             )
             image = nil
             resolved = false
+        }
+        if image == nil, prefersOnlineArtwork, asyncFallbackURL != nil {
+            let firstVariant = previewVariant ?? variant
+            if let firstPaint = await ArtworkFirstPaintResolver.resolve(
+                references: references,
+                variant: firstVariant,
+                maxAspectRatio: maxAspectRatio,
+                asyncOnlineURL: asyncFallbackURL,
+                maximumOnlineWait: preferredArtworkWait,
+                prefersOnlineArtwork: true,
+                sharedKey: sharedResolutionIdentity
+            ) {
+                guard !Task.isCancelled else { return }
+                image = firstPaint.image
+                resolved = true
+                isPreviewQuality = firstVariant != variant
+                pinnedIdentity = pinIdentity
+                displayedReference = firstPaint.reference
+                onResolveReference?(firstPaint.reference)
+
+                if firstVariant != variant,
+                   let loaded = await ArtworkImageCache.shared.image(
+                       for: firstPaint.reference,
+                       variant: variant
+                   ),
+                   Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil {
+                    guard !Task.isCancelled else { return }
+                    image = loaded
+                    isPreviewQuality = false
+                    ArtworkSeedMemo.store(loaded, for: key)
+                }
+                loadedKey = key
+                return
+            }
         }
         // Progressive first pass. Deliberately before the full loop below, and
         // deliberately only when there is nothing on screen: an image already up is
@@ -502,6 +621,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                 loadedKey = key
                 ArtworkSeedMemo.store(loaded, for: key)
                 pinnedIdentity = pinIdentity
+                displayedReference = reference
                 onResolveReference?(reference)
                 return
             }
@@ -522,6 +642,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                     resolved = true
                     isPreviewQuality = true
                     pinnedIdentity = pinIdentity
+                    displayedReference = .remote(url)
                 }
                 if let loaded = await ArtworkImageCache.shared.image(
                     for: url,
@@ -533,6 +654,7 @@ private struct FilteredArtworkImage<Content: View, Placeholder: View>: View {
                     loadedKey = key
                     ArtworkSeedMemo.store(loaded, for: key)
                     pinnedIdentity = pinIdentity
+                    displayedReference = .remote(url)
                     onResolveReference?(nil)
                     return
                 }

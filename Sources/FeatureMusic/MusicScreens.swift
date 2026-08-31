@@ -13,6 +13,7 @@ struct MusicLandingView: View {
     var layout: MusicLandingLayout = .default
 
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
 
     var body: some View {
         ContentStateView(state: viewModel.state, emptyMessage: "No music found in your libraries.", onRetry: { Task { await viewModel.load() } }) { content in
@@ -127,7 +128,11 @@ struct MusicLandingView: View {
             Spacer(minLength: metrics.cardSpacing)
             if let trailing { trailing }
         }
-        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+        .padding(
+            .leading,
+            PlozzTheme.Metrics.screenPadding + navigationContentInset
+        )
+        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
     }
 }
 
@@ -181,6 +186,8 @@ private struct MusicRow<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.plozzNavigationContentInset) private var navigationContentInset
+    @Environment(\.plozzPinnedSidebarActive) private var pinnedSidebarActive
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
@@ -189,29 +196,39 @@ private struct MusicRow<Content: View>: View {
                 Spacer()
                 if let trailing { trailing }
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(
+                .leading,
+                PlozzTheme.Metrics.screenPadding + navigationContentInset
+            )
+            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                // Lazy so only on-screen cards build their Liquid Glass surface.
-                // The eager HStack kept every card's glass effect live, so fast
-                // focus moves recomputed every card's SDF and lagged navigation.
-                // Matches the lazy rails used elsewhere (MediaRowView/HomeView).
-                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
-                    content()
+            PinnedSidebarLeadingFade(
+                isActive: pinnedSidebarActive,
+                inset: navigationContentInset,
+                verticalOverhang: metrics.railShadowClearance
+            ) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    // Lazy so only on-screen cards build their Liquid Glass surface.
+                    // The eager HStack kept every card's glass effect live, so fast
+                    // focus moves recomputed every card's SDF and lagged navigation.
+                    // Matches the lazy rails used elsewhere (MediaRowView/HomeView).
+                    LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
+                        content()
+                    }
+                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                    // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                    // engine holds the first/last card at its inset, and reserve room
+                    // *inside* the clip for the focused card's lift + shadow. The
+                    // negative outer padding restores the original vertical inset, so
+                    // the row's height is unchanged — only the clip grows.
+                    .padding(.vertical, metrics.railShadowClearance)
                 }
-                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
-                // engine holds the first/last card at its inset, and reserve room
-                // *inside* the clip for the focused card's lift + shadow. The
-                // negative outer padding restores the original vertical inset, so
-                // the row's height is unchanged — only the clip grows.
-                .padding(.vertical, metrics.railShadowClearance)
+                // Match the shared rails: a tight `railTopPadding`-based gap above the
+                // cards (not the wide `railVerticalPadding` used below the row), so the
+                // section header hugs the cards instead of floating far above them.
+                .padding(.top, metrics.railTopClearanceOffset)
+                .padding(.bottom, metrics.railBottomClearanceOffset)
             }
-            // Match the shared rails: a tight `railTopPadding`-based gap above the
-            // cards (not the wide `railVerticalPadding` used below the row), so the
-            // section header hugs the cards instead of floating far above them.
-            .padding(.top, metrics.railTopClearanceOffset)
-            .padding(.bottom, metrics.railBottomClearanceOffset)
         }
     }
 }

@@ -2146,6 +2146,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
 /// episode isn't downloaded — download itself is started from the ⋯ menu.
 private struct PlozziOSCastSection: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozzMetrics) private var metrics
     @Environment(\.themePalette) private var palette
     // Scales the trailing whitespace with the OS text size so the space under the
     // (variably wrapped) cast names stays proportional at every Dynamic Type level,
@@ -2167,7 +2168,7 @@ private struct PlozziOSCastSection: View {
                 .padding(.horizontal, pageInset)
 
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 20) {
+                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                     ForEach(people.prefix(20)) { person in
                         Button {
                             openPerson?(person, sourceAccountID)
@@ -2185,9 +2186,9 @@ private struct PlozziOSCastSection: View {
                                             .plozzForeground(.secondary)
                                     }
                             }
-                            .frame(width: 164, height: 164)
+                            .frame(width: tileDiameter, height: tileDiameter)
                             .clipShape(Circle())
-                            .frame(width: 164, alignment: .top)
+                            .frame(width: tileDiameter, alignment: .top)
 
                             Text(person.name)
                                 .font(.subheadline.weight(.semibold))
@@ -2210,7 +2211,7 @@ private struct PlozziOSCastSection: View {
                                     )
                             }
                         }
-                        .frame(width: 164, alignment: .top)
+                        .frame(width: tileDiameter, alignment: .top)
                         .multilineTextAlignment(.center)
                         }
                         // Plain, so the tile keeps its own colours: a bordered
@@ -2242,5 +2243,8 @@ private struct PlozziOSCastSection: View {
     private var pageInset: CGFloat {
         PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass)
     }
+
+    /// Match Home's poster artwork scale without the card's surrounding glass.
+    private var tileDiameter: CGFloat { metrics.posterWidth }
 }
 #endif

@@ -11,11 +11,12 @@ import SwiftUI
 /// placement above the cast — rendered with the phone/tablet poster card so it sits
 /// with the rest of the page rather than importing a TV-sized rail.
 struct PlozziOSRelatedSection: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
+
     let entries: [RelatedEntry]
     var inset: CGFloat
     var onSelect: (MediaItem) -> Void
-
-    @ScaledMetric(relativeTo: .body) private var cardWidth: CGFloat = 116
 
     var body: some View {
         if !items.isEmpty {
@@ -25,7 +26,7 @@ struct PlozziOSRelatedSection: View {
                     .padding(.horizontal, inset)
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 12) {
+                    LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                         ForEach(items, id: \.stablePresentationID) { item in
                             Button {
                                 onSelect(item)
@@ -52,6 +53,9 @@ struct PlozziOSRelatedSection: View {
     }
 
     private var items: [MediaItem] { entries.map(\.item) }
+    private var cardWidth: CGFloat {
+        metrics.cardSlotWidth(for: .poster, cardStyle: cardStyle)
+    }
 
     /// Library ids of the entries that continue the seed's own story, so the cue
     /// follows the *relation* rather than anything about the matched item.

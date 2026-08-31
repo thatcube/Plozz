@@ -126,9 +126,8 @@ private struct FocusHaloModifier: ViewModifier {
 /// sits on the page (never on glass), so — unlike the framed caption — it doesn't
 /// flip to dark ink on focus.
 ///
-/// Both lines marquee: they fade into that same inset instead of truncating with
-/// an ellipsis, and walk their overflow into view while the card holds focus.
-/// See `PlozzMarqueeText`.
+/// Both lines use `PlozzMarqueeText`: native one-line truncation on touch
+/// platforms, and a focus-driven fade/marquee on tvOS.
 ///
 /// Callers constrain the width (the card slot / artwork width); this fills it and
 /// stays leading-aligned.

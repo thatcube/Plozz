@@ -4,12 +4,14 @@ import CoreUI
 import SwiftUI
 
 struct PlozziOSExtrasSection: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
+
     let state: LoadState<[MediaExtra]>
     let inset: CGFloat
     let onSelect: (MediaExtra) -> Void
     let onRetry: () -> Void
 
-    @ScaledMetric(relativeTo: .body) private var cardWidth: CGFloat = 220
     @State private var showsLoadingPlaceholders = false
 
     var body: some View {
@@ -45,9 +47,15 @@ struct PlozziOSExtrasSection: View {
             EmptyView()
         }
     }
+
+    private var cardWidth: CGFloat {
+        metrics.cardSlotWidth(for: .landscape, cardStyle: cardStyle)
+    }
 }
 
 private struct PlozziOSExtrasRail: View {
+    @Environment(\.plozzMetrics) private var metrics
+
     let extras: [MediaExtra]
     let inset: CGFloat
     let cardWidth: CGFloat
@@ -59,7 +67,7 @@ private struct PlozziOSExtrasRail: View {
                 .font(.title3.weight(.bold))
                 .padding(.horizontal, inset)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
+                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                     ForEach(extras) { extra in
                         Button {
                             onSelect(extra)
@@ -82,6 +90,8 @@ private struct PlozziOSExtrasRail: View {
 }
 
 private struct PlozziOSExtrasLoadingRail: View {
+    @Environment(\.plozzMetrics) private var metrics
+
     let inset: CGFloat
     let cardWidth: CGFloat
 
@@ -91,7 +101,7 @@ private struct PlozziOSExtrasLoadingRail: View {
                 .font(.title3.weight(.bold))
                 .padding(.horizontal, inset)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
+                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                     ForEach(0..<3, id: \.self) { _ in
                         PlozziOSPosterCard(item: nil, style: .landscape)
                             .frame(width: cardWidth)

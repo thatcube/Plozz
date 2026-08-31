@@ -391,12 +391,11 @@ public struct PosterCardView: View {
         }
     }
 
-    /// The framed card's caption: title over subtitle, both marqueed.
+    /// The framed card's caption: title over subtitle, both single-line.
     ///
     /// The block spans the card's **full** content width and the lines carry
-    /// their own `inset` instead — that inset is the fade zone, so a long title
-    /// dissolves into the gap that keeps text off the rounded corners rather than
-    /// stopping short with an ellipsis. See `PlozzMarqueeText`.
+    /// their own `inset` instead. `PlozzMarqueeText` uses that clearance for
+    /// native tail truncation on touch platforms and as the fade zone on tvOS.
     @ViewBuilder
     private func captionBlock(inset: CGFloat, spacing: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: spacing) {

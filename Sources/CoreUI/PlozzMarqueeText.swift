@@ -1,9 +1,9 @@
 #if canImport(SwiftUI)
 import SwiftUI
 
-/// A single line of card caption that **fades** at the edges instead of
-/// truncating with an ellipsis, and walks its overflow into view while its card
-/// holds focus.
+/// A single line of card caption. tvOS fades overflow at the edges and walks it
+/// into view while its card holds focus. Touch platforms use native tail
+/// truncation, where focus-driven marquee behavior has no user benefit.
 ///
 /// The geometry is derived from the card rather than invented. A caption already
 /// sits inset from the card's edges — that inset is what keeps text clear of the
@@ -12,8 +12,7 @@ import SwiftUI
 /// poster and landscape have different corner radii, framed and borderless
 /// different insets again, and all of them move with the display-size setting,
 /// so a fade expressed in *card* terms tracks all of it without a table of
-/// special cases. Text that runs long doesn't stop short with a "…"; it carries
-/// on and dissolves.
+/// special cases on tvOS.
 ///
 /// The text sits in a band with the same clearance at both ends — `inset` in
 /// from the leading edge, `inset` in from the trailing one — and that band does
@@ -120,7 +119,17 @@ public struct PlozzMarqueeText: View {
     /// different title in this line.
     private var cycle: String { "\(isFocused)-\(Int(overflow.rounded()))" }
 
+    @ViewBuilder
     public var body: some View {
+        #if os(iOS)
+        text
+            .font(font)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        #else
         // The layout copy: ordinary, truncating, never drawn. It exists so the
         // card measures a caption that fits, exactly as it did before this line
         // could scroll. Using the real text — rather than a spacer of guessed
@@ -150,6 +159,7 @@ public struct PlozzMarqueeText: View {
             ))
             .clipped()
             .task(id: cycle) { await runMarquee() }
+        #endif
     }
 
     /// Whether this line should be walking along right now — it has to be the

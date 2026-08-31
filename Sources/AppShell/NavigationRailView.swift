@@ -610,7 +610,7 @@ private struct NavigationRailItemStyle: ButtonStyle {
             : AnyShapeStyle(
                 isSelected
                     ? accent.opacity(0.20)
-                    : isExpanded ? Color.primary.opacity(0.055) : Color.clear
+                    : Color.clear
             )
         let cornerRadius = isExpanded ? 18 : PlozzTheme.Metrics.Radius.content
 

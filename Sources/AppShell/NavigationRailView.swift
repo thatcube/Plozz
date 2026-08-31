@@ -118,10 +118,9 @@ struct NavigationRailView: View {
     /// Briefly makes every row unfocusable so the focus engine is FORCED to move
     /// focus out of the rail. See `releaseFocusToPage()`.
     @State private var isReleasingFocus = false
-    /// Whether the library list has content scrolled off its top / bottom edge, so
-    /// each end is feathered ONLY when something is actually passing under it.
-    @State private var libraryListOverflowsTop = false
-    @State private var libraryListOverflowsBottom = false
+    /// Continuously tracks how much content has moved past each edge, so the mask
+    /// follows the scroll instead of flashing on at a threshold.
+    @State private var libraryListFade = ListEdgeFade()
 
     /// The rail is expanded exactly while it holds focus — "move focus into it to
     /// open it", with no timers and no separate toggle to get out of sync.
@@ -338,27 +337,25 @@ struct NavigationRailView: View {
         // as it reaches either end instead of being cut mid-glyph. It overhangs
         // horizontally so a focused row's pill and shadow stay intact.
         //
-        // Each end fades only while something is actually scrolled past it. A fade
-        // that is always on dims the first and last rows at rest — including the
-        // selected row's pill — for no reason, since nothing is passing under it.
+        // Each end fades in continuously as content travels beneath it. The mask
+        // always keeps the same view structure and geometry, avoiding the flicker
+        // caused by inserting/removing a gradient at a one-point threshold.
         .verticalEdgeFadeMask(
-            topFade: libraryListOverflowsTop ? NavigationRailMetrics.listEdgeFade : 0,
-            bottomFade: libraryListOverflowsBottom ? NavigationRailMetrics.listEdgeFade : 0,
+            fadeHeight: NavigationRailMetrics.listEdgeFade,
+            topStrength: libraryListFade.top,
+            bottomStrength: libraryListFade.bottom,
             horizontalOverhang: NavigationRailMetrics.listFadeHorizontalOverhang
         )
-        .animation(.easeOut(duration: 0.18), value: libraryListOverflowsTop)
-        .animation(.easeOut(duration: 0.18), value: libraryListOverflowsBottom)
-        .onScrollGeometryChange(for: ListOverflow.self) { geometry in
+        .onScrollGeometryChange(for: ListEdgeFade.self) { geometry in
             let top = geometry.contentOffset.y + geometry.contentInsets.top
             let bottom = geometry.contentSize.height
                 - (geometry.contentOffset.y + geometry.containerSize.height)
-            return ListOverflow(
-                top: top > 1,
-                bottom: bottom > 1
+            return ListEdgeFade(
+                top: ListEdgeFade.strength(for: top),
+                bottom: ListEdgeFade.strength(for: bottom)
             )
-        } action: { _, overflow in
-            libraryListOverflowsTop = overflow.top
-            libraryListOverflowsBottom = overflow.bottom
+        } action: { _, fade in
+            libraryListFade = fade
         }
     }
 
@@ -580,10 +577,15 @@ struct NavigationRailView: View {
 
 /// What can hold focus inside the rail. The profile row isn't a destination, so it
 /// needs its own case rather than being folded into ``NavigationRailDestination``.
-/// Which ends of the library list currently have content scrolled past them.
-private struct ListOverflow: Equatable {
-    var top: Bool
-    var bottom: Bool
+/// Normalized fade strength at each edge of the scrolling library list.
+private struct ListEdgeFade: Equatable {
+    var top: CGFloat = 0
+    var bottom: CGFloat = 0
+
+    static func strength(for overflow: CGFloat) -> CGFloat {
+        let progress = min(max(overflow / NavigationRailMetrics.listEdgeFade, 0), 1)
+        return progress * progress * (3 - 2 * progress)
+    }
 }
 
 private enum RailFocusTarget: Hashable {

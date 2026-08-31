@@ -142,48 +142,68 @@ public struct PinnedSidebarLeadingFade<Content: View>: View {
 /// `horizontalOverhang` widens the mask left and right so a focused row's own
 /// lift and shadow are not clipped by it.
 public struct VerticalEdgeFadeMask: View {
-    private let topFade: CGFloat
-    private let bottomFade: CGFloat
+    private let topFadeHeight: CGFloat
+    private let bottomFadeHeight: CGFloat
+    private let topStrength: CGFloat
+    private let bottomStrength: CGFloat
     private let horizontalOverhang: CGFloat
 
     /// Feathers both ends by the same amount.
     public init(fadeHeight: CGFloat, horizontalOverhang: CGFloat = 0) {
-        self.init(
-            topFade: fadeHeight,
-            bottomFade: fadeHeight,
-            horizontalOverhang: horizontalOverhang
-        )
+        topFadeHeight = fadeHeight
+        bottomFadeHeight = fadeHeight
+        topStrength = 1
+        bottomStrength = 1
+        self.horizontalOverhang = horizontalOverhang
     }
 
     /// Feathers each end independently. A fade of `0` leaves that end hard, which
     /// is what a list wants at an end it is not scrolled past — an always-on fade
     /// dims the first or last row for no reason.
     public init(topFade: CGFloat, bottomFade: CGFloat, horizontalOverhang: CGFloat = 0) {
-        self.topFade = topFade
-        self.bottomFade = bottomFade
+        topFadeHeight = topFade
+        bottomFadeHeight = bottomFade
+        topStrength = 1
+        bottomStrength = 1
+        self.horizontalOverhang = horizontalOverhang
+    }
+
+    /// Feathers both ends over a fixed distance while independently varying how
+    /// strongly each fade is applied. Keeping the geometry fixed avoids replacing
+    /// mask subtrees as a scroll view reaches either edge.
+    public init(
+        fadeHeight: CGFloat,
+        topStrength: CGFloat,
+        bottomStrength: CGFloat,
+        horizontalOverhang: CGFloat = 0
+    ) {
+        topFadeHeight = fadeHeight
+        bottomFadeHeight = fadeHeight
+        self.topStrength = min(max(topStrength, 0), 1)
+        self.bottomStrength = min(max(bottomStrength, 0), 1)
         self.horizontalOverhang = horizontalOverhang
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            if topFade > 0 {
-                edgeFade(reversed: false).frame(height: topFade)
-            }
+            edgeFade(reversed: false, strength: topStrength)
+                .frame(height: topFadeHeight)
             Color.black
-            if bottomFade > 0 {
-                edgeFade(reversed: true).frame(height: bottomFade)
-            }
+            edgeFade(reversed: true, strength: bottomStrength)
+                .frame(height: bottomFadeHeight)
         }
         .padding(.horizontal, -horizontalOverhang)
     }
 
-    private func edgeFade(reversed: Bool) -> some View {
+    private func edgeFade(reversed: Bool, strength: CGFloat) -> some View {
         let samples = 24
         let stops = (0 ... samples).map { step -> Gradient.Stop in
             let t = Double(step) / Double(samples)
             let eased = t * t * (3 - 2 * t)
+            let activeOpacity = reversed ? 1 - eased : eased
+            let opacity = 1 - Double(strength) * (1 - activeOpacity)
             return Gradient.Stop(
-                color: .black.opacity(reversed ? 1 - eased : eased),
+                color: .black.opacity(opacity),
                 location: t
             )
         }
@@ -221,6 +241,24 @@ public extension View {
             VerticalEdgeFadeMask(
                 topFade: topFade,
                 bottomFade: bottomFade,
+                horizontalOverhang: horizontalOverhang
+            )
+        }
+    }
+
+    /// Feathers both edges using continuously variable strengths over fixed mask
+    /// geometry. A strength of `0` is fully opaque; `1` applies the full dissolve.
+    func verticalEdgeFadeMask(
+        fadeHeight: CGFloat,
+        topStrength: CGFloat,
+        bottomStrength: CGFloat,
+        horizontalOverhang: CGFloat = 0
+    ) -> some View {
+        mask {
+            VerticalEdgeFadeMask(
+                fadeHeight: fadeHeight,
+                topStrength: topStrength,
+                bottomStrength: bottomStrength,
                 horizontalOverhang: horizontalOverhang
             )
         }

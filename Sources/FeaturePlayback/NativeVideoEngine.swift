@@ -93,7 +93,10 @@ public final class NativeVideoEngine: VideoEngine {
     @ObservationIgnored private var request: PlaybackRequest?
     @ObservationIgnored private let authenticatedHTTPResolver:
         (any AuthenticatedHTTPResourceResolving)?
-    @ObservationIgnored private var timeObserver: Any?
+    @ObservationIgnored private var timeObserver: (owner: AVPlayer, token: Any)?
+    /// Fences reentrant async loads. A newer load or stop invalidates every older
+    /// continuation before it can publish or start a stale player.
+    @ObservationIgnored private var loadGeneration: UInt = 0
     @ObservationIgnored private let reportInterval: TimeInterval = 10
     @ObservationIgnored private var lastReportedSecond: Int = -1
     @ObservationIgnored private var fallbackMonitorTask: Task<Void, Never>?
@@ -180,6 +183,8 @@ public final class NativeVideoEngine: VideoEngine {
     // MARK: - Lifecycle
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         status = .loading
         configureAudioSession()
         // Tear down any previous player (e.g. a failed direct-play attempt being
@@ -192,6 +197,7 @@ public final class NativeVideoEngine: VideoEngine {
             do {
                 streamURL = try await authenticatedHTTPResolver?.resolve(locator)
             } catch {
+                guard generation == loadGeneration else { return }
                 let appError = AppError.unknown(String(describing: error))
                 status = .failed(appError)
                 onFailure?(appError)
@@ -200,6 +206,7 @@ public final class NativeVideoEngine: VideoEngine {
         } else {
             streamURL = request.streamURL ?? request.playbackSource?.publicURL
         }
+        guard generation == loadGeneration else { return }
         guard let streamURL else {
             let error = AppError.unknown("Native playback requires a URL source")
             status = .failed(error)
@@ -208,6 +215,7 @@ public final class NativeVideoEngine: VideoEngine {
         }
 
         let injectableSubtitles = await resolveInjectableSubtitles(for: request)
+        guard generation == loadGeneration else { return }
         let asset: AVURLAsset
         var item: AVPlayerItem
         if let audioURL = request.externalAudioURL {
@@ -221,7 +229,9 @@ public final class NativeVideoEngine: VideoEngine {
             // fall back to the plain video URL, whose failed (silent) decode
             // re-resolves through the engine's transcode fallback to the
             // progressive muxed (audible ~360p) stream.
-            if let muxItem = await makeTrailerMuxItem(videoURL: streamURL, audioURL: audioURL) {
+            let muxItem = await makeTrailerMuxItem(videoURL: streamURL, audioURL: audioURL)
+            guard generation == loadGeneration else { return }
+            if let muxItem {
                 item = muxItem
                 asset = AVURLAsset(url: streamURL)
             } else {
@@ -253,6 +263,10 @@ public final class NativeVideoEngine: VideoEngine {
         furthestObservedPosition = max(furthestObservedPosition, startPosition)
         if startPosition > 1 {
             await seekWhenReady(player: player, to: startPosition)
+            guard generation == loadGeneration else {
+                player.pause()
+                return
+            }
         }
 
         // Watch for a direct-play item that can't actually be decoded so we can
@@ -576,6 +590,7 @@ public final class NativeVideoEngine: VideoEngine {
     }
 
     public func stop() {
+        loadGeneration &+= 1
         fallbackMonitorTask?.cancel()
         fallbackMonitorTask = nil
         #if !os(macOS)
@@ -849,10 +864,7 @@ public final class NativeVideoEngine: VideoEngine {
             NotificationCenter.default.removeObserver(endOfPlaybackObserver)
         }
         endOfPlaybackObserver = nil
-        if let timeObserver, let player {
-            player.removeTimeObserver(timeObserver)
-        }
-        timeObserver = nil
+        removeTimeObserver()
         player?.pause()
         player = nil
         lastReportedSecond = -1
@@ -947,8 +959,9 @@ public final class NativeVideoEngine: VideoEngine {
     // MARK: - Progress cadence
 
     private func installTimeObserver(on player: AVPlayer) {
+        removeTimeObserver()
         let interval = CMTime(seconds: 1, preferredTimescale: 1)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+        let token = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
             if time.seconds.isFinite { self.furthestObservedPosition = max(0, time.seconds) }
             let seconds = Int(time.seconds)
@@ -956,6 +969,13 @@ public final class NativeVideoEngine: VideoEngine {
             self.lastReportedSecond = seconds
             self.onProgress?()
         }
+        timeObserver = (owner: player, token: token)
+    }
+
+    private func removeTimeObserver() {
+        guard let timeObserver else { return }
+        self.timeObserver = nil
+        timeObserver.owner.removeTimeObserver(timeObserver.token)
     }
 
     // MARK: - Subtitle / audio track selection

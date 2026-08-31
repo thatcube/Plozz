@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 import CoreModels
 @testable import FeaturePlayback
 
@@ -61,6 +62,45 @@ final class SubtitleHLSComposerTests: XCTestCase {
             XCTAssertEqual(resolver.locators, [locator])
             await engine.stop()
         }
+
+        func testSupersededAuthenticatedLoadCannotReplaceNewerPlayer() async throws {
+            let locator = try AuthenticatedHTTPPlaybackLocator(
+                provider: .jellyfin,
+                accountID: "account",
+                credentialRevision: CredentialRevision(),
+                itemID: "stale",
+                deliveryMode: .directFile,
+                purpose: .mediaStream,
+                resource: try AuthenticatedHTTPResource(
+                    pathBase: .configuredBaseURL,
+                    path: "Videos/stale/stream"
+                )
+            )
+            let staleURL = URL(string: "https://media.example/stale.mp4")!
+            let currentURL = URL(string: "https://media.example/current.mp4")!
+            let resolver = SuspendingAuthenticatedResolver(resolvedURL: staleURL)
+            let engine = NativeVideoEngine(authenticatedHTTPResolver: resolver)
+            let staleRequest = PlaybackRequest(
+                item: MediaItem(id: "stale", title: "Stale", kind: .movie),
+                playbackSource: .authenticatedHTTP(locator)
+            )
+            let currentRequest = PlaybackRequest(
+                item: MediaItem(id: "current", title: "Current", kind: .movie),
+                streamURL: currentURL
+            )
+
+            let staleLoad = Task {
+                await engine.load(request: staleRequest, startPosition: 0)
+            }
+            await resolver.waitUntilResolutionBegins()
+            await engine.load(request: currentRequest, startPosition: 0)
+            resolver.resume()
+            await staleLoad.value
+
+            let loadedURL = (engine.underlyingPlayer?.currentItem?.asset as? AVURLAsset)?.url
+            XCTAssertEqual(loadedURL, currentURL)
+            engine.stop()
+        }
     }
 
     @MainActor
@@ -79,6 +119,37 @@ final class SubtitleHLSComposerTests: XCTestCase {
         ) async throws -> URL {
             locators.append(locator)
             return resolvedURL
+        }
+    }
+
+    @MainActor
+    private final class SuspendingAuthenticatedResolver:
+        AuthenticatedHTTPResourceResolving
+    {
+        let resolvedURL: URL
+        private var continuation: CheckedContinuation<URL, Never>?
+
+        init(resolvedURL: URL) {
+            self.resolvedURL = resolvedURL
+        }
+
+        func resolve(
+            _ locator: AuthenticatedHTTPPlaybackLocator
+        ) async throws -> URL {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+            }
+        }
+
+        func waitUntilResolutionBegins() async {
+            while continuation == nil {
+                await Task.yield()
+            }
+        }
+
+        func resume() {
+            continuation?.resume(returning: resolvedURL)
+            continuation = nil
         }
     }
 

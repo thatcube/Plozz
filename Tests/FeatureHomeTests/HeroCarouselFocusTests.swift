@@ -63,6 +63,27 @@ final class HeroCarouselFocusTests: XCTestCase {
         XCTAssertEqual(resolve(.left, itemIndex: 0, focusedButton: 0, nav: .sidebar), .escape)
     }
 
+    func testLeftAtFirstItemFirstButtonOpensPinnedSidebar() {
+        XCTAssertEqual(
+            resolve(.left, itemIndex: 0, focusedButton: 0, nav: .rail),
+            .openPinnedSidebar
+        )
+    }
+
+    func testPinnedSidebarInteriorLeftMovesWithinHero() {
+        XCTAssertEqual(
+            resolve(.left, itemIndex: 0, focusedButton: 2, nav: .rail),
+            .moveButton(1)
+        )
+    }
+
+    func testPinnedSidebarLeftOnLaterSlideMovesToPreviousSlide() {
+        XCTAssertEqual(
+            resolve(.left, itemIndex: 2, focusedButton: 0, nav: .rail),
+            .advance(toItem: 1, keepButton: 0)
+        )
+    }
+
     func testLeftAtFirstItemFirstButtonWrapsBackwardInTopBar() {
         XCTAssertEqual(resolve(.left, itemIndex: 0, itemCount: 3, focusedButton: 0, nav: .tabBar), .advance(toItem: 2, keepButton: 0))
     }

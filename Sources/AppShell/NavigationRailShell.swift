@@ -32,6 +32,7 @@ struct NavigationRailShell<Content: View>: View {
     /// the initial pick, which would open the navigation every time the app launches
     /// or the viewer switches destination.
     @Namespace private var focusScopeID
+    @StateObject private var pinnedSidebarInteraction = PlozzPinnedSidebarInteraction()
     /// Whether focus is inside the rail, reported up from it.
     @State private var railExpanded = false
     /// Bumped each time the catcher takes a Left press, so the rail claims focus.
@@ -58,6 +59,7 @@ struct NavigationRailShell<Content: View>: View {
                     hidden ? 0 : NavigationRailMetrics.contentInset
                 )
                 .environment(\.plozzPinnedSidebarActive, true)
+                .environment(\.plozzPinnedSidebarInteraction, pinnedSidebarInteraction)
                 // Content is the scope's preferred focus ONLY while the rail does
                 // not hold focus. Opening the rail changes its focusable subtree;
                 // leaving this unconditional can re-assert content focus in the
@@ -65,17 +67,16 @@ struct NavigationRailShell<Content: View>: View {
                 .prefersDefaultFocus(!railExpanded, in: focusScopeID)
 
 
-            // Left opens the navigation from anywhere, and Right leaves it from
-            // anywhere — including across a grid or rail whose own focus section
-            // would otherwise absorb the press. See `NavigationRailEdgeCatcher`;
-            // both are fallbacks for a press that resolved to nothing, so no
-            // existing behaviour in either direction changes.
+            // Left opens the navigation from unresolved page edges, and Right leaves
+            // it from unresolved rail edges. The Home hero disables this fallback
+            // while focused because its logical button moves share one UIKit focus
+            // item; it explicitly requests the rail only at its true leading edge.
             if !hidden {
                 NavigationRailEdgeCatcher(
                     onOpenNavigation: { focusRequestToken &+= 1 },
                     onLeaveNavigation: { railReturnToken &+= 1 },
                     railHasFocus: railExpanded,
-                    isEnabled: true
+                    isEnabled: !pinnedSidebarInteraction.heroHasFocus
                 )
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
@@ -108,6 +109,9 @@ struct NavigationRailShell<Content: View>: View {
             // without this the rail would stay hidden after leaving a detail page
             // by switching destinations rather than by pressing Back.
             chrome.resetForDestinationChange()
+        }
+        .onChange(of: pinnedSidebarInteraction.openRequest) { _, _ in
+            focusRequestToken &+= 1
         }
     }
 }

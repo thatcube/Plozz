@@ -20,6 +20,10 @@ public enum HeroFocusOutcome: Equatable, Sendable {
     /// Let the system handle the move — used at the first item's left edge in
     /// Sidebar mode so Left opens the side navigation instead of wrapping.
     case escape
+    /// Ask Plozz's custom pinned sidebar to take focus. Unlike native Sidebar,
+    /// this is explicit because the hero's logical button moves share one UIKit
+    /// focus item and otherwise look unresolved to the sidebar's global fallback.
+    case openPinnedSidebar
     /// The move is blocked with nothing to do (e.g. a single-item carousel at an
     /// edge). Focus stays put.
     case blocked
@@ -36,10 +40,9 @@ public enum HeroFocusOutcome: Equatable, Sendable {
 /// - At the **first (left-most) button, Left goes to the previous item**, again
 ///   keeping the button index. Backward paging **wraps only in Top-Bar
 ///   navigation**.
-/// - In **Sidebar** or **Library Rail** navigation, when on the **first item** and
-///   the **left-most button**, Left **escapes to the side navigation** instead of
-///   wrapping — preventing a focus fight with the leading-edge chrome. (Top-Bar has
-///   no left chrome, so there Left wraps backward to the last item.)
+/// - At the **first item** and **left-most button**, Left escapes to the native
+///   Sidebar or explicitly opens the Pinned Sidebar. Top Bar has no leading
+///   chrome, so it wraps backward to the last item.
 ///
 /// SwiftUI-free and exhaustively testable.
 public enum HeroCarouselFocus {
@@ -73,10 +76,14 @@ public enum HeroCarouselFocus {
             }
             // At the left edge of the FIRST item, behaviour depends on nav chrome.
             if itemIndex == 0 {
-                if navigationStyle.hasLeadingEdgeChrome {
-                    // Hand the move to the system so the side navigation opens;
-                    // don't wrap.
+                switch navigationStyle {
+                case .sidebar:
+                    // Hand the move to the system so the native sidebar opens.
                     return .escape
+                case .rail:
+                    return .openPinnedSidebar
+                case .tabBar:
+                    break
                 }
                 // No left chrome to fight — wrap backward to the last item.
                 guard itemCount > 1 else { return .blocked }

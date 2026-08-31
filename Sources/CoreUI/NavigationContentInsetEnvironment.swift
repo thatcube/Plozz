@@ -26,6 +26,29 @@ private struct PlozzPinnedSidebarActiveKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct PlozzPinnedSidebarInteractionKey: EnvironmentKey {
+    static let defaultValue: PlozzPinnedSidebarInteraction? = nil
+}
+
+/// Coordinates focus-sensitive interactions between page content and the custom
+/// pinned sidebar without coupling feature modules to AppShell.
+public final class PlozzPinnedSidebarInteraction: ObservableObject {
+    @Published public private(set) var heroHasFocus = false
+    @Published public private(set) var openRequest = 0
+
+    public init() {}
+
+    @MainActor
+    public func setHeroFocused(_ focused: Bool) {
+        heroHasFocus = focused
+    }
+
+    @MainActor
+    public func requestOpen() {
+        openRequest &+= 1
+    }
+}
+
 public extension EnvironmentValues {
     /// The leading inset the navigation chrome has applied to page content.
     var plozzNavigationContentInset: CGFloat {
@@ -41,6 +64,12 @@ public extension EnvironmentValues {
     var plozzPinnedSidebarActive: Bool {
         get { self[PlozzPinnedSidebarActiveKey.self] }
         set { self[PlozzPinnedSidebarActiveKey.self] = newValue }
+    }
+
+    /// Focus coordination available only inside Plozz's custom pinned-sidebar shell.
+    var plozzPinnedSidebarInteraction: PlozzPinnedSidebarInteraction? {
+        get { self[PlozzPinnedSidebarInteractionKey.self] }
+        set { self[PlozzPinnedSidebarInteractionKey.self] = newValue }
     }
 }
 

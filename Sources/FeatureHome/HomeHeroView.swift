@@ -125,6 +125,7 @@ struct HomeHeroView: View {
     /// full-bleed artwork can cancel it. `0` under the native tab styles.
     @Environment(\.plozzNavigationContentInset) private var navigationContentInset
     @Environment(\.mediaItemActionContext) private var actionContext
+    @Environment(\.plozzPinnedSidebarInteraction) private var pinnedSidebarInteraction
 
     /// The index of the slide currently fronted.
     /// Internal (not private) so the artwork extension in a sibling file can center
@@ -1417,18 +1418,14 @@ struct HomeHeroView: View {
             // same focus section. Native focus movement preserves the familiar tvOS
             // click sound. The UIKit surface tracks physical press phases so only
             // the first move from one held press is handled; touch-surface swipes
-            // still pass through normally. It steps aside only at the one escape
-            // spot (first item, left-most button, sidebar nav).
+            // still pass through normally. It steps aside only at the native
+            // Sidebar escape spot; Pinned Sidebar opening stays explicit.
             //
             // Crucially the inactivation is gated on `focus == .row`, NOT on
-            // `allowsSidebarEscape` alone: `handleLeft()` moves `selectedButton`
-            // to 0 (or pages back to item 0) which flips `allowsSidebarEscape` to
-            // true in the very transaction that is bouncing focus guard→row. If the
-            // guard's focusability keyed on that flip alone, it would go
-            // non-focusable *while still holding focus*, and the focus engine could
-            // relocate to a Continue Watching card (scroll-down regression) or
-            // strand focus. Requiring `focus == .row` means the guard can only lose
-            // focusability once focus has already left it for the row — no race.
+            // `allowsNativeSidebarEscape` alone: `handleLeft()` can move to the
+            // native escape spot in the same transaction that bounces guard→row. If
+            // the guard became non-focusable while still focused, the focus engine
+            // could relocate to a lower row or strand focus.
             Color.clear
                 .frame(width: 1, height: 1)
                 .focusable(leftGuardActive)
@@ -1475,7 +1472,7 @@ struct HomeHeroView: View {
                 Color.clear
                     .background {
                         HeroDirectionalPressMonitor(
-                            capturesLeft: !allowsSidebarEscape,
+                            capturesLeft: !allowsNativeSidebarEscape,
                             gate: directionalPressGate,
                             // Reliable Select activation. Gated to when the hero holds
                             // focus (so a Select on a detail page / another tab is
@@ -1542,6 +1539,7 @@ struct HomeHeroView: View {
         // scroll in `HomeView` — not by this handler.
         .onMoveCommand { _ in handleMove() }
         .onChange(of: focus) { old, new in
+            pinnedSidebarInteraction?.setHeroFocused(new != nil)
             let oldName = old.map { "\($0)" } ?? "nil"
             let newName = new.map { "\($0)" } ?? "nil"
             HeroFocusDiagnostics.emit("focus \(oldName)->\(newName) | \(hfState())")
@@ -1593,13 +1591,14 @@ struct HomeHeroView: View {
         .onChange(of: receded) { _, isReceded in
             if isReceded { pauseWhileReceded() } else { resumeFromRecede() }
         }
+        .onDisappear {
+            pinnedSidebarInteraction?.setHeroFocused(false)
+        }
     }
 
-    /// Whether Left on the left-most button of the *current* slide should open
-    /// the side navigation instead of paging — the one case the reducer resolves
-    /// to `.escape`. Mirrors `HeroCarouselFocus`, and controls whether the left
-    /// focus guard steps aside so Left can reach the sidebar.
-    private var allowsSidebarEscape: Bool {
+    /// Whether Left should fall through to the system so the native Sidebar opens.
+    /// The custom Pinned Sidebar stays inside the guard and is opened explicitly.
+    private var allowsNativeSidebarEscape: Bool {
         HeroCarouselFocus.resolve(
             direction: .left,
             itemIndex: index,
@@ -1614,17 +1613,9 @@ struct HomeHeroView: View {
     /// a focus-engine move so the hero handles it internally instead of escaping
     /// to the sidebar. It steps aside (non-focusable) *only* at the escape spot AND
     /// while focus is resting on the row — never while the guard itself holds
-    /// focus. Gating on `focus == .row` is what makes the guard→row bounce
-    /// race-free: `handleLeft()` moves `selectedButton`/`index` (flipping
-    /// `allowsSidebarEscape` to true) in the same transaction that re-pins focus to
-    /// `.row`; if focusability keyed on `allowsSidebarEscape` alone, the guard would
-    /// go non-focusable *while focused*, and the engine could relocate focus to a
-    /// Continue Watching card (scroll-down) or strand it. Requiring `focus == .row`
-    /// means the guard can only lose focusability once focus has already moved off
-    /// it, so the escape only fires from a genuine at-rest Left on item 0's
-    /// left-most button.
+    /// focus. Gating on `focus == .row` keeps the guard→row bounce race-free.
     private var leftGuardActive: Bool {
-        !(allowsSidebarEscape && focus == .row)
+        !(allowsNativeSidebarEscape && focus == .row)
     }
 
     /// The container-level move handler. Its ONLY job is to pause the auto-advance
@@ -1645,7 +1636,7 @@ struct HomeHeroView: View {
         let focusName = focus.map { "\($0)" } ?? "nil"
         return "idx=\(index)/\(items.count) selBtn=\(selectedButton)/\(btnCount) "
             + "focus=\(focusName) leftGuardActive=\(leftGuardActive) "
-            + "sidebarEscape=\(allowsSidebarEscape) metaVisible=\(metadataVisible)"
+            + "sidebarEscape=\(allowsNativeSidebarEscape) metaVisible=\(metadataVisible)"
     }
 
     /// Resolves one discrete Left click from the UIKit surface or a swipe captured
@@ -1674,6 +1665,8 @@ struct HomeHeroView: View {
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: false)
             // (Focus recovery is handled centrally in `page(to:)`.)
+        case .openPinnedSidebar:
+            pinnedSidebarInteraction?.requestOpen()
         case .escape, .blocked:
             break
         }
@@ -1735,7 +1728,7 @@ struct HomeHeroView: View {
         case let .advance(toItem, keepButton):
             page(to: toItem, keepButton: keepButton, forward: true)
             // (Focus recovery is handled centrally in `page(to:)`.)
-        case .escape, .blocked:
+        case .escape, .openPinnedSidebar, .blocked:
             break
         }
     }

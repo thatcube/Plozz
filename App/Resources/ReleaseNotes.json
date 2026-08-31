@@ -2,6 +2,48 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "id": "release/031",
+      "version": "2026.8.31",
+      "build": 31,
+      "releasedAt": "2026-08-31",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Special features and bonus videos on movie and show pages from Plex, Jellyfin, Emby, and network shares"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "New Plozz app icon and logo",
+            {
+              "text": "Updated Pinned Sidebar design with better behavior; long library names no longer truncate",
+              "platforms": ["tvOS"]
+            },
+            {
+              "text": "Continue Watching artwork loads sooner",
+              "platforms": ["iOS"]
+            }
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Artwork preferences now respect the \"Prefer artwork from your library\" setting; enable it to use images from your server or files",
+            {
+              "text": "Pinned Sidebar focus with slower libraries",
+              "platforms": ["tvOS"]
+            },
+            {
+              "text": "Bitmap subtitles appearing squashed",
+              "platforms": ["iOS"]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "release/030",
       "version": "2026.8.28",
       "build": 30,

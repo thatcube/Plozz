@@ -466,6 +466,15 @@ private struct PlozziOSCanonicalItemDetailView: View {
 
                 // Above the cast, matching tvOS: what else to watch is the decision
                 // being made now; who was in it is looked up afterwards.
+                PlozziOSExtrasSection(
+                    state: viewModel.extrasState,
+                    inset: pageInset,
+                    onSelect: { play($0.playbackItem) },
+                    onRetry: {
+                        Task { await viewModel.retryExtras() }
+                    }
+                )
+
                 if let entries = viewModel.relatedTitlesLoader?.entries, !entries.isEmpty {
                     PlozziOSRelatedSection(
                         entries: entries,

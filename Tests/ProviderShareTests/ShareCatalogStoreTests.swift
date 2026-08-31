@@ -248,7 +248,7 @@ final class ShareCatalogStoreTests: XCTestCase {
         let state = try queryMigrationState(at: url)
         // v3 adds local-artwork inventory without changing the legacy normalized
         // metadata/enrichment lanes.
-        XCTAssertEqual(state.userVersion, 3)
+        XCTAssertEqual(state.userVersion, 4)
         XCTAssertEqual(state.metadataValueCount, 14)
         XCTAssertEqual(state.enrichmentStateCount, 5)
         XCTAssertEqual(state.richLegacyValueCount, 10)
@@ -264,7 +264,7 @@ final class ShareCatalogStoreTests: XCTestCase {
             "f:Movies/Exhausted.mkv",
             "f:Movies/Retry.mkv"
         ])
-        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 3)
+        XCTAssertEqual(try queryMigrationState(at: url).userVersion, 4)
     }
 
     func testPartiallyMigratedCatalogDecodesValidProvenanceAndInfersMissingEntries() async throws {

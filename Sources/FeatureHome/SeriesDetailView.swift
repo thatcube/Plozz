@@ -565,6 +565,11 @@ struct SeriesDetailView: View {
                         relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
                         relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
                         onSelectRelated: onSelectRelated,
+                        extrasState: viewModel.extrasState,
+                        onSelectExtra: { onPlay($0.playbackItem) },
+                        onRetryExtras: {
+                            Task { await viewModel.retryExtras() }
+                        },
                         spoilerSettings: spoilerSettings
                     )
                         // A real layout gap, not a transform: it has to be

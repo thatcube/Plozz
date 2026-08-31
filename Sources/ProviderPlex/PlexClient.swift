@@ -387,9 +387,18 @@ public struct PlexClient: Sendable {
     /// `GET /library/metadata/{ratingKey}/extras` — trailers and other extras
     /// (behind-the-scenes, deleted scenes, …) attached to an item. Each extra is
     /// a `clip` with its own ratingKey that streams through the normal playback
-    /// path. Callers filter by `subtype` to keep only trailers.
-    func extras(ratingKey: String) async throws -> [PlexMetadata] {
-        let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)/extras", headers: headers)
+    /// path.
+    func extras(
+        ratingKey: String,
+        includeExternalMedia: Bool = true
+    ) async throws -> [PlexMetadata] {
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)/extras",
+            queryItems: includeExternalMedia
+                ? []
+                : [URLQueryItem(name: "includeExternalMedia", value: "0")],
+            headers: headers
+        )
         return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }

@@ -51,6 +51,10 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     /// Optional per-item trailers for `trailers(of:)`. Inherits the protocol's
     /// empty default when `nil`.
     var trailersByItem: [String: [MediaItem]]?
+    var extrasByItem: [String: [MediaExtra]]?
+    var extrasErrorsByItem: [String: AppError]?
+    private var _extrasCallCount: [String: Int] = [:]
+    var extrasCallCount: [String: Int] { withLock { _extrasCallCount } }
     /// Optional per-item async gate that runs before `item(id:)` returns.
     var itemGate: [String: @Sendable () async -> Void]?
     /// Optional start index at which `items(in:page:)` throws once.
@@ -162,6 +166,15 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     func trailers(for itemID: String) async throws -> [MediaItem] {
         guard let trailersByItem else { return [] }
         return trailersByItem[itemID] ?? []
+    }
+
+    func extras(for itemID: String) async throws -> [MediaExtra] {
+        withLock { _extrasCallCount[itemID, default: 0] += 1 }
+        if let error = extrasErrorsByItem?[itemID] {
+            throw error
+        }
+        guard let extrasByItem else { return [] }
+        return extrasByItem[itemID] ?? []
     }
 
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {

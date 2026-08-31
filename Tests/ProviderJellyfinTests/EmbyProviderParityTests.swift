@@ -40,6 +40,22 @@ final class EmbyProviderParityTests: XCTestCase {
         XCTAssertTrue(provider.kind.usesMediaBrowserAPI)
     }
 
+    func testEmbyUsesMediaBrowserExtrasRoutesAndMapping() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/movie1/LocalTrailers", json: "[]")
+        stub.stub(pathSuffix: "/Items/movie1/SpecialFeatures", json: """
+        [{"Id":"extra1","Name":"Deleted Scene","Type":"Video","ExtraType":"DeletedScene"}]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let extras = try await provider.extras(for: "movie1")
+
+        XCTAssertEqual(extras.map(\.item.id), ["extra1"])
+        XCTAssertEqual(extras.map(\.kind), [.deletedScene])
+        XCTAssertEqual(provider.kind, .emby)
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Users/u1/Items/movie1/SpecialFeatures") })
+    }
+
     func testEmbyMapsChapterMarkersToIntroAndCreditsSegments() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/episode1", json: """

@@ -39,7 +39,7 @@ struct ShareWatchStateService: Sendable {
             break
         }
         let records = await records(for: [item.id])
-        let canonicalID = await catalog().canonicalItemID(item.id)
+        let canonicalID = await watchItemID(for: item.id)
         let record = records[canonicalID]
         return Self.stamped(item, with: record)
     }
@@ -60,7 +60,7 @@ struct ShareWatchStateService: Sendable {
             case .folder, .collection, .series, .season:
                 stamped.append(item)
             default:
-                let canonical = await catalog.canonicalItemID(item.id)
+                let canonical = await watchItemID(for: item.id, catalog: catalog)
                 stamped.append(Self.stamped(item, with: records[canonical]))
             }
         }
@@ -158,6 +158,9 @@ struct ShareWatchStateService: Sendable {
         let catalog = await self.catalog()
         var result: [String: ShareWatchStore.Record] = [:]
         for (id, record) in snapshot {
+            if ShareExtraDiscoveryPolicy.isRecognizedExtraItemID(id) {
+                continue
+            }
             let canonical = await catalog.canonicalItemID(id)
             if let existing = result[canonical], existing.updatedAt >= record.updatedAt {
                 continue
@@ -172,7 +175,12 @@ struct ShareWatchStateService: Sendable {
     /// dictionary lookups for that small set.
     func records(for itemIDs: [String]) async -> [String: ShareWatchStore.Record] {
         let catalog = await self.catalog()
-        let aliases = await catalog.watchStateAliases(for: itemIDs)
+        var aliases = await catalog.watchStateAliases(for: itemIDs)
+        for id in itemIDs {
+            if ShareExtraDiscoveryPolicy.isRecognizedExtraItemID(id) {
+                aliases[id] = id
+            }
+        }
         let stored = await watchStore.records(for: aliases.keys)
         var result: [String: ShareWatchStore.Record] = [:]
         for (storedID, canonicalID) in aliases {
@@ -194,9 +202,10 @@ struct ShareWatchStateService: Sendable {
         // supersedes it and clears the resume, so a fully-watched title doesn't
         // linger in Continue Watching.
         PlozzLog.playback.info("share.reportPlayback event=\(String(describing: event)) item=\(progress.itemID) pos=\(Int(progress.positionSeconds)) account=\(accountID)")
+        guard await mayPersistWatchState(for: progress.itemID) else { return }
         switch event {
         case .progress, .pause, .stop:
-            let id = await catalog().canonicalItemID(progress.itemID)
+            let id = await watchItemID(for: progress.itemID)
             await watchStore.setResume(progress.positionSeconds, itemID: id, capturedAt: Date(), duration: progress.durationSeconds)
         case .start, .unpause:
             break
@@ -204,14 +213,37 @@ struct ShareWatchStateService: Sendable {
     }
 
     func setPlayed(_ played: Bool, itemID: String, capturedAt: Date) async {
-        await watchStore.setPlayed(played, itemID: await catalog().canonicalItemID(itemID), capturedAt: capturedAt)
+        guard await mayPersistWatchState(for: itemID) else { return }
+        await watchStore.setPlayed(played, itemID: await watchItemID(for: itemID), capturedAt: capturedAt)
     }
 
     func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date) async {
-        await watchStore.setResume(seconds, itemID: await catalog().canonicalItemID(itemID), capturedAt: capturedAt)
+        guard await mayPersistWatchState(for: itemID) else { return }
+        await watchStore.setResume(seconds, itemID: await watchItemID(for: itemID), capturedAt: capturedAt)
     }
 
     func dismissFromContinueWatching(itemID: String, at date: Date = Date()) async {
-        await watchStore.dismissFromContinueWatching(itemID: await catalog().canonicalItemID(itemID), at: date)
+        guard await mayPersistWatchState(for: itemID) else { return }
+        await watchStore.dismissFromContinueWatching(itemID: await watchItemID(for: itemID), at: date)
+    }
+
+    private func mayPersistWatchState(for itemID: String) async -> Bool {
+        let stored = await catalog().extraResumeBehavior(fileID: itemID)
+        return stored
+            ?? ShareExtraDiscoveryPolicy.resumeBehavior(forItemID: itemID)
+            ?? true
+    }
+
+    private func watchItemID(for itemID: String) async -> String {
+        let catalog = await self.catalog()
+        return await watchItemID(for: itemID, catalog: catalog)
+    }
+
+    private func watchItemID(
+        for itemID: String,
+        catalog: any ShareCatalogReading
+    ) async -> String {
+        if ShareExtraDiscoveryPolicy.isRecognizedExtraItemID(itemID) { return itemID }
+        return await catalog.canonicalItemID(itemID)
     }
 }

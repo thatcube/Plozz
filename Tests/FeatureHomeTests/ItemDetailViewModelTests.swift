@@ -1148,6 +1148,139 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertFalse(vm.trailers.first?.isYouTubeTrailer ?? true)
     }
 
+    func testSeriesExtrasAggregateShowAndSeasonsWithoutCrawlingEpisodes() async {
+        let show = series("show")
+        let firstSeason = season("s1", "Season 1")
+        let secondSeason = season("s2", "Season 2")
+        let provider = FakeMediaProvider(allItems: [show, firstSeason, secondSeason])
+        provider.childrenByParent = ["show": [firstSeason, secondSeason]]
+        provider.extrasByItem = [
+            "show": [
+                MediaExtra(
+                    item: MediaItem(id: "show-extra", title: "Retrospective", kind: .video),
+                    kind: .interview
+                )
+            ],
+            "s1": [
+                MediaExtra(
+                    item: MediaItem(id: "season-extra", title: "Gag Reel", kind: .video),
+                    kind: .behindTheScenes
+                )
+            ]
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "show",
+            sourceAccountID: "acct-9",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+
+        let extras = try? XCTUnwrap(vm.extrasState.value)
+        XCTAssertEqual(extras?.map(\.item.id), ["season-extra", "show-extra"])
+        XCTAssertEqual(extras?.map(\.item.sourceAccountID), ["acct-9", "acct-9"])
+        XCTAssertEqual(extras?.first(where: { $0.item.id == "show-extra" })?.owner?.kind, .series)
+        XCTAssertEqual(extras?.first(where: { $0.item.id == "season-extra" })?.owner?.kind, .season)
+        XCTAssertNil(provider.childrenCallCount["s1"])
+        XCTAssertNil(provider.childrenCallCount["s2"])
+    }
+
+    func testSeriesExtrasKeepPartialResultsWhenOneOwnerFails() async {
+        let show = series("show")
+        let firstSeason = season("s1", "Season 1")
+        let provider = FakeMediaProvider(allItems: [show, firstSeason])
+        provider.childrenByParent = ["show": [firstSeason]]
+        provider.extrasByItem = [
+            "s1": [
+                MediaExtra(
+                    item: MediaItem(id: "season-extra", title: "Making Of", kind: .video),
+                    kind: .featurette
+                )
+            ]
+        ]
+        provider.extrasErrorsByItem = ["show": .serverUnreachable]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "show",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.extrasState.value?.map(\.item.id), ["season-extra"])
+    }
+
+    func testRetryExtrasRecoversAfterFailure() async {
+        let movie = MediaItem(id: "movie", title: "Movie", kind: .movie)
+        let provider = FakeMediaProvider(allItems: [movie])
+        provider.extrasErrorsByItem = ["movie": .serverUnreachable]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+        guard case .failed(.serverUnreachable) = vm.extrasState else {
+            return XCTFail("Expected an extras failure")
+        }
+
+        provider.extrasErrorsByItem = nil
+        provider.extrasByItem = [
+            "movie": [
+                MediaExtra(
+                    item: MediaItem(id: "extra", title: "Deleted Scene", kind: .video),
+                    kind: .deletedScene
+                )
+            ]
+        ]
+        await vm.retryExtras()
+
+        XCTAssertEqual(vm.extrasState.value?.map(\.item.id), ["extra"])
+        XCTAssertEqual(provider.extrasCallCount["movie"], 2)
+    }
+
+    func testWatchedStateMutationUpdatesLoadedExtraInPlace() async {
+        let movie = MediaItem(id: "movie", title: "Movie", kind: .movie)
+        let provider = FakeMediaProvider(allItems: [movie])
+        provider.extrasByItem = [
+            "movie": [
+                MediaExtra(
+                    item: MediaItem(id: "extra", title: "Featurette", kind: .video),
+                    kind: .featurette
+                )
+            ]
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "movie",
+            sourceAccountID: "plex",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+        await vm.load()
+
+        vm.applyWatchedState(
+            MediaItemMutation(
+                itemIDs: ["extra"],
+                scopedItemIDs: ["plex:extra"],
+                resumePosition: 42,
+                playedPercentage: 0.25
+            )
+        )
+
+        XCTAssertEqual(vm.extrasState.value?.first?.item.resumePosition, 42)
+        XCTAssertEqual(vm.extrasState.value?.first?.item.playedPercentage, 0.25)
+    }
+
     func testFallsBackToOnlineTrailerWhenNoLocal() async {
         let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
         // No local trailers configured → online fallback is used.
@@ -1741,6 +1874,20 @@ final class ItemDetailViewModelTests: XCTestCase {
             "a-s1": [episode("a-e1", number: 1)],
             "b-s1": [episode("b-e1", number: 1)],
         ]
+        provider.extrasByItem = [
+            "showA": [
+                MediaExtra(
+                    item: MediaItem(id: "a-extra", title: "A Extra", kind: .video),
+                    kind: .featurette
+                )
+            ],
+            "showB": [
+                MediaExtra(
+                    item: MediaItem(id: "b-extra", title: "B Extra", kind: .video),
+                    kind: .interview
+                )
+            ]
+        ]
         let sources = [
             MediaSourceRef(accountID: "jelly", itemID: "showA"),
             MediaSourceRef(accountID: "plex", itemID: "showB"),
@@ -1754,6 +1901,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         await vm.load()
         XCTAssertEqual(vm.state.value?.item.id, "showA")
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["a-s1"])
+        XCTAssertEqual(vm.extrasState.value?.map(\.item.id), ["a-extra"])
 
         await vm.switchToSource(accountID: "plex")
 
@@ -1761,6 +1909,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["b-s1"], "Reloads the new server's seasons")
         XCTAssertEqual(vm.state.value?.item.sourceAccountID, "plex", "Hero tagged with the new active account")
         XCTAssertEqual(Set(vm.sources.map(\.accountID)), ["jelly", "plex"], "Cross-server picker stays intact")
+        XCTAssertEqual(vm.extrasState.value?.map(\.item.id), ["b-extra"])
 
         await vm.loadEpisodes(for: "a-s1")
         XCTAssertNil(provider.childrenCallCount["a-s1"], "An obsolete season id must not reach the replacement source")

@@ -391,6 +391,60 @@ public struct JellyfinProvider: MediaProvider {
         return local + remote
     }
 
+    public func extras(for itemID: String) async throws -> [MediaExtra] {
+        @Sendable func capture(
+            _ operation: @escaping @Sendable () async throws -> [BaseItemDto]
+        ) async -> Result<[BaseItemDto], AppError> {
+            do {
+                return .success(try await operation())
+            } catch let error as AppError {
+                return .failure(error)
+            } catch is CancellationError {
+                return .failure(.cancelled)
+            } catch {
+                return .failure(.unknown(String(describing: error)))
+            }
+        }
+
+        async let trailersResult = capture {
+            try await client.localTrailers(userID: session.userID, id: itemID)
+        }
+        async let featuresResult = capture {
+            try await client.specialFeatures(userID: session.userID, id: itemID)
+        }
+        let (resolvedTrailers, resolvedFeatures) = await (trailersResult, featuresResult)
+        if case let .failure(trailersError) = resolvedTrailers,
+           case .failure = resolvedFeatures {
+            throw trailersError
+        }
+        let trailers = (try? resolvedTrailers.get()) ?? []
+        let features = (try? resolvedFeatures.get()) ?? []
+        let localTrailers = trailers.map { dto in
+            MediaExtra(
+                item: map(item: dto),
+                kind: .trailer,
+                rawProviderType: dto.ExtraType ?? "Trailer",
+                supportsResume: dto.SupportsResume ?? true
+            )
+        }
+        let specialFeatures = features
+            .filter { dto in
+                dto.`Type`?.caseInsensitiveCompare("Audio") != .orderedSame
+                    && dto.MediaType?.caseInsensitiveCompare("Audio") != .orderedSame
+            }
+            .map { dto in
+            let rawType = dto.ExtraType ?? dto.`Type`
+            let extraKind = MediaExtraKind(rawProviderValue: rawType)
+            return MediaExtra(
+                item: map(item: dto),
+                kind: extraKind,
+                rawProviderType: rawType,
+                supportsResume: dto.SupportsResume ?? true
+            )
+        }
+        return MediaExtra.ordered(localTrailers + specialFeatures)
+    }
+
     public func themeMusic(for itemID: String) async throws -> ThemeMusic? {
         if let song = try? await client.themeSongs(userID: session.userID, id: itemID).Items.first,
            !song.Id.isEmpty {
@@ -1976,7 +2030,7 @@ public struct JellyfinProvider: MediaProvider {
         case "Series": return .series
         case "Season": return .season
         case "Episode": return .episode
-        case "Video": return .video
+        case "Video", "Trailer", "Audio": return .video
         case "CollectionFolder", "Folder": return .folder
         case "BoxSet": return .collection
         default: return .unknown

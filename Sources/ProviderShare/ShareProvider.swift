@@ -169,6 +169,7 @@ public struct ShareProvider: MediaProvider {
         let resumable = byCanonical.filter {
             !$0.value.played
                 && $0.value.position > 1
+                && !ShareExtraDiscoveryPolicy.isRecognizedExtraItemID($0.key)
                 // Taken off the row deliberately. The position is deliberately still
                 // here, so playing it again resumes rather than restarts.
                 && !$0.value.isDismissedFromContinueWatching
@@ -234,6 +235,13 @@ public struct ShareProvider: MediaProvider {
     public func item(id: String) async throws -> MediaItem {
         // Indexed items (movies/series/seasons/episodes) resolve from the catalog;
         // raw file-tree ids (`share:root`, `d:`) fall back to the live browser.
+        if let extra = await catalog.extra(fileID: id) {
+            var stamped = extra
+            stamped.item = extra.supportsResume
+                ? await watchState.stamp(extra.item)
+                : extra.playbackItem
+            return stamped.item
+        }
         if let indexed = await catalog.item(id: id) {
             // A user just opened this — fast-track its enrichment ahead of the
             // background backlog so its hero/poster/overview persist promptly. Fire-
@@ -249,6 +257,28 @@ public struct ShareProvider: MediaProvider {
             throw AppError.unknown("Item not found on share: \(id)")
         }
         return await watchState.stamp(item)
+    }
+
+    public func trailers(for itemID: String) async throws -> [MediaItem] {
+        try await extras(for: itemID)
+            .filter { $0.kind == .trailer }
+            .map(\.playbackItem)
+    }
+
+    public func extras(for itemID: String) async throws -> [MediaExtra] {
+        let catalog = await self.catalog
+        let ownerID = await catalog.canonicalItemID(itemID)
+        let stored = await catalog.extras(ownerID: ownerID)
+        var result: [MediaExtra] = []
+        result.reserveCapacity(stored.count)
+        for extra in stored {
+            var copy = extra
+            copy.item = extra.supportsResume
+                ? await watchState.stamp(extra.item)
+                : extra.playbackItem
+            result.append(copy)
+        }
+        return MediaExtra.ordered(result)
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {
@@ -334,10 +364,17 @@ public struct ShareProvider: MediaProvider {
     /// `f:<rel>` (raw browser / episode) plays directly.
     public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
         let catalog = await self.catalog
-        let canonicalItemID = await catalog.canonicalItemID(itemID)
+        let storedExtra = await catalog.extra(fileID: itemID)
+        let isExtra = storedExtra != nil
+            || ShareExtraDiscoveryPolicy.isRecognizedExtraItemID(itemID)
+        let canonicalItemID = isExtra ? itemID : await catalog.canonicalItemID(itemID)
         let relPath: String
         if let ms = mediaSourceID, !ms.isEmpty {
             relPath = ms
+        } else if isExtra, let path = await store.path(forItemID: itemID) {
+            // Extras deliberately retain their ordinary `f:` address even if an old
+            // pre-migration movie alias exists for that path.
+            relPath = path
         } else if ShareCatalogID.relPath(forFileID: itemID) != nil,
                   await catalog.containsFileAsset(id: itemID),
                   let path = await store.path(forItemID: itemID) {
@@ -359,7 +396,12 @@ public struct ShareProvider: MediaProvider {
         // watched before version grouping still resumes after the upgrade.
         let records = await watchState.records(for: [canonicalItemID])
         let record = records[canonicalItemID]
-        let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
+        let storedExtraResume = await catalog.extraResumeBehavior(fileID: canonicalItemID)
+        let extraResume = storedExtraResume
+            ?? ShareExtraDiscoveryPolicy.resumeBehavior(forItemID: canonicalItemID)
+        let startPosition = extraResume == false || record?.played == true
+            ? 0
+            : (record?.position ?? 0)
         var playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
         let probedFacts = await streamProbeCache.completedFacts(for: locator)
         let selectedFileSize = item.versions.first(where: { $0.id == relPath })?.sizeBytes
@@ -394,7 +436,10 @@ public struct ShareProvider: MediaProvider {
         // Surface any text sidecar subtitles sitting next to the video (and in a
         // sibling Subs/Subtitles folder) as selectable tracks. Best-effort: a
         // listing/read failure just yields no sidecars rather than blocking play.
-        let subtitleTracks = (try? await playbackSource.discoverSidecarSubtitles(forVideoRelPath: relPath)) ?? []
+        let subtitleTracks = (try? await playbackSource.discoverSidecarSubtitles(
+            forVideoRelPath: relPath,
+            exactStemOnly: isExtra
+        )) ?? []
         return PlaybackRequest(
             item: playItem,
             playbackSource: .networkFile(locator),

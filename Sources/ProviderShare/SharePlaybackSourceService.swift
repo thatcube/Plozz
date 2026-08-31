@@ -73,7 +73,10 @@ struct SharePlaybackSourceService: Sendable {
     /// serial (the SMB session is single-connection) and lazy-small (sidecars are
     /// tiny). Cleans up its temp dir on player teardown is handled by the OS temp
     /// reaper; files are namespaced per item so replays reuse them within a run.
-    func discoverSidecarSubtitles(forVideoRelPath relPath: String) async throws -> [MediaTrack] {
+    func discoverSidecarSubtitles(
+        forVideoRelPath relPath: String,
+        exactStemOnly: Bool = false
+    ) async throws -> [MediaTrack] {
         let dir = (relPath as NSString).deletingLastPathComponent
         let videoStem = ShareMediaParser.videoStem((relPath as NSString).lastPathComponent)
 
@@ -105,7 +108,14 @@ struct SharePlaybackSourceService: Sendable {
 
         for (candidateDir, name, dedicated) in candidates {
             guard let sidecar = ShareMediaParser.parseSidecar(name) else { continue }
-            guard Self.sidecarMatchesVideo(sidecarStem: sidecar.stem, videoStem: videoStem, dedicatedFolder: dedicated) else { continue }
+            let matches = exactStemOnly
+                ? sidecar.stem.caseInsensitiveCompare(videoStem) == .orderedSame
+                : Self.sidecarMatchesVideo(
+                    sidecarStem: sidecar.stem,
+                    videoStem: videoStem,
+                    dedicatedFolder: dedicated
+                )
+            guard matches else { continue }
 
             let relSidecar = candidateDir.isEmpty ? name : "\(candidateDir)/\(name)"
             guard let data = try? await store.readFile(relSidecar), !data.isEmpty else { continue }
@@ -148,7 +158,7 @@ struct SharePlaybackSourceService: Sendable {
     /// folder — conventionally holding a single title's subs — we allow a prefix
     /// match, but only at a separator boundary so `E1` still can't match `E10`.
     static func sidecarMatchesVideo(sidecarStem: String, videoStem: String, dedicatedFolder: Bool) -> Bool {
-        if sidecarStem == videoStem { return true }
+        if sidecarStem.caseInsensitiveCompare(videoStem) == .orderedSame { return true }
         guard dedicatedFolder else { return false }
         return isPrefixAtBoundary(sidecarStem, of: videoStem)
             || isPrefixAtBoundary(videoStem, of: sidecarStem)

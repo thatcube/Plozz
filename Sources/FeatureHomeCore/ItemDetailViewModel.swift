@@ -59,6 +59,10 @@ public final class ItemDetailViewModel {
     /// detail's owning account so it routes back to the right provider.
     public private(set) var trailers: [MediaItem] = []
 
+    /// Local, playable extras for the active source. Loaded independently from
+    /// the detail so missing or unavailable bonus material never blocks the page.
+    public private(set) var extrasState: LoadState<[MediaExtra]> = .idle
+
     /// Episodes for each season of a series, loaded lazily the first time a
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
@@ -719,6 +723,7 @@ public final class ItemDetailViewModel {
                 // load() on navigate-away; heavy trailer extraction is dwell-gated.
                 await runTrailersAndRatings(
                     for: item,
+                    children: fetchedChildren,
                     provider: loadProvider,
                     sourceGeneration: loadSourceGeneration
                 )
@@ -751,6 +756,7 @@ public final class ItemDetailViewModel {
                 loadRelatedTitles(for: taggedItem)
                 await runTrailersAndRatings(
                     for: item,
+                    children: [],
                     provider: loadProvider,
                     sourceGeneration: loadSourceGeneration
                 )
@@ -1074,6 +1080,7 @@ public final class ItemDetailViewModel {
     /// so rapid tap-through never pays it.
     private func runTrailersAndRatings(
         for item: MediaItem,
+        children: [MediaItem],
         provider: any MediaProvider,
         sourceGeneration: UInt64
     ) async {
@@ -1090,9 +1097,106 @@ public final class ItemDetailViewModel {
             for: item,
             sourceGeneration: sourceGeneration
         )
+        async let extrasDone: Void = loadExtras(
+            for: item,
+            children: children,
+            provider: provider,
+            sourceGeneration: sourceGeneration
+        )
         _ = await trailersDone
         _ = await ratingsDone
         _ = await overviewDone
+        _ = await extrasDone
+    }
+
+    /// Loads the active item's local extras. A series aggregates its own extras
+    /// with season-owned extras, preserving parent/season order without crawling
+    /// every episode. Episode-owned extras are requested only on Episode Info.
+    private func loadExtras(
+        for item: MediaItem,
+        children: [MediaItem],
+        provider: any MediaProvider,
+        sourceGeneration: UInt64
+    ) async {
+        guard !Task.isCancelled, self.sourceGeneration == sourceGeneration else { return }
+        extrasState = .loading
+
+        let owners = [item] + (
+            item.kind == .series
+                ? children.filter { $0.kind == .season }
+                : []
+        )
+        var results: [(Int, Result<[MediaExtra], AppError>)] = []
+        let indexedOwners = Array(owners.enumerated())
+        for batchStart in stride(from: 0, to: indexedOwners.count, by: 4) {
+            guard !Task.isCancelled else { return }
+            let batchEnd = min(batchStart + 4, indexedOwners.count)
+            let batch = indexedOwners[batchStart..<batchEnd]
+            let batchResults = await withTaskGroup(
+                of: (Int, Result<[MediaExtra], AppError>).self,
+                returning: [(Int, Result<[MediaExtra], AppError>)].self
+            ) { group in
+                for (index, owner) in batch {
+                    group.addTask {
+                        do {
+                            return (
+                                index,
+                                .success(
+                                    try await provider.extras(for: owner.id)
+                                        .map { $0.attaching(to: owner) }
+                                )
+                            )
+                        } catch let error as AppError {
+                            return (index, .failure(error))
+                        } catch is CancellationError {
+                            return (index, .failure(.cancelled))
+                        } catch {
+                            return (index, .failure(.unknown(String(describing: error))))
+                        }
+                    }
+                }
+                var collected: [(Int, Result<[MediaExtra], AppError>)] = []
+                for await result in group {
+                    collected.append(result)
+                }
+                return collected
+            }
+            results.append(contentsOf: batchResults)
+        }
+        results.sort { $0.0 < $1.0 }
+
+        guard !Task.isCancelled, isStillLoaded(item, sourceGeneration: sourceGeneration) else {
+            return
+        }
+
+        let loaded = results.flatMap { _, result -> [MediaExtra] in
+            guard case let .success(extras) = result else { return [] }
+            return extras
+        }
+        if !loaded.isEmpty {
+            let tagged = loaded.map { extra in
+                guard let activeSourceAccountID else { return extra }
+                return extra.taggingSource(activeSourceAccountID)
+            }
+            extrasState = .loaded(MediaExtra.ordered(tagged))
+        } else if let failure = results.compactMap({ _, result -> AppError? in
+            guard case let .failure(error) = result, error != .cancelled else { return nil }
+            return error
+        }).first {
+            extrasState = .failed(failure)
+        } else {
+            extrasState = .empty
+        }
+    }
+
+    public func retryExtras() async {
+        guard let detail = state.value else { return }
+        await loadExtras(
+            for: detail.item,
+            children: detail.children,
+            provider: activeProvider,
+            sourceGeneration: sourceGeneration
+        )
     }
 
     /// Cancels ALL off-critical-path enrichment (trailers, ratings, cross-server
@@ -1357,6 +1461,13 @@ public final class ItemDetailViewModel {
                 return updated
             }
         }
+        if case let .loaded(extras) = extrasState {
+            extrasState = .loaded(extras.map { extra in
+                var copy = extra
+                copy.item = mutation.applied(to: extra.item)
+                return copy
+            })
+        }
     }
 
     /// Quietly re-fetches the detail, its children, and any season episode lists
@@ -1431,6 +1542,19 @@ public final class ItemDetailViewModel {
         guard !Task.isCancelled else { return }
         await enrichRatings(for: item, sourceGeneration: reloadSourceGeneration)
         await enrichOverview(for: item, sourceGeneration: reloadSourceGeneration)
+        async let trailers: Void = loadTrailers(
+            for: item,
+            provider: provider,
+            sourceGeneration: reloadSourceGeneration
+        )
+        async let extras: Void = loadExtras(
+            for: item,
+            children: children,
+            provider: provider,
+            sourceGeneration: reloadSourceGeneration
+        )
+        _ = await trailers
+        _ = await extras
     }
 
     /// Whether the page can switch to `accountID`'s copy of this title in place —
@@ -1487,6 +1611,8 @@ public final class ItemDetailViewModel {
         activeProvider = provider
         activeItemID = source.itemID
         activeSourceAccountID = accountID
+        trailers = []
+        extrasState = .loading
         seasonLoadingResumeSourceGeneration = sourceGeneration
 
         // Drop the old server's per-season episode caches so the rail reloads from

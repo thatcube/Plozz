@@ -29,7 +29,7 @@ final class ShareCatalogDecompositionTests: XCTestCase {
         })
         var version = -1
         conn.query("PRAGMA user_version;") { version = Int(CatalogConnection.columnDouble($0, 0)) }
-        XCTAssertEqual(version, 3, "Step 4 local-artwork migration must reach schema version 3")
+        XCTAssertEqual(version, 4, "extras migration must reach schema version 4")
 
         // A brand-new connection over the same file sees the committed row.
         let reopened = CatalogConnection(url: url)

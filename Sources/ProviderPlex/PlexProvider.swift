@@ -495,9 +495,38 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     }
 
     public func trailers(for itemID: String) async throws -> [MediaItem] {
-        try await client.extras(ratingKey: itemID)
-            .filter { ($0.subtype ?? "").lowercased() == "trailer" }
-            .map(map(metadata:))
+        let trailers = try await client.extras(ratingKey: itemID)
+            .filter { Self.extraKind(for: $0) == .trailer }
+            .enumerated()
+            .sorted { left, right in
+                let leftLocal = Self.isLocalExtra(left.element)
+                let rightLocal = Self.isLocalExtra(right.element)
+                return leftLocal == rightLocal ? left.offset < right.offset : leftLocal
+            }
+        guard trailers.count > 1,
+              let parent = try? await client.metadata(ratingKey: itemID)
+        else { return trailers.map { map(metadata: $0.element) } }
+        guard let primary = Self.ratingKey(fromPrimaryExtraKey: parent.primaryExtraKey),
+              let preferred = trailers.first(where: { $0.element.ratingKey == primary })
+        else { return trailers.map { map(metadata: $0.element) } }
+        return [map(metadata: preferred.element)]
+            + trailers
+                .filter { $0.element.ratingKey != primary }
+                .map { map(metadata: $0.element) }
+    }
+
+    public func extras(for itemID: String) async throws -> [MediaExtra] {
+        try await client.extras(ratingKey: itemID, includeExternalMedia: false)
+            .filter(Self.isLocalExtra)
+            .map { dto in
+                let rawType = dto.subtype ?? dto.extraType.map(String.init)
+                return MediaExtra(
+                    item: map(metadata: dto),
+                    kind: Self.extraKind(for: dto),
+                    rawProviderType: rawType,
+                    supportsResume: true
+                )
+            }
     }
 
     public func themeMusic(for itemID: String) async throws -> ThemeMusic? {
@@ -2174,6 +2203,45 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         case "collection": return .collection
         default: return .unknown
         }
+    }
+
+    private static func isLocalExtra(_ dto: PlexMetadata) -> Bool {
+        guard dto.type == "clip" || dto.type == "video",
+              dto.ratingKey?.isEmpty == false,
+              dto.Media?.contains(where: { media in
+                  media.Part?.contains(where: { $0.file?.isEmpty == false }) == true
+              }) == true
+        else { return false }
+        let guid = dto.guid?.lowercased() ?? ""
+        guard !guid.hasPrefix("iva://"), !guid.hasPrefix("provider://") else {
+            return false
+        }
+        return dto.Media?.flatMap { $0.Part ?? [] }.contains(where: {
+            $0.key?.lowercased().hasPrefix("/services/iva/") == true
+        }) != true
+    }
+
+    private static func extraKind(for dto: PlexMetadata) -> MediaExtraKind {
+        if let subtype = dto.subtype {
+            return MediaExtraKind(rawProviderValue: subtype)
+        }
+        switch dto.extraType {
+        case 1: return .trailer
+        case 2: return .deletedScene
+        case 3: return .interview
+        case 5: return .behindTheScenes
+        case 6: return .scene
+        case 10: return .featurette
+        case 11: return .short
+        default: return .unknown
+        }
+    }
+
+    private static func ratingKey(fromPrimaryExtraKey key: String?) -> String? {
+        guard let key = key?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !key.isEmpty
+        else { return nil }
+        return key.split(separator: "/").last.map(String.init)
     }
 
     private static func kind(forSectionType type: String?) -> MediaItemKind {

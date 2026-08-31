@@ -86,6 +86,12 @@ struct BaseItemDto: Decodable {
     /// differs from the localised `Name`. Requested via `Fields=OriginalTitle`.
     let OriginalTitle: String?
     let `Type`: String?
+    /// Open-ended server classification for local bonus material.
+    let ExtraType: String?
+    let LocationType: String?
+    let MediaType: String?
+    /// Provider-native playback capability for this item.
+    let SupportsResume: Bool?
     let CollectionType: String?
     let Overview: String?
     let SeriesName: String?

@@ -123,6 +123,10 @@ struct PlexMetadata: Decodable {
     let type: String?          // "movie", "show", "season", "episode", "clip"
     /// For extras/clips, the kind of extra, e.g. "trailer", "behindTheScenes".
     let subtype: String?
+    /// Legacy numeric classifier used when `subtype` is absent.
+    @LenientInt var extraType: Int?
+    /// Plex's preferred trailer/extra rating key for the parent item.
+    let primaryExtraKey: String?
     let title: String?  // l10n:content — server-supplied media item title
     /// Original-language title (`originalTitle`), present when distinct from the
     /// localised `title`. Used as an extra cross-server discovery query.

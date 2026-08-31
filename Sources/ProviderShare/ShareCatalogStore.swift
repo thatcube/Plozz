@@ -46,6 +46,7 @@ actor ShareCatalogStore {
     private var localRepo: LocalMetadataRepository { LocalMetadataRepository(connection: connection) }
     private var artworkRepo: LocalArtworkRepository { LocalArtworkRepository(connection: connection) }
     private var enrichmentRepo: EnrichmentRepository { EnrichmentRepository(connection: connection) }
+    private var extraRepo: ShareExtraRepository { ShareExtraRepository(connection: connection) }
     /// Pure, transaction-free read-query composition over the same actor-confined
     /// connection. A cheap value type constructed on demand; it holds no state of its
     /// own, opens no transaction, and only runs while the store's actor is executing.
@@ -262,6 +263,33 @@ actor ShareCatalogStore {
             PlozzLog.boot(
                 "share.catalog slow upsert files=\(assets.count) total=\(Int(Date().timeIntervalSince(started) * 1_000))ms maxChunk=\(slowestChunkMs)ms"
             )
+        }
+    }
+
+    /// Persist bonus-video inventory independently from catalog assets. Unresolved
+    /// owner candidates remain invisible and are retained only until a clean scan
+    /// has enough topology to prove their owner.
+    func upsertExtras(
+        _ extras: [CatalogExtraCandidate],
+        scanID: Int64,
+        scanGeneration: UUID? = nil
+    ) {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil, !extras.isEmpty else { return }
+        if !extraRepo.upsert(extras, scanID: scanID) {
+            PlozzLog.boot("share.catalog extras upsert failed count=\(extras.count)")
+        }
+    }
+
+    /// A partial pass never prunes, but may safely expose newly found extras whose
+    /// owner is already proven by persisted asset topology.
+    func resolveExtraOwners(scanGeneration: UUID? = nil) {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil else { return }
+        guard extraRepo.resolveOwners(deleteUnresolved: false),
+              extraRepo.removeResolvedAssetRows() else {
+            PlozzLog.boot("share.catalog extras partial reconciliation failed")
+            return
         }
     }
 
@@ -1298,10 +1326,14 @@ actor ShareCatalogStore {
     /// not treated as a change here. Its row is updated by the upsert either way,
     /// and everything the reconciliation derives — grouping, series keys,
     /// projections — comes from the path, which did not move.
-    func isMateriallyUnchanged(inScan scanID: Int64, priorAssetCount: Int) -> Bool {
+    func isMateriallyUnchanged(
+        inScan scanID: Int64,
+        priorAssetCount: Int,
+        priorExtraCount: Int
+    ) -> Bool {
         ensureOpen()
         guard db != nil else { return false }
-        for table in ["assets", "local_metadata_files", "local_artwork_files", "dir_state"] {
+        for table in ["assets", "extras", "local_metadata_files", "local_artwork_files", "dir_state"] {
             var stale = 0
             query(
                 "SELECT COUNT(*) FROM \(table) WHERE last_scan <> ?;",
@@ -1315,7 +1347,7 @@ actor ShareCatalogStore {
         query("SELECT COUNT(*) FROM assets;") { stmt in
             total = Int(sqlite3_column_int64(stmt, 0))
         }
-        return total == priorAssetCount
+        return total == priorAssetCount && extraRepo.count() == priorExtraCount
     }
 
     func finalizeCleanScan(
@@ -1341,6 +1373,11 @@ actor ShareCatalogStore {
         // resolution below reads the group representative, so this must precede it.
         guard scanWriter.regroupMoviesInTransaction(),
               failurePoint != .afterMovieRegroup else { return rollback() }
+
+        // Extras are scan-scoped but never assets. Resolve them only after movie
+        // grouping is stable so owner ids use the same canonical movie key as detail
+        // and playback; unresolved candidates are discarded rather than guessed.
+        guard extraRepo.finalizeCleanScan(scanID: scanID) else { return rollback() }
 
         // P3 — Delete orphan enrichment/metadata rows for every item id whose
         // backing asset just vanished (derived live ids via NOT EXISTS).
@@ -2414,6 +2451,26 @@ actor ShareCatalogStore {
         ensureOpen(); return readQueries.containsFileAsset(id: id)
     }
 
+    func extras(ownerID: String) async -> [MediaExtra] {
+        ensureOpen()
+        return extraRepo.extras(ownerID: ownerID)
+    }
+
+    func extra(fileID: String) async -> MediaExtra? {
+        ensureOpen()
+        return extraRepo.extra(fileID: fileID)
+    }
+
+    func extraResumeBehavior(fileID: String) async -> Bool? {
+        ensureOpen()
+        return extraRepo.extra(fileID: fileID)?.supportsResume
+    }
+
+    func extraCount() -> Int {
+        ensureOpen()
+        return extraRepo.count()
+    }
+
     // MARK: - Small SQLite helpers
     //
     // Thin forwarders onto the actor-confined `CatalogConnection`, kept so the store's
@@ -2556,13 +2613,21 @@ extension ShareCatalogStore {
         // SQLite has no `dirname`, and doing it here keeps the whole set to one
         // scan instead of shipping every row's path back to be parsed.
         query("""
-        SELECT DISTINCT rtrim(rel_path, replace(rel_path, '/', '')) FROM assets;
+        SELECT DISTINCT parent_dir FROM (
+          SELECT rtrim(rel_path, replace(rel_path, '/', '')) AS parent_dir FROM assets
+          UNION ALL
+          SELECT parent_dir FROM extras
+        );
         """) { stmt in
             guard let path = self.columnText(stmt, 0) else { return }
             // A file directly at the share root has no separator, so the trim
             // leaves nothing — that empty string IS the root's own path, which is
             // how `dir_state` spells it too.
-            out.insert(path.isEmpty ? "" : String(path.dropLast()))
+            if path.hasSuffix("/") {
+                out.insert(String(path.dropLast()))
+            } else {
+                out.insert(path)
+            }
         }
         return out
     }
@@ -2603,6 +2668,10 @@ extension ShareCatalogStore {
     }
 
     static let completedDirectoryStateScanKey = "dir_state_complete_scan"
+
+    func invalidateCompletedDirectoryState() {
+        setMeta(Self.completedDirectoryStateScanKey, "")
+    }
 
     /// Mark this scan's directory state as trustworthy. Called only after a clean,
     /// complete pass — the point at which every recorded directory is known to
@@ -2726,7 +2795,7 @@ extension ShareCatalogStore {
             "UPDATE assets SET last_scan=? WHERE substr(rel_path, 1, length(rel_path) - length(basename) - 1) IN (SELECT rel_path FROM skipped_dirs);",
             scanID: scanID
         )
-        for table in ["local_metadata_files", "local_artwork_files"] {
+        for table in ["extras", "local_metadata_files", "local_artwork_files"] {
             stampScan(
                 "UPDATE \(table) SET last_scan=? WHERE parent_dir IN (SELECT rel_path FROM skipped_dirs);",
                 scanID: scanID
@@ -2782,7 +2851,7 @@ extension ShareCatalogStore {
         guard admits(scanGeneration), db != nil else { return }
         // Every table pruned by `last_scan`, kept together so a future scan-scoped
         // table can't be forgotten here (which would delete its rows).
-        for table in ["assets", "local_metadata_files", "local_artwork_files"] {
+        for table in ["assets", "extras", "local_metadata_files", "local_artwork_files"] {
             touchDirectChildren(table: table, relPath: relPath, scanID: scanID)
         }
         var stmt: OpaquePointer?

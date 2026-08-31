@@ -454,7 +454,24 @@ public struct JellyfinClient: Sendable {
     func localTrailers(userID: String, id: String) async throws -> [BaseItemDto] {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)/LocalTrailers",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview")],
+            queryItems: [URLQueryItem(
+                name: "Fields",
+                value: "Overview,MediaStreams,MediaSources,UserData"
+            )],
+            headers: authHeaders
+        )
+        return try await http.decode([BaseItemDto].self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// Local special features attached to a movie, series, season, episode, or
+    /// collection. Jellyfin and Emby return ordinary playable item DTOs.
+    func specialFeatures(userID: String, id: String) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items/\(id)/SpecialFeatures",
+            queryItems: [URLQueryItem(
+                name: "Fields",
+                value: "Overview,MediaStreams,MediaSources,UserData"
+            )],
             headers: authHeaders
         )
         return try await http.decode([BaseItemDto].self, from: endpoint, baseURL: baseURL)

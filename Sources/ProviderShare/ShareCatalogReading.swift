@@ -64,6 +64,15 @@ public protocol ShareCatalogReading: Sendable {
 
     /// Whether a raw file id is a known indexed file asset.
     func containsFileAsset(id: String) async -> Bool
+
+    /// Bonus videos attached to one proven catalog or explicit folder owner.
+    func extras(ownerID: String) async -> [MediaExtra]
+
+    /// One separately inventoried bonus video addressed by its ordinary `f:` id.
+    func extra(fileID: String) async -> MediaExtra?
+
+    /// `nil` for a normal asset, otherwise the extra's resume policy.
+    func extraResumeBehavior(fileID: String) async -> Bool?
 }
 
 /// The concrete SQLite-backed store is the production witness. Its methods are
@@ -74,4 +83,8 @@ extension ShareCatalogStore: ShareCatalogReading {}
 public extension ShareCatalogReading {
     /// Default: no searchable cast.
     func itemsWithPerson(id personID: String?, name: String, limit: Int) async -> [MediaItem] { [] }
+
+    func extras(ownerID: String) async -> [MediaExtra] { [] }
+    func extra(fileID: String) async -> MediaExtra? { nil }
+    func extraResumeBehavior(fileID: String) async -> Bool? { nil }
 }

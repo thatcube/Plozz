@@ -222,7 +222,7 @@ final class ShareLocalArtworkTests: XCTestCase {
     }
 
     func testParserRecognizesCaseInsensitiveConventionsAndRejectsGIF() {
-        XCTAssertEqual(ShareMediaParser.localInventoryVersion, 2)
+        XCTAssertEqual(ShareMediaParser.localInventoryVersion, 3)
         XCTAssertEqual(ShareArtworkNameParser.parse("POSTER-2.EN.JPEG")?.role, .poster)
         XCTAssertEqual(ShareArtworkNameParser.parse("POSTER-2.EN.JPEG")?.numberedAlternative, 2)
         XCTAssertEqual(ShareArtworkNameParser.parse("POSTER-2.EN.JPEG")?.language, "en")

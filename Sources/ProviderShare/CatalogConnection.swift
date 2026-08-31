@@ -28,7 +28,7 @@ final class CatalogConnection {
 
     // MARK: - Open / schema
 
-    /// Idempotently opens the database and migrates its schema to `user_version = 3`
+    /// Idempotently opens the database and migrates its schema to `user_version = 4`
     /// inside one `BEGIN IMMEDIATE` transaction. `legacyMetadataMigration` runs
     /// inside that same transaction at the exact point the original monolithic
     /// `ensureOpen` ran it (after the v1 enrichment schema, before the Step-3 v2
@@ -340,7 +340,34 @@ final class CatalogConnection {
         """)
         apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_associations_item ON local_artwork_associations(item_id, placement, selected_order);")
         apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_associations_path ON local_artwork_associations(artwork_rel_path);")
-        apply("PRAGMA user_version=3;")
+        // Network-share extras are deliberately separate from `assets`: catalog,
+        // Search, Recently Added, and Home queries never see these rows. Owner
+        // columns stay nullable while an interrupted scan is incomplete; the next
+        // clean finalization resolves or removes every uncertain candidate.
+        apply("""
+        CREATE TABLE IF NOT EXISTS extras(
+            canonical_path TEXT PRIMARY KEY,
+            rel_path TEXT NOT NULL,
+            parent_dir TEXT NOT NULL,
+            basename TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            modified_at REAL NOT NULL,
+            last_scan INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            supports_resume INTEGER NOT NULL,
+            owner_path TEXT NOT NULL,
+            owner_file_rel_path TEXT,
+            owner_id TEXT,
+            owner_kind TEXT,
+            owner_title TEXT
+        );
+        """)
+        apply("CREATE UNIQUE INDEX IF NOT EXISTS idx_extras_rel_path ON extras(rel_path);")
+        apply("CREATE INDEX IF NOT EXISTS idx_extras_owner ON extras(owner_id, kind);")
+        apply("CREATE INDEX IF NOT EXISTS idx_extras_parent ON extras(parent_dir);")
+        apply("CREATE INDEX IF NOT EXISTS idx_extras_scan ON extras(last_scan);")
+        apply("PRAGMA user_version=4;")
         // One-shot repair: `attempts` was inflated by a bug, not by real background
         // retries. The fast-track path (an item the user opened) intentionally
         // ignores the retry cap, but it was reached through `ShareProvider.item(id:)`

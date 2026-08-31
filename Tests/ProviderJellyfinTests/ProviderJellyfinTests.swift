@@ -505,6 +505,72 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertTrue(trailers.isEmpty)
     }
 
+    func testExtrasCombineLocalTrailersAndSpecialFeatures() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/m1/LocalTrailers", json: """
+        [{"Id":"t1","Name":"Official Trailer","Type":"Trailer","SupportsResume":false}]
+        """)
+        stub.stub(pathSuffix: "/Items/m1/SpecialFeatures", json: """
+        [
+          {"Id":"f1","Name":"Making Of","Type":"Video","ExtraType":"BehindTheScenes","SupportsResume":true},
+          {"Id":"f2","Name":"Mystery","Type":"Video","ExtraType":"FutureType"}
+        ]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let extras = try await provider.extras(for: "m1")
+
+        XCTAssertEqual(extras.map(\.item.id), ["t1", "f1", "f2"])
+        XCTAssertEqual(extras.map(\.kind), [.trailer, .behindTheScenes, .unknown])
+        XCTAssertEqual(extras.map(\.supportsResume), [false, true, true])
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Users/u1/Items/m1/SpecialFeatures") })
+    }
+
+    func testExtrasKeepSpecialFeaturesWhenLocalTrailersEndpointFails() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/m1/LocalTrailers", json: "{}", status: 404)
+        stub.stub(pathSuffix: "/Items/m1/SpecialFeatures", json: """
+        [{"Id":"f1","Name":"Making Of","Type":"Video","ExtraType":"Featurette"}]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let extras = try await provider.extras(for: "m1")
+
+        XCTAssertEqual(extras.map(\.item.id), ["f1"])
+        XCTAssertEqual(extras.map(\.kind), [.featurette])
+    }
+
+    func testExtrasExcludeAudioOnlySpecialFeatures() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/m1/LocalTrailers", json: "[]")
+        stub.stub(pathSuffix: "/Items/m1/SpecialFeatures", json: """
+        [
+          {"Id":"a1","Name":"Commentary","Type":"Audio","ExtraType":"Interview"},
+          {"Id":"v1","Name":"Interview","Type":"Video","ExtraType":"Interview"}
+        ]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let extras = try await provider.extras(for: "m1")
+
+        XCTAssertEqual(extras.map(\.item.id), ["v1"])
+    }
+
+    func testExtrasThrowWhenBothNativeEndpointsFail() async {
+        let stub = StubHTTPClient()
+        stub.error = .serverUnreachable
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        do {
+            _ = try await provider.extras(for: "m1")
+            XCTFail("Expected the provider failure to reach the Extras retry state")
+        } catch let error as AppError {
+            XCTAssertEqual(error, .serverUnreachable)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testItemsPageUsesSeriesTypeForTVLibrary() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)

@@ -55,6 +55,13 @@ public protocol MediaProvider: Sendable {
     /// backend has no (playable) trailer for the item.
     func trailers(for itemID: String) async throws -> [MediaItem]
 
+    /// Local, playable bonus videos attached to an item.
+    ///
+    /// Each extra is an ordinary provider item and must resolve through the same
+    /// playback path as its parent. Hosted/licensed online clips are excluded;
+    /// online trailers remain a separate hero fallback.
+    func extras(for itemID: String) async throws -> [MediaExtra]
+
     /// The title's theme song as a credential-free playback source, or `nil`
     /// when the backend and fallback archive have no theme.
     func themeMusic(for itemID: String) async throws -> ThemeMusic?
@@ -420,6 +427,9 @@ public extension MediaProvider {
     /// trailers, Plex extras) override this; test doubles and other conformers
     /// inherit the safe empty result, so adding the capability stays additive.
     func trailers(for itemID: String) async throws -> [MediaItem] { [] }
+
+    /// Default: no attached local extras.
+    func extras(for itemID: String) async throws -> [MediaExtra] { [] }
 
     /// Default: no theme. Jellyfin and Plex override this; media shares,
     /// trailers, aggregates, and test doubles remain graceful no-ops.

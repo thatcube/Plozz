@@ -27,7 +27,8 @@ enum ShareMediaParser {
     /// existing NFO files, explicit ids, and local artwork — independent of
     /// `classifierVersion` (which governs movie/episode classification) and never
     /// forcing external re-enrichment (see `ShareScanner.scanIfStale`).
-    static let localInventoryVersion = 2
+    /// v3: discover separately persisted local video extras and their owner hints.
+    static let localInventoryVersion = 3
 
     /// File extensions we treat as playable video.
     static let videoExtensions: Set<String> = [

@@ -43,9 +43,12 @@ public enum OnboardingStep: Equatable, Sendable {
     /// user before entering the app.
     case selectSeerr
     /// Brand-new install only: after the profile is confirmed, pick the app's
-    /// appearance/theme before entering the app. Never shown again once
-    /// first-run setup is done.
+    /// theme before entering the app.
     case selectTheme
+    /// Brand-new install only: choose the active profile's navigation chrome after
+    /// its theme. Existing installs receive the same picker through feature
+    /// onboarding instead of re-entering the account setup state machine.
+    case selectNavigation
 }
 
 public enum SessionState: Equatable, Sendable {
@@ -86,6 +89,8 @@ public enum SessionEvent: Sendable {
     case seerrSelected
     /// The user picked an app theme on the one-time first-run theme step.
     case themeSelected
+    /// The user confirmed a navigation style on first run.
+    case navigationSelected
     case authenticationFailed(AppError)
     /// Back out of onboarding without adding an account.
     case cancelOnboarding
@@ -177,8 +182,10 @@ public struct SessionStateMachine: Sendable {
         case (.onboarding(.selectSeerr, _), .seerrSelected):
             return .onboarding(.selectTheme, canReturnToApp: true)
 
-        // Picked an app theme on the one-time first-run theme step — enter the app.
+        // Appearance choices finish with navigation, then enter the app.
         case (.onboarding(.selectTheme, _), .themeSelected):
+            return .onboarding(.selectNavigation, canReturnToApp: true)
+        case (.onboarding(.selectNavigation, _), .navigationSelected):
             return .ready
 
         // Cancelling the Quick Connect / password step steps BACK to the

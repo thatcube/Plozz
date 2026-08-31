@@ -41,7 +41,7 @@ final class SessionStateMachineTests: XCTestCase {
 
     func testFirstRunAuthDetoursThroughProfileSetup() {
         // First-ever account: auth success routes into the one-time profile
-        // setup (confirm → theme picker), not straight to the app. Profiles are
+        // setup (confirm → appearance pickers), not straight to the app. Profiles are
         // always on, so there is no opt-out prompt in between.
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
         m.apply(.accountAuthenticatedNeedsProfile)
@@ -51,6 +51,8 @@ final class SessionStateMachineTests: XCTestCase {
         m.apply(.seerrSelected)
         XCTAssertEqual(m.state, .onboarding(.selectTheme, canReturnToApp: true))
         m.apply(.themeSelected)
+        XCTAssertEqual(m.state, .onboarding(.selectNavigation, canReturnToApp: true))
+        m.apply(.navigationSelected)
         XCTAssertEqual(m.state, .ready)
     }
 

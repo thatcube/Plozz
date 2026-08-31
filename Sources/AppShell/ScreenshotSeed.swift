@@ -67,6 +67,8 @@ enum ScreenshotSeed {
 
         appState.confirmFirstRunProfile()
         appState.finishThemeSelection()
+        FeatureIntroductionStore().markCompleted(.navigationStyles)
+        appState.finishNavigationSelection()
 
         // Subtitles on. A shot of the subtitle style editor with no caption
         // under it shows the controls and none of what they control, which is

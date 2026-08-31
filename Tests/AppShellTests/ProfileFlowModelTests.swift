@@ -7,7 +7,7 @@ import FeatureMusic
 
 /// Unit tests for ``ProfileFlowModel`` — the profile-flow + household facet split
 /// out of ``AppState``. Cover the picker-state machine (request / cancel / launch
-/// picker / new-profile theme) deterministically. The full switch/save/remove and
+/// picker / new-profile appearance) deterministically. The full switch/save/remove and
 /// household-membership orchestration stays covered end-to-end by ServerToggleTests,
 /// which now exercises it through `state.profileFlow.*`.
 @MainActor
@@ -109,11 +109,10 @@ final class ProfileFlowModelTests: XCTestCase {
         XCTAssertFalse(model.isProfileSelectionCancelable)
     }
 
-    func testFinishPickingThemeForNewProfileNoOpsWhenNotPicking() {
+    func testFinishPickingAppearanceForNewProfileNoOpsWhenNotPicking() {
         let (model, _) = makeModel()
-        // Not in the new-profile theme step → returns false and stays put.
-        XCTAssertFalse(model.finishPickingThemeForNewProfile())
-        XCTAssertFalse(model.isPickingThemeForNewProfile)
+        XCTAssertFalse(model.finishPickingAppearanceForNewProfile())
+        XCTAssertFalse(model.isPickingAppearanceForNewProfile)
     }
 
     func testDismissPickerClearsChoosingState() {

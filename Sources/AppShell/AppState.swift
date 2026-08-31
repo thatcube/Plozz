@@ -1675,12 +1675,16 @@ public final class AppState {
         apply(.seerrSelected)
     }
 
-    /// Completes the one-time first-run theme picker and enters the app. Applying
-    /// any Plex Home-user binding (which can raise a PIN prompt) is deferred to
-    /// here so it surfaces as the user actually enters the app — not over the
-    /// theme screen.
+    /// Completes the one-time first-run theme picker and advances to navigation.
     public func finishThemeSelection() {
         apply(.themeSelected)
+    }
+
+    /// Completes first-run appearance setup and enters the app. Applying any Plex
+    /// Home-user binding (which can raise a PIN prompt) is deferred until here so
+    /// it never stacks over either appearance picker.
+    public func finishNavigationSelection() {
+        apply(.navigationSelected)
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
@@ -1724,6 +1728,10 @@ public final class AppState {
         profileFlow.finishSetupFlow()
     }
 
+    public func completeProfileAppearanceSetup(for id: String) {
+        profileFlow.completeAppearanceSetup(for: id)
+    }
+
     /// Marks a profile as restricted, or lifts the restriction.
     public func setKidsProfile(_ isKids: Bool, forProfile id: String) {
         guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
@@ -1731,12 +1739,11 @@ public final class AppState {
         profilesModel.update(profile)
     }
 
-    /// Dismisses the one-time theme picker shown after creating a profile in-app
-    /// and applies the (now active) new profile's Plex identity — raising a PIN
-    /// prompt if it maps to a protected Home user. Guarded so it's safe to call
-    /// from both the Continue button and the cover's dismissal binding.
-    public func finishNewProfileThemeSelection() {
-        guard profileFlow.finishPickingThemeForNewProfile() else { return }
+    /// Dismisses the one-time appearance flow shown after creating a profile and
+    /// applies the active profile's Plex identity. Guarded so Continue and the
+    /// cover binding cannot complete it twice.
+    public func finishNewProfileAppearanceSelection() {
+        guard profileFlow.finishPickingAppearanceForNewProfile() else { return }
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 

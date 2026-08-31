@@ -34,9 +34,9 @@ public final class ProfileFlowModel {
     /// mandatory launch picker; true when opened from Settings behind an active
     /// profile).
     public private(set) var isProfileSelectionCancelable = false
-    /// True while the one-time theme picker for a just-created in-app profile is
-    /// showing (cleared by `finishPickingThemeForNewProfile()`).
-    public private(set) var isPickingThemeForNewProfile = false
+    /// True while the one-time Theme + Navigation flow for a just-created profile
+    /// is showing.
+    public private(set) var isPickingAppearanceForNewProfile = false
 
     /// A just-created profile that still needs its setup step (servers, identity,
     /// libraries).
@@ -53,6 +53,8 @@ public final class ProfileFlowModel {
     @ObservationIgnored private let plexHomeUsers: PlexHomeUsersModel
     @ObservationIgnored private let profileSettings: ProfileSettingsModel
     @ObservationIgnored private let audioController: AudioPlaybackController
+    @ObservationIgnored private let appearanceSetupStore:
+        any ProfileAppearanceSetupStoring
     /// Re-points the tracker services (Trakt/Simkl/Seerr/AniList/MAL/Last.fm) +
     /// identity index at the active profile. Injected because the tracker services
     /// still live on `AppState`.
@@ -71,6 +73,8 @@ public final class ProfileFlowModel {
         plexHomeUsers: PlexHomeUsersModel,
         profileSettings: ProfileSettingsModel,
         audioController: AudioPlaybackController,
+        appearanceSetupStore: any ProfileAppearanceSetupStoring =
+            ProfileAppearanceSetupStore(),
         updateTrackersForActiveProfile: @escaping @MainActor () async -> Void,
         discardWatchReconciler: @escaping @MainActor (String) -> Void,
         removeMediaAliases: @escaping @MainActor (String) -> Void = { _ in },
@@ -81,6 +85,7 @@ public final class ProfileFlowModel {
         self.plexHomeUsers = plexHomeUsers
         self.profileSettings = profileSettings
         self.audioController = audioController
+        self.appearanceSetupStore = appearanceSetupStore
         self.updateTrackersForActiveProfile = updateTrackersForActiveProfile
         self.discardWatchReconciler = discardWatchReconciler
         self.removeMediaAliases = removeMediaAliases
@@ -109,14 +114,18 @@ public final class ProfileFlowModel {
         isChoosingProfile = false
     }
 
-    /// Clears the "picking theme for a new profile" state once the one-time theme
-    /// picker is dismissed. Returns whether it was showing (so the caller can skip
-    /// the follow-up Plex identity re-apply when it wasn't).
+    /// Clears new-profile appearance setup once its cover is dismissed.
     @discardableResult
-    public func finishPickingThemeForNewProfile() -> Bool {
-        guard isPickingThemeForNewProfile else { return false }
-        isPickingThemeForNewProfile = false
+    public func finishPickingAppearanceForNewProfile() -> Bool {
+        guard isPickingAppearanceForNewProfile else { return false }
+        isPickingAppearanceForNewProfile = false
+        appearanceSetupStore.markCompleted(profileID: profilesModel.activeProfileID)
         return true
+    }
+
+    public var hasResumableSetup: Bool {
+        let active = profilesModel.activeProfile
+        return active.needsSetup || appearanceSetupStore.isPending(profileID: active.id)
     }
 
     // MARK: Profiles
@@ -415,20 +424,20 @@ public final class ProfileFlowModel {
                 avatarEmoji: draft.avatarEmoji,
                 avatarEmojiColorIndex: draft.avatarEmojiColorIndex
             )
-            // Switch to the freshly created profile so the per-profile theme
-            // picker edits *its* namespace, then present it. Mirrors
+            // Switch to the freshly created profile so the per-profile appearance
+            // pickers edit *its* namespace, then present them. Mirrors
             // `switchProfile(to:)` minus the Plex identity check, which is
-            // deferred to `finishPickingThemeForNewProfile()` so any PIN prompt
-            // surfaces as the new profile actually enters the app — not stacked
-            // under the theme cover.
+            // deferred until appearance setup completes so any PIN prompt surfaces
+            // as the new profile enters the app, not over a picker.
             audioController.stop()
+            appearanceSetupStore.markPending(profileID: created.id)
             profilesModel.select(created.id)
             rebuildSettingsModels()
             Task { await updateTrackersForActiveProfile() }
             accountsProviders.reloadAccounts()
             activateUniversalWatchlist()
             isChoosingProfile = false
-            isPickingThemeForNewProfile = true
+            isPickingAppearanceForNewProfile = true
         }
     }
 
@@ -477,6 +486,7 @@ public final class ProfileFlowModel {
             isKids: isKids,
             activeAccountIDs: draft.activeAccountIDs
         )
+        appearanceSetupStore.markPending(profileID: configured.id)
         // Claim the root setup page BEFORE switching dismisses the picker. Root
         // can then render setup directly underneath the editor sheet, so the
         // sheet's fade-out never exposes Home.
@@ -504,8 +514,11 @@ public final class ProfileFlowModel {
     public func resumeSetupIfNeeded() {
         guard pendingSetupProfile == nil else { return }
         let active = profilesModel.activeProfile
-        guard active.needsSetup else { return }
-        pendingSetupProfile = active
+        if active.needsSetup {
+            pendingSetupProfile = active
+        } else if appearanceSetupStore.isPending(profileID: active.id) {
+            isPickingAppearanceForNewProfile = true
+        }
     }
 
     /// Marks setup finished and releases the deferred watchlist import.
@@ -521,7 +534,7 @@ public final class ProfileFlowModel {
         // current is still on screen gets it dropped, which is why the theme
         // picker kept not appearing. The caller raises it from the cover's
         // `onDismiss`, once the screen is actually free. See `presentPostSetupStep`.
-        profileAwaitingThemePick = profile
+        profileAwaitingAppearancePick = profile
     }
 
     /// Releases the watchlist import after Libraries while keeping the full setup
@@ -540,22 +553,25 @@ public final class ProfileFlowModel {
         pendingSetupProfile = nil
     }
 
-    /// Held between one cover closing and the next opening.
-    @ObservationIgnored private var profileAwaitingThemePick: Profile?
-    @ObservationIgnored private var profileAwaitingLockOffer: Profile?
-
-    /// Raises the theme picker for a just-set-up profile. Call from the setup
-    /// cover's `onDismiss`, never while it's still presented.
-    public func presentPostSetupStep() {
-        guard let profile = profileAwaitingThemePick else { return }
-        profileAwaitingThemePick = nil
-        profileAwaitingLockOffer = profile
-        isPickingThemeForNewProfile = true
+    public func completeAppearanceSetup(for profileID: String) {
+        appearanceSetupStore.markCompleted(profileID: profileID)
     }
 
-    /// Raises the lock offer once the theme picker has actually gone. Call from
-    /// the theme cover's `onDismiss`.
-    public func presentPostThemeStep() {
+    /// Held between one cover closing and the next opening.
+    @ObservationIgnored private var profileAwaitingAppearancePick: Profile?
+    @ObservationIgnored private var profileAwaitingLockOffer: Profile?
+
+    /// Raises appearance setup for a just-set-up profile. Call from the setup
+    /// cover's `onDismiss`, never while it is still presented.
+    public func presentPostSetupStep() {
+        guard let profile = profileAwaitingAppearancePick else { return }
+        profileAwaitingAppearancePick = nil
+        profileAwaitingLockOffer = profile
+        isPickingAppearanceForNewProfile = true
+    }
+
+    /// Raises the lock offer once appearance setup has gone.
+    public func presentPostAppearanceStep() {
         guard let profile = profileAwaitingLockOffer else { return }
         profileAwaitingLockOffer = nil
         pendingLockOfferProfile = profile
@@ -578,6 +594,7 @@ public final class ProfileFlowModel {
         let outgoingProfile = profilesModel.activeProfile
         discardWatchReconciler(id)
         removeMediaAliases(id)
+        appearanceSetupStore.markCompleted(profileID: id)
         profilesModel.remove(id)
         if wasActive {
             if enforceLockOnActiveProfile(leaving: outgoingProfile) { return }

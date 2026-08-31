@@ -5,12 +5,10 @@ import CoreUI
 
 /// One-time theme picker shown when a profile is first set up.
 ///
-/// Two entry points, both driven by the same view:
+/// Entry points share this view:
 /// - **First run** — rendered by `RootView` in the onboarding flow, right after
 ///   profile setup (`onContinue` fires `AppState.finishThemeSelection`).
-/// - **New in-app profile** — presented as a full-screen cover after Settings →
-///   "Add Profile" switches to the freshly created profile (`onContinue` fires
-///   `AppState.finishNewProfileThemeSelection`).
+/// - **New in-app profile** — first page of its combined appearance flow.
 ///
 /// Selecting a theme applies it **live**: `RootView` derives its palette and
 /// `preferredColorScheme` from `appState.profileSettings.themeModel.theme`, so pressing an option

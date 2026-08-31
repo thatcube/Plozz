@@ -485,6 +485,10 @@ struct NavigationRailView: View {
                 width: isExpanded ? nil : NavigationRailMetrics.iconColumnWidth,
                 alignment: .center
             )
+            .frame(
+                maxWidth: isExpanded ? .infinity : nil,
+                alignment: .center
+            )
             // Collapsed, match the icon's own offset inside its focus pill.
             .padding(.leading, isExpanded ? 0 : PlozzTheme.Spacing.xSmall)
             .padding(.vertical, PlozzTheme.Spacing.medium)

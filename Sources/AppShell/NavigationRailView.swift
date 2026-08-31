@@ -43,6 +43,8 @@ enum NavigationRailMetrics {
     static let expandedRowCornerRadius: CGFloat =
         expandedPanelCornerRadius - expandedPanelContentInset
     static let itemSpacing: CGFloat = 10
+    /// Two points on each row edge creates four points between adjacent items.
+    static let itemVerticalPadding: CGFloat = 2
     /// Matches ``iconColumnWidth`` exactly. Any larger and the avatar overflows the
     /// glyph column it shares with every other row, so it sits off the axis the
     /// icons below it line up on — and steals from the gap before the label.
@@ -55,7 +57,7 @@ enum NavigationRailMetrics {
     /// drift). Pinning the height to the taller of the two states means rows are
     /// already the right size before focus arrives, and expanding changes width
     /// only.
-    static let rowContentHeight: CGFloat = 44
+    static let rowContentHeight: CGFloat = 42
     /// The profile is a navigation row too: avatar + one label, matching every
     /// destination's vertical rhythm.
     static let profileRowHeight: CGFloat = rowContentHeight
@@ -395,6 +397,7 @@ struct NavigationRailView: View {
                 accent: palette.accent
             )
         )
+        .padding(.vertical, NavigationRailMetrics.itemVerticalPadding)
         .focused($focusedTarget, equals: .profile)
         .disabled(!isRowFocusable(.profile))
         .accessibilityLabel(Text(Self.switchProfileSubtitle))
@@ -451,6 +454,7 @@ struct NavigationRailView: View {
                 holdsFocusStyling: isBouncingOffBumper(.destination(destination))
             )
         )
+        .padding(.vertical, NavigationRailMetrics.itemVerticalPadding)
         .focused($focusedTarget, equals: .destination(destination))
         .disabled(!isRowFocusable(.destination(destination)))
         .accessibilityLabel(label)

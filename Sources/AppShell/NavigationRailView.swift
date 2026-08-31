@@ -405,6 +405,9 @@ struct NavigationRailView: View {
     ) -> some View {
         Button {
             selection = destination
+            // Activating a destination is the same commitment as selecting it and
+            // pressing Right: close the menu and enter the page immediately.
+            releaseFocusToPage()
         } label: {
             HStack(spacing: PlozzTheme.Spacing.medium) {
                 Image(systemName: symbol)

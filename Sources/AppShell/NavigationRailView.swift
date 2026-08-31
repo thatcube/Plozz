@@ -115,6 +115,7 @@ struct NavigationRailView: View {
     var focusReleaseToken: Int = 0
 
     @Environment(\.themePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: RailFocusTarget?
     /// The last row that actually held focus, so an edge bumper can hand focus
     /// straight back to it.
@@ -371,9 +372,14 @@ struct NavigationRailView: View {
                 ProfileAvatarView(profile: profile, size: NavigationRailMetrics.avatarSize)
                     .frame(width: NavigationRailMetrics.iconColumnWidth)
                 if isExpanded {
-                    Text(verbatim: profile.name)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
+                    PlozzMarqueeText(
+                        text: Text(verbatim: profile.name),
+                        font: .subheadline.weight(.semibold),
+                        color: foregroundColor(for: .profile, isSelected: false),
+                        inset: 0,
+                        fadeWidth: 16,
+                        isFocused: focusedTarget == .profile
+                    )
                 }
                 if isExpanded { Spacer(minLength: 0) }
             }
@@ -415,10 +421,17 @@ struct NavigationRailView: View {
                     .frame(width: NavigationRailMetrics.iconColumnWidth)
                     .accessibilityHidden(true)
                 if isExpanded {
-                    label
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    PlozzMarqueeText(
+                        text: label,
+                        font: .subheadline.weight(.semibold),
+                        color: foregroundColor(
+                            for: .destination(destination),
+                            isSelected: selection == destination
+                        ),
+                        inset: 0,
+                        fadeWidth: 16,
+                        isFocused: focusedTarget == .destination(destination)
+                    )
                 }
                 if isExpanded { Spacer(minLength: 0) }
             }
@@ -445,6 +458,17 @@ struct NavigationRailView: View {
         .disabled(!isRowFocusable(.destination(destination)))
         .accessibilityLabel(label)
         .accessibilityAddTraits(selection == destination ? [.isSelected] : [])
+    }
+
+    private func foregroundColor(
+        for target: RailFocusTarget,
+        isSelected: Bool
+    ) -> Color {
+        let focused = focusedTarget == target || isBouncingOffBumper(target)
+        if focused {
+            return colorScheme == .dark ? .black : .white
+        }
+        return isSelected ? palette.accent : .primary
     }
 
     /// The LIBRARIES heading — a word when there is room for one, a rule when

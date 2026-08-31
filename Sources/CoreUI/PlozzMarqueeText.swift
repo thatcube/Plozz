@@ -49,6 +49,7 @@ public struct PlozzMarqueeText: View {
     private let font: Font
     private let color: Color
     private let inset: CGFloat
+    private let fadeWidth: CGFloat
     private let isFocused: Bool
 
     /// Intrinsic width of the line. Changes when the text does, not when the card
@@ -66,12 +67,14 @@ public struct PlozzMarqueeText: View {
         font: Font,
         color: Color,
         inset: CGFloat,
+        fadeWidth: CGFloat? = nil,
         isFocused: Bool
     ) {
         self.text = text
         self.font = font
         self.color = color
         self.inset = inset
+        self.fadeWidth = fadeWidth ?? inset * PlozzTheme.Metrics.marqueeFadeRatio
         self.isFocused = isFocused
     }
 
@@ -93,7 +96,7 @@ public struct PlozzMarqueeText: View {
     /// Where the trailing dissolve begins — and so the last point at which the
     /// text is still at full strength.
     private var fadeStart: CGFloat {
-        max(fadeEnd - inset * PlozzTheme.Metrics.marqueeFadeRatio, lead)
+        max(fadeEnd - fadeWidth, lead)
     }
 
     /// How far the line runs past the point where it starts to dissolve — and

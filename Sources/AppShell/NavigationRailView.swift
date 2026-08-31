@@ -32,13 +32,14 @@ enum NavigationRailMetrics {
 
     /// Width the rail grows to once focus enters it.
     static let expandedWidth: CGFloat = 420
-    /// Floating-menu geometry. The first/last row sits exactly 18 points inside
-    /// the 32-point panel, so its 14-point corner shares the panel's corner centre.
+    /// Floating-menu geometry. Rows sit exactly 18 points inside each horizontal
+    /// edge, so their 14-point corners share the 32-point panel's corner centres.
+    /// Vertically the glass bleeds just beyond the safe area while the controls
+    /// retain their existing safe padding.
     static let expandedPanelCornerRadius: CGFloat = 32
     static let expandedPanelContentInset: CGFloat = 18
     static let expandedPanelHorizontalInset: CGFloat = leadingInset - expandedPanelContentInset
-    static let expandedPanelVerticalInset: CGFloat =
-        verticalPadding + bumperHeight - expandedPanelContentInset
+    static let expandedPanelVerticalInset: CGFloat = -4
     static let expandedRowCornerRadius: CGFloat =
         expandedPanelCornerRadius - expandedPanelContentInset
     static let itemSpacing: CGFloat = 10

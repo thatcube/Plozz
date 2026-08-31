@@ -79,6 +79,7 @@ enum NavigationRailMetrics {
     /// How far the fade mask overhangs the list horizontally, so a focused row's
     /// pill and its shadow are not clipped by the mask that feathers the ends.
     static let listFadeHorizontalOverhang: CGFloat = 40
+    static let dividerHorizontalInset: CGFloat = 20
     static let expandAnimation = Animation.easeOut(duration: 0.22)
 }
 
@@ -481,7 +482,7 @@ struct NavigationRailView: View {
                 width: isExpanded
                     ? NavigationRailMetrics.expandedWidth
                         - (NavigationRailMetrics.leadingInset * 2)
-                        - (PlozzTheme.Spacing.xSmall * 4)
+                        - (NavigationRailMetrics.dividerHorizontalInset * 2)
                     : NavigationRailMetrics.iconColumnWidth * 0.6,
                 height: 2
             )

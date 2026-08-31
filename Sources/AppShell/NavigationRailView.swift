@@ -477,6 +477,7 @@ struct NavigationRailView: View {
                 width: isExpanded
                     ? NavigationRailMetrics.expandedWidth
                         - (NavigationRailMetrics.leadingInset * 2)
+                        - (PlozzTheme.Spacing.xSmall * 2)
                     : NavigationRailMetrics.iconColumnWidth * 0.6,
                 height: 2
             )

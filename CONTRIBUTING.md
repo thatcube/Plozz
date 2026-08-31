@@ -118,8 +118,10 @@ fastlane release --env fastlane # build + upload to the App Store
 (`CFBundleShortVersionString`) by hand; the **build number** is auto-incremented
 from the latest TestFlight build at archive time — never edit it manually.
 
-tvOS **Brand Assets** (app icon + Top Shelf images) live under
-`App/Resources/Assets.xcassets/…brandassets` and are required for any upload.
+App icons, in-app logos, and tvOS **Brand Assets** are generated from
+`App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg` with
+`python3 tools/generate_brand_assets.py`. The tvOS App Store and Top Shelf
+assets live under `App/Resources/Assets.xcassets/…brandassets`.
 
 ## Architecture
 

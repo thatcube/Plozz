@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate tvOS Brand Assets (layered app icon + Top Shelf images) for Plozz.
+"""Generate Plozz app icons and tvOS Top Shelf images.
 
 Source art is the Plozz pixel-art logo (a smiling TV in Jellyfin blue). The
 background is a smooth radial gradient — a dark off-black grey with a subtle
@@ -15,6 +15,7 @@ Run from the repo root:  python3 tools/generate_brand_assets.py
 import io
 import json
 import os
+import shutil
 import sys
 
 import cairosvg
@@ -24,6 +25,14 @@ from PIL import Image
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGO_SVG = os.path.join(REPO, "App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg")
 BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets")
+IOS_ICON = os.path.join(
+    REPO,
+    "App/PlozziOS/Assets.xcassets/AppIcon.appiconset/PlozzAppIcon.png",
+)
+IOS_LOGO_SVG = os.path.join(
+    REPO,
+    "App/PlozziOS/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg",
+)
 
 # Brand background: a smooth, premium radial gradient. The surface is a dark
 # off-black grey with a subtle (~5%) glow of Plozz's brand light blue
@@ -143,10 +152,27 @@ def write_top_shelf(name: str, w: int, h: int, file_prefix: str):
               {"images": images, "info": {"author": "xcode", "version": 1}})
 
 
+def write_ios_icon():
+    """Write the opaque 1024-square iOS marketing icon."""
+    icon = radial_background(1024, 1024)
+    icon.alpha_composite(centered_logo(1024, 1024, logo_frac=ICON_LOGO_FRAC))
+    os.makedirs(os.path.dirname(IOS_ICON), exist_ok=True)
+    icon.convert("RGB").save(IOS_ICON)
+    print("wrote", os.path.relpath(IOS_ICON, REPO), icon.size)
+
+
+def sync_ios_logo():
+    """Keep the in-app iOS logo identical to the canonical tvOS source."""
+    os.makedirs(os.path.dirname(IOS_LOGO_SVG), exist_ok=True)
+    shutil.copyfile(LOGO_SVG, IOS_LOGO_SVG)
+    print("wrote", os.path.relpath(IOS_LOGO_SVG, REPO))
+
+
 def main():
     if not os.path.exists(LOGO_SVG):
         sys.exit(f"logo not found: {LOGO_SVG}")
     os.makedirs(BRAND, exist_ok=True)
+    sync_ios_logo()
 
     save_json(os.path.join(BRAND, "Contents.json"), {
         "assets": [
@@ -166,6 +192,7 @@ def main():
     write_imagestack("App Icon - App Store.imagestack", 1280, 768, scales=(1,))
     write_top_shelf("Top Shelf Image", 1920, 720, "top")
     write_top_shelf("Top Shelf Image Wide", 2320, 720, "wide")
+    write_ios_icon()
     print("done")
 
 

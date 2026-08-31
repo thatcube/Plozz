@@ -31,7 +31,7 @@ enum NavigationRailMetrics {
     static let contentInset: CGFloat = 64
 
     /// Width the rail grows to once focus enters it.
-    static let expandedWidth: CGFloat = 420
+    static let expandedWidth: CGFloat = 400
     /// Floating-menu geometry. Row pills sit exactly 18 points inside every panel
     /// edge. The outer radius adds that same inset to the pill radius, keeping their
     /// corner centres concentric.
@@ -39,12 +39,13 @@ enum NavigationRailMetrics {
     static let expandedPanelHorizontalInset: CGFloat = leadingInset - expandedPanelContentInset
     static let expandedPanelVerticalInset: CGFloat =
         verticalPadding + bumperHeight + itemVerticalPadding - expandedPanelContentInset
+    static let rowInnerPadding: CGFloat = 10
     static let expandedRowHeight: CGFloat =
-        rowContentHeight + (PlozzTheme.Spacing.small * 2)
+        rowContentHeight + (rowInnerPadding * 2)
     static let expandedRowCornerRadius: CGFloat =
         expandedRowHeight / 2
     /// Aligns the icon centre with the centre of the capsule's leading arc.
-    static let expandedRowHorizontalPadding: CGFloat =
+    static let rowHorizontalPadding: CGFloat =
         expandedRowCornerRadius - (iconColumnWidth / 2)
     static let expandedPanelCornerRadius: CGFloat =
         expandedRowCornerRadius + expandedPanelContentInset
@@ -503,7 +504,7 @@ struct NavigationRailView: View {
                 alignment: .center
             )
             // Collapsed, match the icon's own offset inside its focus pill.
-            .padding(.leading, isExpanded ? 0 : PlozzTheme.Spacing.xSmall)
+            .padding(.leading, isExpanded ? 0 : NavigationRailMetrics.rowHorizontalPadding)
             .padding(.vertical, PlozzTheme.Spacing.medium)
             .accessibilityHidden(true)
     }
@@ -627,15 +628,11 @@ private struct NavigationRailItemStyle: ButtonStyle {
                     : Color.clear
             )
         return configuration.label
-            // Keep the collapsed icon axis fixed. Expanded, move content just far
-            // enough inward for the icon centre to meet the capsule's arc centre.
-            .padding(
-                .horizontal,
-                isExpanded
-                    ? NavigationRailMetrics.expandedRowHorizontalPadding
-                    : PlozzTheme.Spacing.xSmall
-            )
-            .padding(.vertical, PlozzTheme.Spacing.small)
+            // The same inset in both states keeps the icon fixed during expansion.
+            // With a square icon slot, matching horizontal and vertical padding also
+            // makes the collapsed row a true circle.
+            .padding(.horizontal, NavigationRailMetrics.rowHorizontalPadding)
+            .padding(.vertical, NavigationRailMetrics.rowInnerPadding)
             .foregroundStyle(foreground)
             // The rail sits over artwork, so an unfocused glyph carries its own
             // contrast while collapsed. The open menu panel supplies that contrast.

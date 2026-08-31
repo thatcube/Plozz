@@ -32,16 +32,19 @@ enum NavigationRailMetrics {
 
     /// Width the rail grows to once focus enters it.
     static let expandedWidth: CGFloat = 420
-    /// Floating-menu geometry. Rows sit exactly 18 points inside each horizontal
-    /// edge, so their 14-point corners share the 32-point panel's corner centres.
-    /// Vertically the glass bleeds just beyond the safe area while the controls
-    /// retain their existing safe padding.
-    static let expandedPanelCornerRadius: CGFloat = 32
+    /// Floating-menu geometry. Row pills sit exactly 18 points inside every panel
+    /// edge. The outer radius adds that same inset to the pill radius, keeping their
+    /// corner centres concentric.
     static let expandedPanelContentInset: CGFloat = 18
     static let expandedPanelHorizontalInset: CGFloat = leadingInset - expandedPanelContentInset
-    static let expandedPanelVerticalInset: CGFloat = -4
+    static let expandedPanelVerticalInset: CGFloat =
+        verticalPadding + bumperHeight + itemVerticalPadding - expandedPanelContentInset
+    static let expandedRowHeight: CGFloat =
+        rowContentHeight + (PlozzTheme.Spacing.small * 2)
     static let expandedRowCornerRadius: CGFloat =
-        expandedPanelCornerRadius - expandedPanelContentInset
+        expandedRowHeight / 2
+    static let expandedPanelCornerRadius: CGFloat =
+        expandedRowCornerRadius + expandedPanelContentInset
     static let itemSpacing: CGFloat = 10
     /// Two points on each row edge creates four points between adjacent items.
     static let itemVerticalPadding: CGFloat = 2
@@ -618,10 +621,6 @@ private struct NavigationRailItemStyle: ButtonStyle {
                     ? accent.opacity(0.20)
                     : Color.clear
             )
-        let cornerRadius = isExpanded
-            ? NavigationRailMetrics.expandedRowCornerRadius
-            : PlozzTheme.Metrics.Radius.content
-
         return configuration.label
             // Horizontal stays tight: collapsed, the pill hugs the glyph and has to
             // fit inside the rail's collapsed width. The breathing room the rail
@@ -637,7 +636,7 @@ private struct NavigationRailItemStyle: ButtonStyle {
                 y: 1
             )
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(fill)
             )
             .scaleEffect(isFocused && !isExpanded ? 1.03 : 1)

@@ -46777,6 +46777,9 @@
         }
       }
     },
+    "Behind the Scenes" : {
+
+    },
     "Behind the hero" : {
       "localizations" : {
         "ar" : {
@@ -61416,6 +61419,9 @@
           }
         }
       }
+    },
+    "Choose navigation for this profile" : {
+
     },
     "Choose theme" : {
       "comment" : "Title of the first-run theme picker when profiles are off, above the theme choices.",
@@ -88412,6 +88418,9 @@
           }
         }
       }
+    },
+    "Deleted Scene" : {
+
     },
     "Deletes the shared iCloud copy and re-uploads it from THIS Apple TV. Other devices keep their own logins. Use only if devices won't converge." : {
       "extractionState" : "stale",
@@ -118823,6 +118832,12 @@
         }
       }
     },
+    "Extra" : {
+
+    },
+    "Extras" : {
+
+    },
     "FTP sends credentials and media without encryption." : {
       "localizations" : {
         "ar" : {
@@ -121026,6 +121041,9 @@
           }
         }
       }
+    },
+    "Featurette" : {
+
     },
     "Fetching it and loading it into the player." : {
       "localizations" : {
@@ -141352,6 +141370,9 @@
           }
         }
       }
+    },
+    "Interview" : {
+
     },
     "Intro Skipped" : {
       "comment" : "Brief on-screen confirmation shown after the player automatically skips an intro segment.",
@@ -163062,6 +163083,9 @@
           }
         }
       }
+    },
+    "Music & Performance" : {
+
     },
     "Music Player" : {
       "comment" : "Section header and row title in Settings for customizing the music now-playing screen.",
@@ -253432,6 +253456,9 @@
         }
       }
     },
+    "Sample" : {
+
+    },
     "Sand" : {
       "comment" : "Accessibility name for one profile color choice in the profile editor color palette.",
       "localizations" : {
@@ -258724,6 +258751,12 @@
           }
         }
       }
+    },
+    "Scene" : {
+
+    },
+    "Scene / Sample" : {
+
     },
     "Schedule" : {
       "comment" : "Picker label in iOS Circadian Mode settings for choosing when the warm color schedule runs.",
@@ -277486,6 +277519,9 @@
           }
         }
       }
+    },
+    "Short" : {
+
     },
     "Show Box" : {
       "comment" : "Toggle in subtitle appearance settings that shows or hides the background box behind subtitle text, on tvOS and iOS.",
@@ -402832,7 +402868,7 @@
     },
     "navigationRail.librariesHeader" : {
       "comment" : "Heading above the list of libraries in the navigation rail.",
-      "extractionState" : "extracted_with_value",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {

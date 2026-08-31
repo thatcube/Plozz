@@ -43,8 +43,13 @@ enum NavigationRailMetrics {
         rowContentHeight + (PlozzTheme.Spacing.small * 2)
     static let expandedRowCornerRadius: CGFloat =
         expandedRowHeight / 2
+    /// Aligns the icon centre with the centre of the capsule's leading arc.
+    static let expandedRowHorizontalPadding: CGFloat =
+        expandedRowCornerRadius - (iconColumnWidth / 2)
     static let expandedPanelCornerRadius: CGFloat =
         expandedRowCornerRadius + expandedPanelContentInset
+    static let itemIconSize: CGFloat = 26
+    static let labelFont: Font = .system(size: 25, weight: .semibold)
     static let itemSpacing: CGFloat = 10
     /// Two points on each row edge creates four points between adjacent items.
     static let itemVerticalPadding: CGFloat = 2
@@ -377,7 +382,7 @@ struct NavigationRailView: View {
                 if isExpanded {
                     PlozzMarqueeText(
                         text: Text(verbatim: profile.name),
-                        font: .subheadline.weight(.semibold),
+                        font: NavigationRailMetrics.labelFont,
                         color: foregroundColor(for: .profile, isSelected: false),
                         inset: 0,
                         fadeWidth: 16,
@@ -421,13 +426,13 @@ struct NavigationRailView: View {
         } label: {
             HStack(spacing: PlozzTheme.Spacing.medium) {
                 Image(systemName: symbol)
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(.system(size: NavigationRailMetrics.itemIconSize, weight: .semibold))
                     .frame(width: NavigationRailMetrics.iconColumnWidth)
                     .accessibilityHidden(true)
                 if isExpanded {
                     PlozzMarqueeText(
                         text: label,
-                        font: .subheadline.weight(.semibold),
+                        font: NavigationRailMetrics.labelFont,
                         color: foregroundColor(
                             for: .destination(destination),
                             isSelected: selection == destination
@@ -622,10 +627,14 @@ private struct NavigationRailItemStyle: ButtonStyle {
                     : Color.clear
             )
         return configuration.label
-            // Horizontal stays tight: collapsed, the pill hugs the glyph and has to
-            // fit inside the rail's collapsed width. The breathing room the rail
-            // needed is vertical.
-            .padding(.horizontal, PlozzTheme.Spacing.xSmall)
+            // Keep the collapsed icon axis fixed. Expanded, move content just far
+            // enough inward for the icon centre to meet the capsule's arc centre.
+            .padding(
+                .horizontal,
+                isExpanded
+                    ? NavigationRailMetrics.expandedRowHorizontalPadding
+                    : PlozzTheme.Spacing.xSmall
+            )
             .padding(.vertical, PlozzTheme.Spacing.small)
             .foregroundStyle(foreground)
             // The rail sits over artwork, so an unfocused glyph carries its own

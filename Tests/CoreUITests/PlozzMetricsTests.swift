@@ -79,16 +79,47 @@ final class PlozzMetricsTests: XCTestCase {
         let standard = PlozzMetrics(density: .standard)
         let extraLarge = PlozzMetrics(density: .extraLarge)
 
-        XCTAssertEqual(micro.cardStatusCueFontSize, PlozzTheme.Metrics.cardStatusCueMinFontSize)
+        #if os(iOS)
+        let minimumFontSize = PlozzTheme.Metrics.cardStatusCueTouchMinFontSize
+        let minimumHorizontalPadding =
+            PlozzTheme.Metrics.cardStatusCueTouchMinHorizontalPadding
+        let minimumVerticalPadding =
+            PlozzTheme.Metrics.cardStatusCueTouchMinVerticalPadding
+        #else
+        let minimumFontSize = PlozzTheme.Metrics.cardStatusCueMinFontSize
+        let minimumHorizontalPadding = PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
+        let minimumVerticalPadding = PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
+        #endif
+
+        XCTAssertEqual(micro.cardStatusCueFontSize, minimumFontSize)
         XCTAssertGreaterThan(extraLarge.cardStatusCueFontSize, standard.cardStatusCueFontSize)
         XCTAssertGreaterThanOrEqual(
             micro.cardStatusCueHorizontalPadding,
-            PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
+            minimumHorizontalPadding
         )
         XCTAssertGreaterThanOrEqual(
             micro.cardStatusCueVerticalPadding,
-            PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
+            minimumVerticalPadding
         )
     }
+
+    #if os(iOS)
+    func testTouchStatusCueUsesCaptionTypographyAndAdaptsToDynamicType() {
+        let standard = PlozzMetrics.touch(density: .standard, dynamicTypeSize: .large)
+        let accessibility = PlozzMetrics.touch(
+            density: .standard,
+            dynamicTypeSize: .accessibility1
+        )
+
+        XCTAssertLessThan(
+            standard.cardStatusCueFontSize,
+            PlozzTheme.Metrics.cardStatusCueFontSize
+        )
+        XCTAssertGreaterThan(
+            accessibility.cardStatusCueFontSize,
+            standard.cardStatusCueFontSize
+        )
+    }
+    #endif
 }
 #endif

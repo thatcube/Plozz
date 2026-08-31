@@ -245,14 +245,20 @@ public enum PlozzTheme {
         /// Base (standard-density) point size for a card's subtitle/metadata line.
         /// Density-scaled in `PlozzMetrics` so caption text grows with the card.
         public static let cardSubtitleFontSize: CGFloat = 20
-        /// Search-only status cue painted on media artwork. It scales with the card
-        /// but is floored in `PlozzMetrics` so micro density remains TV-readable.
+        /// Status cue painted on media artwork. tvOS uses these 10-foot values;
+        /// touch platforms derive the font from native caption typography and use
+        /// the smaller touch insets below.
         public static let cardStatusCueFontSize: CGFloat = 18
         public static let cardStatusCueMinFontSize: CGFloat = 16
         public static let cardStatusCueHorizontalPadding: CGFloat = 10
         public static let cardStatusCueMinHorizontalPadding: CGFloat = 8
         public static let cardStatusCueVerticalPadding: CGFloat = 6
         public static let cardStatusCueMinVerticalPadding: CGFloat = 5
+        public static let cardStatusCueTouchMinFontSize: CGFloat = 10
+        public static let cardStatusCueTouchHorizontalPadding: CGFloat = 7
+        public static let cardStatusCueTouchMinHorizontalPadding: CGFloat = 6
+        public static let cardStatusCueTouchVerticalPadding: CGFloat = 4
+        public static let cardStatusCueTouchMinVerticalPadding: CGFloat = 3
         /// Resume-chip (play glyph + progress bar + "… left") drawn on landscape
         /// artwork. tvOS's tuned constants: read from ~10ft, so the glyph is large
         /// and the bar is comfortably readable without dominating the chip. iOS derives its own from real text styles in

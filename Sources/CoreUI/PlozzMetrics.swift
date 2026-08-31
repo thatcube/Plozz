@@ -491,23 +491,49 @@ public struct PlozzMetrics: Equatable, Sendable {
         // touch minimum.
         self.artworkMenuTargetSize = max((baseMenuTarget * densityScale).rounded(), 44)
         self.artworkMenuInset = (PlozzTheme.Metrics.artworkMenuInset * densityScale).rounded()
+        #if os(tvOS)
+        let statusCueFont = PlozzTheme.Metrics.cardStatusCueFontSize
+        let statusCueMinFont = PlozzTheme.Metrics.cardStatusCueMinFontSize
+        let statusCueHorizontalPadding = PlozzTheme.Metrics.cardStatusCueHorizontalPadding
+        let statusCueMinHorizontalPadding =
+            PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
+        let statusCueVerticalPadding = PlozzTheme.Metrics.cardStatusCueVerticalPadding
+        let statusCueMinVerticalPadding = PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
+        #elseif canImport(UIKit)
+        let statusCueFont = preferred(.caption2)
+        let statusCueMinFont = PlozzTheme.Metrics.cardStatusCueTouchMinFontSize
+        let statusCueHorizontalPadding = scaled(
+            .caption2,
+            PlozzTheme.Metrics.cardStatusCueTouchHorizontalPadding
+        )
+        let statusCueMinHorizontalPadding =
+            PlozzTheme.Metrics.cardStatusCueTouchMinHorizontalPadding
+        let statusCueVerticalPadding = scaled(
+            .caption2,
+            PlozzTheme.Metrics.cardStatusCueTouchVerticalPadding
+        )
+        let statusCueMinVerticalPadding =
+            PlozzTheme.Metrics.cardStatusCueTouchMinVerticalPadding
+        #else
+        let statusCueFont = PlozzTheme.Metrics.cardStatusCueFontSize
+        let statusCueMinFont = PlozzTheme.Metrics.cardStatusCueMinFontSize
+        let statusCueHorizontalPadding = PlozzTheme.Metrics.cardStatusCueHorizontalPadding
+        let statusCueMinHorizontalPadding =
+            PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
+        let statusCueVerticalPadding = PlozzTheme.Metrics.cardStatusCueVerticalPadding
+        let statusCueMinVerticalPadding = PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
+        #endif
         self.cardStatusCueFontSize = max(
-            (PlozzTheme.Metrics.cardStatusCueFontSize * densityScale).rounded(),
-            PlozzTheme.Metrics.cardStatusCueMinFontSize
+            (statusCueFont * densityScale).rounded(),
+            statusCueMinFont
         )
         self.cardStatusCueHorizontalPadding = max(
-            (
-                PlozzTheme.Metrics.cardStatusCueHorizontalPadding
-                    * densityScale
-            ).rounded(),
-            PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
+            (statusCueHorizontalPadding * densityScale).rounded(),
+            statusCueMinHorizontalPadding
         )
         self.cardStatusCueVerticalPadding = max(
-            (
-                PlozzTheme.Metrics.cardStatusCueVerticalPadding
-                    * densityScale
-            ).rounded(),
-            PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
+            (statusCueVerticalPadding * densityScale).rounded(),
+            statusCueMinVerticalPadding
         )
         // Section headers scale with density but dampened, so they anchor the page
         // hierarchy instead of ballooning/shrinking 1:1 with the cards.

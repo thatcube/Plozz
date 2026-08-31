@@ -67,8 +67,7 @@ private struct PlozziOSExtrasRail: View {
                             PlozziOSPosterCard(
                                 item: extra.item,
                                 style: .landscape,
-                                showsResumeChip: extra.supportsResume,
-                                statusCue: extra.kind.displayName
+                                showsResumeChip: extra.supportsResume
                             )
                             .frame(width: cardWidth)
                         }

@@ -38,10 +38,6 @@ struct ExtrasRowView: View {
                 spoilerSettings: spoilerSettings,
                 leadingInset: leadingInset,
                 onFocusEntered: onFocusEntered,
-                statusCue: { item in
-                    extras.first(where: { $0.item.stablePresentationID == item.stablePresentationID })?
-                        .kind.displayName
-                },
                 playsOnSelect: true,
                 onSelect: { item in
                     guard let extra = extras.first(where: {

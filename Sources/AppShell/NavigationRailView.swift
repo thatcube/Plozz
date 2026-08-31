@@ -35,10 +35,10 @@ enum NavigationRailMetrics {
     /// Floating-menu geometry. Row pills sit exactly 14 points inside every panel
     /// edge. The outer radius adds that same inset to the pill radius, keeping their
     /// corner centres concentric.
-    static let expandedContentInset: CGFloat = leadingInset - 4
+    static let expandedRowBackgroundOutset: CGFloat = 4
     static let expandedPanelContentInset: CGFloat = 14
     static let expandedPanelHorizontalInset: CGFloat =
-        expandedContentInset - expandedPanelContentInset
+        leadingInset - expandedRowBackgroundOutset - expandedPanelContentInset
     static let expandedPanelVerticalInset: CGFloat =
         verticalPadding + bumperHeight + itemVerticalPadding - expandedPanelContentInset
     static let rowInnerPadding: CGFloat = 10
@@ -49,7 +49,6 @@ enum NavigationRailMetrics {
     /// Aligns the icon centre with the centre of the capsule's leading arc.
     static let rowHorizontalPadding: CGFloat =
         expandedRowCornerRadius - (iconColumnWidth / 2)
-    static let expandedRowLeadingPadding: CGFloat = rowHorizontalPadding + 4
     static let expandedPanelCornerRadius: CGFloat =
         expandedRowCornerRadius + expandedPanelContentInset
     static let itemIconSize: CGFloat = 26
@@ -198,13 +197,8 @@ struct NavigationRailView: View {
             edgeBumper(.bottomBumper)
         }
         .padding(.vertical, NavigationRailMetrics.verticalPadding)
-        .padding(
-            .leading,
-            isExpanded
-                ? NavigationRailMetrics.expandedContentInset
-                : NavigationRailMetrics.leadingInset
-        )
-        .padding(.trailing, isExpanded ? NavigationRailMetrics.expandedContentInset : 0)
+        .padding(.leading, NavigationRailMetrics.leadingInset)
+        .padding(.trailing, isExpanded ? NavigationRailMetrics.leadingInset : 0)
         .frame(
             width: isExpanded ? NavigationRailMetrics.expandedWidth : NavigationRailMetrics.collapsedWidth,
             alignment: .leading
@@ -498,7 +492,8 @@ struct NavigationRailView: View {
             .frame(
                 width: isExpanded
                     ? NavigationRailMetrics.expandedWidth
-                        - (NavigationRailMetrics.expandedContentInset * 2)
+                        - (NavigationRailMetrics.leadingInset * 2)
+                        + (NavigationRailMetrics.expandedRowBackgroundOutset * 2)
                         - (NavigationRailMetrics.dividerHorizontalInset * 2)
                     : NavigationRailMetrics.iconColumnWidth * 0.6,
                 height: 2
@@ -636,15 +631,9 @@ private struct NavigationRailItemStyle: ButtonStyle {
                     : Color.clear
             )
         return configuration.label
-            // Expanded rows trade four points of outer clearance for four points of
-            // leading content inset, so the pill grows left while the icon stays put.
-            // Matching collapsed insets around the square icon slot makes a circle.
-            .padding(
-                .leading,
-                isExpanded
-                    ? NavigationRailMetrics.expandedRowLeadingPadding
-                    : NavigationRailMetrics.rowHorizontalPadding
-            )
+            // Fixed content geometry keeps the icon perfectly still while the rail
+            // expands. Matching insets around the square icon slot makes a circle.
+            .padding(.leading, NavigationRailMetrics.rowHorizontalPadding)
             .padding(.trailing, NavigationRailMetrics.rowHorizontalPadding)
             .padding(.vertical, NavigationRailMetrics.rowInnerPadding)
             .foregroundStyle(foreground)
@@ -658,9 +647,11 @@ private struct NavigationRailItemStyle: ButtonStyle {
             .background(
                 Capsule(style: .continuous)
                     .fill(fill)
+                    .padding(
+                        .horizontal,
+                        isExpanded ? -NavigationRailMetrics.expandedRowBackgroundOutset : 0
+                    )
             )
-            .scaleEffect(isFocused && !isExpanded ? 1.03 : 1)
-            .animation(isExpanded ? nil : .easeOut(duration: 0.12), value: isFocused)
     }
 }
 #endif

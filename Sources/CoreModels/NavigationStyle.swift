@@ -68,19 +68,19 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
         case .tabBar:
             return LocalizedStringResource(
                 "navigationStyle.detail.tabBar",
-                defaultValue: "Tabs sit in a bar across the top of each page.",
+                defaultValue: "Native tabs stay across the top.",
                 comment: "One-line explanation shown under the navigation-style picker."
             )
         case .sidebar:
             return LocalizedStringResource(
                 "navigationStyle.detail.sidebar",
-                defaultValue: "One button opens the system sidebar.",
+                defaultValue: "The native sidebar opens from the top left.",
                 comment: "One-line explanation shown under the navigation-style picker."
             )
         case .rail:
             return LocalizedStringResource(
                 "navigationStyle.detail.rail",
-                defaultValue: "A pinned icon list expands to show labels and libraries.",
+                defaultValue: "The pinned sidebar stays visible on the left.",
                 comment: "One-line explanation shown under the navigation-style picker."
             )
         }

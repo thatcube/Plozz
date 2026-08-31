@@ -403578,7 +403578,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "A pinned icon list expands to show labels and libraries."
+            "value" : "The pinned sidebar stays visible on the left."
           }
         },
         "es" : {
@@ -403806,7 +403806,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "One button opens the system sidebar."
+            "value" : "The native sidebar opens from the top left."
           }
         },
         "es" : {
@@ -404034,7 +404034,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Tabs sit in a bar across the top of each page."
+            "value" : "Native tabs stay across the top."
           }
         },
         "es" : {

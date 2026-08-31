@@ -119,8 +119,9 @@ struct NavigationRailView: View {
     /// The last row that actually held focus, so an edge bumper can hand focus
     /// straight back to it.
     @State private var lastFocusedRow: RailFocusTarget?
-    /// Briefly makes every row unfocusable so the focus engine is FORCED to move
-    /// focus out of the rail. See `releaseFocusToPage()`.
+    /// Makes every row unfocusable while focus is moving to the page. The rows stay
+    /// unavailable until the next explicit request to open the rail, so a slow
+    /// destination cannot let tvOS fall back into the menu.
     @State private var isReleasingFocus = false
     /// Continuously tracks how much content has moved past each edge, so the mask
     /// follows the scroll instead of flashing on at a threshold.
@@ -261,15 +262,13 @@ struct NavigationRailView: View {
     /// leave focus on an item that can no longer hold it, so it runs an update and
     /// re-homes focus. By then the rail has collapsed and the shell has marked the
     /// page as its focus scope's preferred target, so focus lands on the page's own
-    /// default rather than somewhere arbitrary. The rows are restored a moment
-    /// later, once focus is safely out.
+    /// default rather than somewhere arbitrary. The rows remain unavailable until
+    /// the next explicit rail-open request. That matters when a library is still
+    /// loading and has no focusable content yet: restoring them on a timer lets
+    /// tvOS re-home focus back into the rail and reopen it.
     private func releaseFocusToPage() {
         isReleasingFocus = true
         focusedTarget = nil
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
-            isReleasingFocus = false
-        }
     }
 
     /// Whether `target` is the row an edge bumper is currently bouncing focus back
@@ -305,6 +304,7 @@ struct NavigationRailView: View {
     /// hand-off has to wait for the current focus transaction to finish.
     private func adoptFocus(_ target: RailFocusTarget) {
         Task { @MainActor in
+            isReleasingFocus = false
             await Task.yield()
             focusedTarget = target
         }

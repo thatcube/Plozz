@@ -224,6 +224,106 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertEqual(items.last?.title, "Film 102")
     }
 
+    /// Discover can transiently return a short first window even while reporting
+    /// that the watchlist contains many more titles. Treating every short page as
+    /// terminal made a large watchlist collapse to four cards until app relaunch.
+    func testWatchlistContinuesAfterShortPageWhenTotalReportsMore() async throws {
+        let stub = StubHTTPClient()
+        let remainder = (4..<104).map {
+            """
+            {"ratingKey":"k\($0)","type":"movie","title":"Film \($0)","year":2020}
+            """
+        }.joined(separator: ",")
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            """
+            {"MediaContainer":{"size":4,"totalSize":104,"Metadata":[
+              {"ratingKey":"k0","type":"movie","title":"Film 0","year":2020},
+              {"ratingKey":"k1","type":"movie","title":"Film 1","year":2020},
+              {"ratingKey":"k2","type":"movie","title":"Film 2","year":2020},
+              {"ratingKey":"k3","type":"movie","title":"Film 3","year":2020}
+            ]}}
+            """,
+            """
+            {"MediaContainer":{"size":100,"totalSize":104,"Metadata":[\(remainder)]}}
+            """
+        ])
+
+        let items = try await PlexProvider(
+            session: makeSession(),
+            http: stub
+        ).watchlist()
+
+        XCTAssertEqual(items.count, 104)
+        XCTAssertEqual(items.last?.title, "Film 103")
+        XCTAssertEqual(
+            stub.sentQueryItems.compactMap {
+                $0.first { $0.name == "X-Plex-Container-Start" }?.value
+            },
+            ["0", "4"]
+        )
+    }
+
+    /// A later empty page cannot turn a partial read into authoritative success
+    /// while the service still reports unseen titles.
+    func testWatchlistRejectsIncompleteEmptyPage() async throws {
+        let stub = StubHTTPClient()
+        let firstPage = (0..<100).map {
+            """
+            {"ratingKey":"k\($0)","type":"movie","title":"Film \($0)","year":2020}
+            """
+        }.joined(separator: ",")
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            """
+            {"MediaContainer":{"size":100,"totalSize":500,"Metadata":[\(firstPage)]}}
+            """,
+            """
+            {"MediaContainer":{"size":0,"totalSize":500,"Metadata":[]}}
+            """
+        ])
+
+        do {
+            _ = try await PlexProvider(
+                session: makeSession(),
+                http: stub
+            ).watchlist()
+            XCTFail("Expected an incomplete response to fail")
+        } catch {
+            XCTAssertEqual(error as? AppError, .invalidResponse)
+        }
+    }
+
+    /// The request cap is a safety boundary, not permission to publish a list the
+    /// service itself says is incomplete.
+    func testWatchlistRejectsIncompleteReadAtRequestCap() async throws {
+        let stub = StubHTTPClient()
+        let pages = (0..<100).map { page in
+            let start = page * 4
+            let items = (start..<(start + 4)).map {
+                """
+                {"ratingKey":"k\($0)","type":"movie","title":"Film \($0)","year":2020}
+                """
+            }.joined(separator: ",")
+            return """
+            {"MediaContainer":{"size":4,"totalSize":500,"Metadata":[\(items)]}}
+            """
+        }
+        stub.stubSequence(
+            pathSuffix: "/library/sections/watchlist/all",
+            jsons: pages
+        )
+
+        do {
+            _ = try await PlexProvider(
+                session: makeSession(),
+                http: stub
+            ).watchlist()
+            XCTFail("Expected a capped partial response to fail")
+        } catch {
+            XCTAssertEqual(error as? AppError, .invalidResponse)
+        }
+        XCTAssertEqual(stub.sentPaths.count, 100)
+    }
+
     func testWatchlistWriteUsesDiscoverHost() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/actions/addToWatchlist", json: "{}")
@@ -573,5 +673,35 @@ final class PlexWatchlistSortFallbackPagingTests: XCTestCase {
 
         XCTAssertEqual(items.count, 102, "Every title exactly once — no page banked under the old ordering")
         XCTAssertEqual(Set(items.map(\.id)).count, 102, "and none of them duplicated")
+    }
+
+    func testSortFallbackResetsTheAbandonedReadTotal() async throws {
+        let stub = StubHTTPClient()
+        let firstPage = (0..<100).map {
+            #"{"ratingKey":"k\#($0)","type":"movie","title":"Film \#($0)","year":2020}"#
+        }.joined(separator: ",")
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            "{\"MediaContainer\":{\"size\":100,\"totalSize\":500,\"Metadata\":[\(firstPage)]}}",
+            "{}",
+            #"""
+            {"MediaContainer":{"size":4,"totalSize":4,"Metadata":[
+              {"ratingKey":"u0","type":"movie","title":"Unsorted 0","year":2020},
+              {"ratingKey":"u1","type":"movie","title":"Unsorted 1","year":2020},
+              {"ratingKey":"u2","type":"movie","title":"Unsorted 2","year":2020},
+              {"ratingKey":"u3","type":"movie","title":"Unsorted 3","year":2020}
+            ]}}
+            """#
+        ])
+
+        let items = try await PlexProvider(
+            session: makeSession(),
+            http: stub
+        ).watchlist()
+
+        XCTAssertEqual(
+            items.map(\.title),
+            ["Unsorted 0", "Unsorted 1", "Unsorted 2", "Unsorted 3"]
+        )
+        XCTAssertEqual(stub.sentPaths.count, 3)
     }
 }

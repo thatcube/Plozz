@@ -964,9 +964,11 @@ public struct PlexClient: Sendable {
     /// simply did not exist as far as Plozz was concerned. Nothing surfaced the
     /// shortfall either: a short page is indistinguishable from a short list.
     ///
-    /// Stops on the first short page, on a page that returns nothing, or once
-    /// `totalSize` is reached, and refuses to loop forever if a server keeps
-    /// handing back full pages.
+    /// Stops once `totalSize` is reached, on a short page only when the service
+    /// omitted `totalSize`, or when the service confirms an empty list. A short
+    /// page with a larger reported total is not complete: Discover occasionally
+    /// returns a partial window during startup, and accepting it would replace a
+    /// full cached watchlist with only those few titles.
     /// How the watchlist is asked to be ordered.
     ///
     /// Without this the endpoint returns its own default, which is not the order
@@ -987,6 +989,7 @@ public struct PlexClient: Sendable {
         let hardCap = 100
         var collected: [PlexMetadata] = []
         var start = 0
+        var expectedTotal: Int?
 
         // A sort the service does not recognise must not cost the viewer their
         // watchlist. These endpoints are undocumented and change without notice, so
@@ -1017,13 +1020,34 @@ public struct PlexClient: Sendable {
                 sort = nil
                 collected.removeAll(keepingCapacity: true)
                 start = 0
+                expectedTotal = nil
                 container = try await watchlistPage(start: 0, size: pageSize, sort: nil)
             }
             let page = container.Metadata ?? []
+            if let total = container.totalSize {
+                expectedTotal = max(expectedTotal ?? 0, total)
+            }
+
+            guard !page.isEmpty else {
+                // A successful-looking response that says more titles exist but
+                // supplies none is incomplete. Throw so the native-view cache marks
+                // this refresh stale and keeps its last-known complete bucket.
+                if let expectedTotal, start < expectedTotal {
+                    throw AppError.invalidResponse
+                }
+                break
+            }
+
             collected.append(contentsOf: page)
-            if page.count < pageSize { break }
             start += page.count
-            if let total = container.totalSize, start >= total { break }
+            if let expectedTotal {
+                if start >= expectedTotal { break }
+            } else if page.count < pageSize {
+                break
+            }
+        }
+        if let expectedTotal, start < expectedTotal {
+            throw AppError.invalidResponse
         }
         return collected
     }

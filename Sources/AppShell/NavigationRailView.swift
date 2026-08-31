@@ -32,11 +32,13 @@ enum NavigationRailMetrics {
 
     /// Width the rail grows to once focus enters it.
     static let expandedWidth: CGFloat = 400
-    /// Floating-menu geometry. Row pills sit exactly 18 points inside every panel
+    /// Floating-menu geometry. Row pills sit exactly 14 points inside every panel
     /// edge. The outer radius adds that same inset to the pill radius, keeping their
     /// corner centres concentric.
-    static let expandedPanelContentInset: CGFloat = 18
-    static let expandedPanelHorizontalInset: CGFloat = leadingInset - expandedPanelContentInset
+    static let expandedContentInset: CGFloat = leadingInset - 4
+    static let expandedPanelContentInset: CGFloat = 14
+    static let expandedPanelHorizontalInset: CGFloat =
+        expandedContentInset - expandedPanelContentInset
     static let expandedPanelVerticalInset: CGFloat =
         verticalPadding + bumperHeight + itemVerticalPadding - expandedPanelContentInset
     static let rowInnerPadding: CGFloat = 10
@@ -47,6 +49,7 @@ enum NavigationRailMetrics {
     /// Aligns the icon centre with the centre of the capsule's leading arc.
     static let rowHorizontalPadding: CGFloat =
         expandedRowCornerRadius - (iconColumnWidth / 2)
+    static let expandedRowLeadingPadding: CGFloat = rowHorizontalPadding + 4
     static let expandedPanelCornerRadius: CGFloat =
         expandedRowCornerRadius + expandedPanelContentInset
     static let itemIconSize: CGFloat = 26
@@ -195,8 +198,13 @@ struct NavigationRailView: View {
             edgeBumper(.bottomBumper)
         }
         .padding(.vertical, NavigationRailMetrics.verticalPadding)
-        .padding(.leading, NavigationRailMetrics.leadingInset)
-        .padding(.trailing, isExpanded ? NavigationRailMetrics.leadingInset : 0)
+        .padding(
+            .leading,
+            isExpanded
+                ? NavigationRailMetrics.expandedContentInset
+                : NavigationRailMetrics.leadingInset
+        )
+        .padding(.trailing, isExpanded ? NavigationRailMetrics.expandedContentInset : 0)
         .frame(
             width: isExpanded ? NavigationRailMetrics.expandedWidth : NavigationRailMetrics.collapsedWidth,
             alignment: .leading
@@ -490,7 +498,7 @@ struct NavigationRailView: View {
             .frame(
                 width: isExpanded
                     ? NavigationRailMetrics.expandedWidth
-                        - (NavigationRailMetrics.leadingInset * 2)
+                        - (NavigationRailMetrics.expandedContentInset * 2)
                         - (NavigationRailMetrics.dividerHorizontalInset * 2)
                     : NavigationRailMetrics.iconColumnWidth * 0.6,
                 height: 2
@@ -628,10 +636,16 @@ private struct NavigationRailItemStyle: ButtonStyle {
                     : Color.clear
             )
         return configuration.label
-            // The same inset in both states keeps the icon fixed during expansion.
-            // With a square icon slot, matching horizontal and vertical padding also
-            // makes the collapsed row a true circle.
-            .padding(.horizontal, NavigationRailMetrics.rowHorizontalPadding)
+            // Expanded rows trade four points of outer clearance for four points of
+            // leading content inset, so the pill grows left while the icon stays put.
+            // Matching collapsed insets around the square icon slot makes a circle.
+            .padding(
+                .leading,
+                isExpanded
+                    ? NavigationRailMetrics.expandedRowLeadingPadding
+                    : NavigationRailMetrics.rowHorizontalPadding
+            )
+            .padding(.trailing, NavigationRailMetrics.rowHorizontalPadding)
             .padding(.vertical, NavigationRailMetrics.rowInnerPadding)
             .foregroundStyle(foreground)
             // The rail sits over artwork, so an unfocused glyph carries its own

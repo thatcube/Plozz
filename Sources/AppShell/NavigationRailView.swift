@@ -173,12 +173,12 @@ struct NavigationRailView: View {
             if !entries.isEmpty {
                 sectionDivider
                 libraryList
+                sectionDivider
             } else {
                 Spacer(minLength: 0)
             }
 
             item(.settings, symbol: "gearshape.fill", label: Text(Self.settingsTitle))
-                .padding(.top, PlozzTheme.Spacing.large)
 
             edgeBumper(.bottomBumper)
         }
@@ -474,17 +474,19 @@ struct NavigationRailView: View {
         Capsule(style: .continuous)
             .fill(.white.opacity(0.22))
             .frame(
-                width: NavigationRailMetrics.iconColumnWidth * 0.6,
+                width: isExpanded
+                    ? NavigationRailMetrics.expandedWidth
+                        - (NavigationRailMetrics.leadingInset * 2)
+                    : NavigationRailMetrics.iconColumnWidth * 0.6,
                 height: 2
             )
             .frame(
-                width: NavigationRailMetrics.iconColumnWidth,
+                width: isExpanded ? nil : NavigationRailMetrics.iconColumnWidth,
                 alignment: .center
             )
-            // Match the icon's own offset. A row's glyph sits inside the pill,
-            // which insets it by this much.
-            .padding(.leading, PlozzTheme.Spacing.xSmall)
-            .padding(.vertical, PlozzTheme.Spacing.small)
+            // Collapsed, match the icon's own offset inside its focus pill.
+            .padding(.leading, isExpanded ? 0 : PlozzTheme.Spacing.xSmall)
+            .padding(.vertical, PlozzTheme.Spacing.medium)
             .accessibilityHidden(true)
     }
 

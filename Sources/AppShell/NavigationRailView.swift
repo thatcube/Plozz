@@ -77,9 +77,6 @@ enum NavigationRailMetrics {
     /// How far the fade mask overhangs the list horizontally, so a focused row's
     /// pill and its shadow are not clipped by the mask that feathers the ends.
     static let listFadeHorizontalOverhang: CGFloat = 40
-    /// Height reserved for the LIBRARIES heading, so the rows below sit at the same
-    /// place whether it is showing the word or the collapsed divider.
-    static let sectionLabelHeight: CGFloat = 22
     static let expandAnimation = Animation.easeOut(duration: 0.22)
 }
 
@@ -174,7 +171,7 @@ struct NavigationRailView: View {
             }
 
             if !entries.isEmpty {
-                sectionLabel(Self.librariesTitle)
+                sectionDivider
                 libraryList
             } else {
                 Spacer(minLength: 0)
@@ -471,51 +468,24 @@ struct NavigationRailView: View {
         return isSelected ? palette.accent : .primary
     }
 
-    /// The LIBRARIES heading — a word when there is room for one, a rule when
-    /// there is not.
-    ///
-    /// Collapsed, the rail is a column of glyphs and the word does not fit. Hiding
-    /// it with `opacity` kept its full height, leaving an unexplained gap in the
-    /// middle of the icons. A short divider occupies that space instead: it still
-    /// separates the destinations above from the libraries below, which is the
-    /// heading's actual job, and it reads as deliberate.
-    private func sectionLabel(_ title: LocalizedStringResource) -> some View {
-        Group {
-            if isExpanded {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .textCase(.uppercase)
-                    .plozzForeground(.secondary)
-                    .lineLimit(1)
-                    .padding(.leading, PlozzTheme.Spacing.small)
-            } else {
-                Capsule(style: .continuous)
-                    .fill(.white.opacity(0.22))
-                    .frame(
-                        width: NavigationRailMetrics.iconColumnWidth * 0.6,
-                        height: 2
-                    )
-                    .frame(
-                        width: NavigationRailMetrics.iconColumnWidth,
-                        alignment: .center
-                    )
-                    // Match the icon's own offset. A row's glyph sits inside the
-                    // pill, which insets it by this much, so a divider aligned to
-                    // the raw icon column reads a notch left of every icon above
-                    // and below it.
-                    .padding(.leading, PlozzTheme.Spacing.xSmall)
-            }
-        }
-        // The word hangs at the BOTTOM of its slot, directly above the first row.
-        // The rule instead sits in the MIDDLE of the same slot, centred in the gap
-        // it divides — bottom-aligning it left it crowding the icon beneath.
-        .frame(
-            height: NavigationRailMetrics.sectionLabelHeight,
-            alignment: isExpanded ? .bottom : .center
-        )
-        .padding(.top, isExpanded ? PlozzTheme.Spacing.small : PlozzTheme.Spacing.xSmall)
-        .padding(.bottom, PlozzTheme.Spacing.xSmall)
-        .accessibilityHidden(!isExpanded)
+    /// A quiet separator between fixed destinations and the viewer's libraries.
+    /// It stays identical in both rail states so expansion changes no content.
+    private var sectionDivider: some View {
+        Capsule(style: .continuous)
+            .fill(.white.opacity(0.22))
+            .frame(
+                width: NavigationRailMetrics.iconColumnWidth * 0.6,
+                height: 2
+            )
+            .frame(
+                width: NavigationRailMetrics.iconColumnWidth,
+                alignment: .center
+            )
+            // Match the icon's own offset. A row's glyph sits inside the pill,
+            // which insets it by this much.
+            .padding(.leading, PlozzTheme.Spacing.xSmall)
+            .padding(.vertical, PlozzTheme.Spacing.small)
+            .accessibilityHidden(true)
     }
 
     /// The rail's backing.
@@ -569,11 +539,6 @@ struct NavigationRailView: View {
         "navigationRail.allLibraries",
         defaultValue: "All Libraries",
         comment: "Navigation destination that browses every library at once."
-    )
-    private static let librariesTitle = LocalizedStringResource(
-        "navigationRail.librariesHeader",
-        defaultValue: "Libraries",
-        comment: "Heading above the list of libraries in the navigation rail."
     )
     private static let switchProfileSubtitle = LocalizedStringResource(
         "navigationRail.switchProfile",

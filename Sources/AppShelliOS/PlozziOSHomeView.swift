@@ -1795,7 +1795,13 @@ private struct PlozziOSFeaturedRow: View {
                 )
 
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 14) {
+                LazyHStack(
+                    alignment: .top,
+                    spacing: PlozziOSMediaRailLayout.stackSpacing(
+                        metrics: metrics,
+                        cardStyle: cardStyle
+                    )
+                ) {
                     ForEach(items, id: \.stablePresentationID) { item in
                         PlozziOSHomeMediaCard(
                             item: item,
@@ -1850,7 +1856,9 @@ private struct PlozziOSHomeRowView: View {
                     title: Text(row.title),
                     style: row.style == .landscape ? .landscape : .poster,
                     showsCaption: !(row.kind == .continueWatching
-                        && appModel.settings.homeVisibility.continueWatchingShowsSeriesArtwork)
+                        && appModel.settings.homeVisibility.continueWatchingShowsSeriesArtwork),
+                    showsSeriesArtwork: row.kind == .continueWatching
+                        && appModel.settings.homeVisibility.continueWatchingShowsSeriesArtwork
                 )
             } else {
                 PlozziOSHomeMediaRail(
@@ -1873,7 +1881,7 @@ private struct PlozziOSHomeRowView: View {
 
     private var libraryRow: some View {
         ScrollView(.horizontal) {
-            LazyHStack(spacing: 14) {
+            LazyHStack(spacing: PlozziOSMediaRailLayout.visibleSpacing) {
                 ForEach(row.libraries) { library in
                     // Still gated on the account having a live provider; the route
                     // resolves it again at push time so this row holds no reference.
@@ -1939,7 +1947,13 @@ private struct PlozziOSHomeMediaRail: View {
                 )
 
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 14) {
+                LazyHStack(
+                    alignment: .top,
+                    spacing: PlozziOSMediaRailLayout.stackSpacing(
+                        metrics: metrics,
+                        cardStyle: cardStyle
+                    )
+                ) {
                     ForEach(items, id: \.stablePresentationID) { item in
                         PlozziOSHomeMediaCard(
                             item: item,

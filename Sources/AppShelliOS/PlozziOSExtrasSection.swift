@@ -54,6 +54,7 @@ struct PlozziOSExtrasSection: View {
 }
 
 private struct PlozziOSExtrasRail: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
 
     let extras: [MediaExtra]
@@ -67,7 +68,13 @@ private struct PlozziOSExtrasRail: View {
                 .font(.title3.weight(.bold))
                 .padding(.horizontal, inset)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
+                LazyHStack(
+                    alignment: .top,
+                    spacing: PlozziOSMediaRailLayout.stackSpacing(
+                        metrics: metrics,
+                        cardStyle: cardStyle
+                    )
+                ) {
                     ForEach(extras) { extra in
                         Button {
                             onSelect(extra)
@@ -90,6 +97,7 @@ private struct PlozziOSExtrasRail: View {
 }
 
 private struct PlozziOSExtrasLoadingRail: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
 
     let inset: CGFloat
@@ -101,7 +109,13 @@ private struct PlozziOSExtrasLoadingRail: View {
                 .font(.title3.weight(.bold))
                 .padding(.horizontal, inset)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
+                LazyHStack(
+                    alignment: .top,
+                    spacing: PlozziOSMediaRailLayout.stackSpacing(
+                        metrics: metrics,
+                        cardStyle: cardStyle
+                    )
+                ) {
                     ForEach(0..<3, id: \.self) { _ in
                         PlozziOSPosterCard(item: nil, style: .landscape)
                             .frame(width: cardWidth)

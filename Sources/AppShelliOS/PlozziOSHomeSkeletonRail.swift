@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreModels
 import CoreUI
 import FeatureHomeCore
 import SwiftUI
@@ -11,10 +12,9 @@ import SwiftUI
 /// the tvOS skeleton is built around overscan-safe screen padding and its own
 /// row metrics, while iOS uses `PlozziOSPageLayout` insets and `contentMargins`.
 ///
-/// Geometry mirrors `PlozziOSHomeMediaRail` exactly (title font, 12pt title gap,
-/// 14pt card spacing, the same `cardSlotWidth`, the same horizontal/vertical
-/// content margins). That 1:1 match is the point: when the real items arrive the
-/// cards swap in place, so nothing reflows or jumps.
+/// Geometry mirrors `PlozziOSHomeMediaRail` exactly (title font, title gap,
+/// visible media spacing, the same `cardSlotWidth`, and the same content margins).
+/// That 1:1 match is the point: when real items arrive, nothing reflows or jumps.
 struct PlozziOSHomeSkeletonRail: View {
     @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
@@ -27,6 +27,8 @@ struct PlozziOSHomeSkeletonRail: View {
     /// Matches the caption-less Continue Watching card, so the placeholder is the
     /// same height as the card replacing it.
     var showsCaption: Bool = true
+    /// Matches Continue Watching's narrower, deeper series-artwork card shape.
+    var showsSeriesArtwork: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -41,16 +43,24 @@ struct PlozziOSHomeSkeletonRail: View {
                 // Deliberately NOT lazy: the placeholders are cheap, and a lazy
                 // stack would only materialise the ones already on screen — the
                 // opposite of what a "never show a blank row" placeholder is for.
-                HStack(alignment: .top, spacing: 14) {
+                HStack(
+                    alignment: .top,
+                    spacing: PlozziOSMediaRailLayout.stackSpacing(
+                        metrics: metrics,
+                        cardStyle: cardStyle
+                    )
+                ) {
                     ForEach(0..<cardCount, id: \.self) { _ in
                         SkeletonCardView(
                             style: style == .landscape ? .landscape : .poster,
-                            showsCaption: showsCaption
+                            showsCaption: showsCaption,
+                            showsSeriesArtwork: showsSeriesArtwork
                         )
                             .frame(
                                 width: metrics.cardSlotWidth(
                                     for: style,
-                                    cardStyle: cardStyle
+                                    cardStyle: cardStyle,
+                                    showsSeriesArtwork: showsSeriesArtwork
                                 )
                             )
                     }

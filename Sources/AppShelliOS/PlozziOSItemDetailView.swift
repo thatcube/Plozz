@@ -1756,7 +1756,10 @@ private struct PlozziOSInlineEpisodeRail: View {
             .frame(minHeight: 180)
         } else if let episodes {
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 14) {
+                LazyHStack(
+                    alignment: .top,
+                    spacing: PlozziOSMediaRailLayout.visibleSpacing
+                ) {
                     ForEach(episodes) { episode in
                         PlozziOSInlineEpisodeEntry(
                             episode: episode,
@@ -1792,7 +1795,10 @@ private struct PlozziOSInlineEpisodeSkeletonRail: View {
 
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 14) {
+            HStack(
+                alignment: .top,
+                spacing: PlozziOSMediaRailLayout.visibleSpacing
+            ) {
                 ForEach(0..<6, id: \.self) { _ in
                     PlozziOSInlineEpisodeSkeleton()
                 }
@@ -2168,7 +2174,10 @@ private struct PlozziOSCastSection: View {
                 .padding(.horizontal, pageInset)
 
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
+                LazyHStack(
+                    alignment: .top,
+                    spacing: PlozziOSMediaRailLayout.visibleSpacing
+                ) {
                     ForEach(people.prefix(20)) { person in
                         Button {
                             openPerson?(person, sourceAccountID)

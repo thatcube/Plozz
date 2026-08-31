@@ -49,6 +49,24 @@ struct PlozziOSPosterCard: View {
     }
 }
 
+enum PlozziOSMediaRailLayout {
+    /// Visible edge-to-edge gap used by every horizontal media rail on iOS.
+    /// This matches the season episode rail, whose spacing is the visual baseline.
+    static let visibleSpacing: CGFloat = 14
+
+    /// Borderless cards reserve side margins inside their layout slots for focus
+    /// clearance. Subtract those margins so artwork still lands exactly
+    /// `visibleSpacing` apart instead of silently adding both margins to the gap.
+    static func stackSpacing(metrics: PlozzMetrics, cardStyle: CardStyle) -> CGFloat {
+        switch cardStyle {
+        case .framed:
+            visibleSpacing
+        case .borderless:
+            max(0, visibleSpacing - metrics.borderlessCardSideMargin * 2)
+        }
+    }
+}
+
 extension UIDensity {
     var iOSPosterMinimumWidth: CGFloat {
         max(86, CGFloat(116 * scale))

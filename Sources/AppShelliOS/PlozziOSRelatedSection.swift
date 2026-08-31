@@ -26,7 +26,13 @@ struct PlozziOSRelatedSection: View {
                     .padding(.horizontal, inset)
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
+                    LazyHStack(
+                        alignment: .top,
+                        spacing: PlozziOSMediaRailLayout.stackSpacing(
+                            metrics: metrics,
+                            cardStyle: cardStyle
+                        )
+                    ) {
                         ForEach(items, id: \.stablePresentationID) { item in
                             Button {
                                 onSelect(item)

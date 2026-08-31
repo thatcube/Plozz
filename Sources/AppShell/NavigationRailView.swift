@@ -181,18 +181,14 @@ struct NavigationRailView: View {
         }
         .padding(.vertical, NavigationRailMetrics.verticalPadding)
         .padding(.leading, NavigationRailMetrics.leadingInset)
+        .padding(.trailing, isExpanded ? 16 : 0)
         .frame(
             width: isExpanded ? NavigationRailMetrics.expandedWidth : NavigationRailMetrics.collapsedWidth,
             alignment: .leading
         )
         .frame(maxHeight: .infinity, alignment: .top)
-        // NO shadow on this container. A shadow forces the whole subtree to be
-        // rasterised offscreen to be blurred, so two stacked shadows here meant the
-        // ENTIRE rail — profile, every library row, Settings — was rendered offscreen
-        // twice per frame, throughout an animation that is already re-laying the rail
-        // out as it widens. That was the lag on opening. Legibility is a per-GLYPH
-        // concern and is handled per row in `NavigationRailItemStyle`, where the
-        // blurred area is a single small label instead of the whole rail.
+        // The panel itself never carries a shadow: blurring a full-height surface
+        // forces the whole rail subtree through an offscreen render on every frame.
         .background(alignment: .leading) { backdrop }
         .animation(NavigationRailMetrics.expandAnimation, value: isExpanded)
         // One focus section, so a Left press from the content lands in the rail as
@@ -391,7 +387,13 @@ struct NavigationRailView: View {
             .frame(maxWidth: isExpanded ? .infinity : nil, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(NavigationRailItemStyle(isSelected: false, accent: palette.accent))
+        .buttonStyle(
+            NavigationRailItemStyle(
+                isExpanded: isExpanded,
+                isSelected: false,
+                accent: palette.accent
+            )
+        )
         .focused($focusedTarget, equals: .profile)
         .disabled(!isRowFocusable(.profile))
         .accessibilityLabel(Text(Self.switchProfileSubtitle))
@@ -432,6 +434,7 @@ struct NavigationRailView: View {
         }
         .buttonStyle(
             NavigationRailItemStyle(
+                isExpanded: isExpanded,
                 isSelected: selection == destination,
                 accent: palette.accent,
                 holdsFocusStyling: isBouncingOffBumper(.destination(destination))
@@ -492,18 +495,9 @@ struct NavigationRailView: View {
 
     /// The rail's backing.
     ///
-    /// Never a panel with an edge, and nothing at all while collapsed.
-    ///
-    /// A wash wide enough to sit under the LABELS is far wider than the icon
-    /// column, so while collapsed it painted a dark band roughly 180pt into a
-    /// bright hero — indistinguishable from a black bar down the side of the
-    /// picture. Collapsed, the rail is icons only, and a shadow on the glyphs
-    /// (applied above) keeps those legible over anything without covering
-    /// artwork. So the wash appears only when the labels do.
-    ///
-    /// Expanded it is an opaque panel under the rail, with a short trailing fade.
-    /// The page stays stationary now, so labels need a stable surface instead of
-    /// inheriting whatever artwork happens to sit behind them.
+    /// The open rail uses the same floating glass surface as playback and source
+    /// menus. Collapsed, there is no panel at all: the compact icon column remains
+    /// directly over the page artwork.
     @ViewBuilder
     private var backdrop: some View {
         if isExpanded {
@@ -514,21 +508,10 @@ struct NavigationRailView: View {
     }
 
     private var expandedBackdrop: some View {
-        let strength = 0.96
-        return LinearGradient(
-            stops: [
-                .init(color: .black.opacity(strength), location: 0),
-                .init(color: .black.opacity(strength), location: 0.72),
-                .init(color: .black.opacity(strength * 0.75), location: 0.84),
-                .init(color: .black.opacity(strength * 0.25), location: 0.95),
-                .init(color: .black.opacity(0), location: 1)
-            ],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
-        .frame(width: NavigationRailMetrics.expandedWidth + 180)
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
+        Color.clear
+            .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
+            .padding(.horizontal, 8)
+            .allowsHitTesting(false)
     }
 
     // MARK: - Copy
@@ -600,6 +583,7 @@ private enum RailFocusTarget: Hashable {
 /// destination keeps a quieter accent wash so you can still see where you are
 /// while focus is out in the content.
 private struct NavigationRailItemStyle: ButtonStyle {
+    let isExpanded: Bool
     let isSelected: Bool
     let accent: Color
     /// Keeps the row drawn as focused while an edge bumper briefly holds focus.
@@ -623,7 +607,12 @@ private struct NavigationRailItemStyle: ButtonStyle {
             : AnyShapeStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.primary))
         let fill: AnyShapeStyle = isFocused
             ? AnyShapeStyle(invertedFill)
-            : AnyShapeStyle(isSelected ? accent.opacity(0.20) : Color.clear)
+            : AnyShapeStyle(
+                isSelected
+                    ? accent.opacity(0.20)
+                    : isExpanded ? Color.primary.opacity(0.055) : Color.clear
+            )
+        let cornerRadius = isExpanded ? 18 : PlozzTheme.Metrics.Radius.content
 
         return configuration.label
             // Horizontal stays tight: collapsed, the pill hugs the glyph and has to
@@ -633,14 +622,18 @@ private struct NavigationRailItemStyle: ButtonStyle {
             .padding(.vertical, PlozzTheme.Spacing.small)
             .foregroundStyle(foreground)
             // The rail sits over artwork, so an unfocused glyph carries its own
-            // contrast rather than relying on the scrim alone.
-            .shadow(color: .black.opacity(isFocused ? 0 : 0.85), radius: 5, y: 1)
+            // contrast while collapsed. The open menu panel supplies that contrast.
+            .shadow(
+                color: .black.opacity(isExpanded || isFocused ? 0 : 0.85),
+                radius: 5,
+                y: 1
+            )
             .background(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.content, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(fill)
             )
-            .scaleEffect(isFocused ? 1.03 : 1)
-            .animation(.easeOut(duration: 0.12), value: isFocused)
+            .scaleEffect(isFocused && !isExpanded ? 1.03 : 1)
+            .animation(isExpanded ? nil : .easeOut(duration: 0.12), value: isFocused)
     }
 }
 #endif

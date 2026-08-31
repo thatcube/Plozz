@@ -55,15 +55,9 @@ enum NavigationRailMetrics {
     /// already the right size before focus arrives, and expanding changes width
     /// only.
     static let rowContentHeight: CGFloat = 44
-    /// Fixed height of the profile row, for the same reason: expanded it gains a
-    /// name and a subtitle, which would otherwise make it grow.
-    ///
-    /// Sized for TWO LINES of tvOS text, which is taller than it looks: a headline
-    /// line plus a caption line is ~78pt. Anything smaller does not merely look
-    /// tight — the text OVERFLOWS the frame the pill is drawn around, so the
-    /// subtitle runs into the pill's bottom edge no matter how the content is
-    /// aligned.
-    static let profileRowHeight: CGFloat = 84
+    /// The profile is a navigation row too: avatar + one label, matching every
+    /// destination's vertical rhythm.
+    static let profileRowHeight: CGFloat = rowContentHeight
     static let verticalPadding: CGFloat = 14
     /// Height of the invisible focus walls at each end of the rail.
     ///
@@ -376,15 +370,9 @@ struct NavigationRailView: View {
                 ProfileAvatarView(profile: profile, size: NavigationRailMetrics.avatarSize)
                     .frame(width: NavigationRailMetrics.iconColumnWidth)
                 if isExpanded {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: profile.name)
-                            .font(.headline.weight(.semibold))
-                            .lineLimit(1)
-                        Text(Self.switchProfileSubtitle)
-                            .font(.caption)
-                            .opacity(0.65)
-                            .lineLimit(1)
-                    }
+                    Text(verbatim: profile.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                 }
                 if isExpanded { Spacer(minLength: 0) }
             }

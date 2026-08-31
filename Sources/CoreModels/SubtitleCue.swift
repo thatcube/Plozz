@@ -141,16 +141,25 @@ public struct SubtitleText: Sendable, Equatable {
 }
 
 /// A decoded bitmap subtitle image. The `CGImage` is fully rendered (RGBA,
-/// premultiplied alpha); `normalizedRect` is `[0, 1]` against the *source* video
-/// frame, so the renderer multiplies it by the on-screen video rect to place it.
+/// premultiplied alpha); `normalizedRect` is `[0, 1]` against the subtitle
+/// composition canvas. The renderer maps that canvas onto the on-screen video
+/// rect before placing the image.
+///
+/// `canvasSize == .zero` means the subtitle canvas matches the video frame.
 /// Matches AetherEngine's `SubtitleImage` so Plozzigen cues pass straight through.
 public struct SubtitleImage: @unchecked Sendable {
     public var cgImage: CGImage
     public var normalizedRect: CGRect
+    public var canvasSize: CGSize
 
-    public init(cgImage: CGImage, normalizedRect: CGRect) {
+    public init(
+        cgImage: CGImage,
+        normalizedRect: CGRect,
+        canvasSize: CGSize = .zero
+    ) {
         self.cgImage = cgImage
         self.normalizedRect = normalizedRect
+        self.canvasSize = canvasSize
     }
 }
 

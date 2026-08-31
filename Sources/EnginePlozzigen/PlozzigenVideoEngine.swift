@@ -49,6 +49,13 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public var currentTime: TimeInterval { engine.currentTime }
     public var duration: TimeInterval { engine.duration }
 
+    public var videoAspectRatio: Double? {
+        let width = Double(engine.sourceVideoWidth)
+        let height = Double(engine.sourceVideoHeight)
+        guard width > 0, height > 0 else { return nil }
+        return width / height
+    }
+
     /// Ground truth for the menu's "selected audio" indicator: the AVStream index
     /// AetherEngine is actually decoding (its resolved `activeAudioTrackIndex`),
     /// which can differ from the container `isDefault` flag because the engine
@@ -757,7 +764,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     case .image(let image):
                         body = .image(CoreModels.SubtitleImage(
                             cgImage: image.cgImage,
-                            normalizedRect: image.position
+                            normalizedRect: image.position,
+                            canvasSize: image.canvasSize
                         ))
                     }
                     return CoreModels.SubtitleCue(
@@ -792,7 +800,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     case .image(let image):
                         body = .image(CoreModels.SubtitleImage(
                             cgImage: image.cgImage,
-                            normalizedRect: image.position
+                            normalizedRect: image.position,
+                            canvasSize: image.canvasSize
                         ))
                     }
                     return CoreModels.SubtitleCue(

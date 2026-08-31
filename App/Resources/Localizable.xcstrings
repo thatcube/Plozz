@@ -46778,7 +46778,224 @@
       }
     },
     "Behind the Scenes" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "كواليس التصوير"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Зад кулисите"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Darrere de les càmeres"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Z natáčení"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bag kulisserne"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hinter den Kulissen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Παρασκήνια"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Entre bastidores"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "پشت صحنه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kulissien takana"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dans les coulisses"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "מאחורי הקלעים"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "पर्दे के पीछे"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Iza kulisa"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kulisszák mögött"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Di Balik Layar"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dietro le quinte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "舞台裏"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "메이킹 영상"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Di Sebalik Tabir"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bak kulissene"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Achter de schermen"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kulisy"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bastidores"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Din culise"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "За кадром"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zo zákulisia"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zakulisje"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Iza kulisa"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bakom kulisserna"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เบื้องหลังการถ่ายทำ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kamera arkası"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "За лаштунками"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hậu trường"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "幕后花絮"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "幕後花絮"
+          }
+        }
+      }
     },
     "Behind the hero" : {
       "localizations" : {
@@ -61421,7 +61638,224 @@
       }
     },
     "Choose navigation for this profile" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "اختر نمط التنقل لهذا الملف الشخصي"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Изберете навигация за този профил"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tria la navegació per a aquest perfil"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vyberte navigaci pro tento profil"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vælg navigation for denne profil"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Navigation für dieses Profil wählen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Επιλέξτε τον τρόπο πλοήγησης για αυτό το προφίλ"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Elige la navegación para este perfil"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "شیوهٔ ناوبری این نمایه را انتخاب کنید"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Valitse tämän profiilin navigointi"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Choisir la navigation de ce profil"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "בחר את אופן הניווט בפרופיל הזה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "इस प्रोफ़ाइल के लिए नेविगेशन चुनें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odaberite navigaciju za ovaj profil"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Navigáció kiválasztása ehhez a profilhoz"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pilih navigasi untuk profil ini"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scegli la navigazione per questo profilo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "このプロファイルのナビゲーションを選択"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "이 프로필의 탐색 방식 선택"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pilih navigasi untuk profil ini"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Velg navigasjon for denne profilen"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kies de navigatie voor dit profiel"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wybierz sposób nawigacji dla tego profilu"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escolha a navegação deste perfil"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alege navigarea pentru acest profil"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Выберите навигацию для этого профиля"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vyberte navigáciu pre tento profil"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Izberite navigacijo za ta profil"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Izaberite navigaciju za ovaj profil"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Välj navigering för den här profilen"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เลือกรูปแบบการนำทางสำหรับโปรไฟล์นี้"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bu profil için gezinme biçimini seçin"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Виберіть навігацію для цього профілю"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Chọn kiểu điều hướng cho hồ sơ này"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "为此个人资料选择导航方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "為此個人檔案選擇導覽方式"
+          }
+        }
+      }
     },
     "Choose theme" : {
       "comment" : "Title of the first-run theme picker when profiles are off, above the theme choices.",
@@ -88420,7 +88854,224 @@
       }
     },
     "Deleted Scene" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مشهد محذوف"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Изтрита сцена"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escena eliminada"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vystřižená scéna"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Slettet scene"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Entfallene Szene"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Διαγραμμένη σκηνή"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escena eliminada"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "صحنهٔ حذف‌شده"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poistettu kohtaus"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scène coupée"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "סצנה שנמחקה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "हटाया गया सीन"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Obrisana scena"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kimaradt jelenet"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adegan yang Dihapus"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena eliminata"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "未公開シーン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "삭제된 장면"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adegan dipotong"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Slettet scene"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verwijderde scène"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usunięta scena"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cena excluída"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scenă eliminată"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Удалённая сцена"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Vystrihnutá scéna"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Izbrisani prizor"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Izbrisana scena"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Borttagen scen"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ฉากที่ถูกตัดออก"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Silinmiş sahne"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Видалена сцена"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cảnh bị cắt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "删减片段"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "刪減片段"
+          }
+        }
+      }
     },
     "Deletes the shared iCloud copy and re-uploads it from THIS Apple TV. Other devices keep their own logins. Use only if devices won't converge." : {
       "extractionState" : "stale",
@@ -118833,10 +119484,444 @@
       }
     },
     "Extra" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مادة إضافية"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Допълнителен материал"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extra"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bonus"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ekstramateriale"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extra"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Έξτρα"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extra"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مورد اضافی"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lisämateriaali"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bonus"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "תוספת"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "एक्स्ट्रा"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodatak"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extra"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ekstra"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contenuto extra"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "特典映像"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "부가 영상"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tambahan"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ekstramateriale"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extra"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodatek"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extra"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Material suplimentar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Дополнительный материал"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bonus"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodatek"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodatak"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extramaterial"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เนื้อหาเสริม"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ek içerik"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Додатковий матеріал"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nội dung bổ sung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "附加内容"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "額外內容"
+          }
+        }
+      }
     },
     "Extras" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مواد إضافية"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Допълнителни материали"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extres"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bonusy"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ekstramateriale"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extras"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Έξτρα"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extras"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "موارد اضافی"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lisämateriaalit"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bonus"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "תוספות"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "एक्स्ट्राज़"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodaci"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extrák"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ekstra"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contenuti extra"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "特典映像"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "부가 영상"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kandungan Tambahan"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ekstramateriale"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extra's"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodatki"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extras"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Materiale suplimentare"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Дополнительные материалы"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bonusy"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodatki"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodaci"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extramaterial"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เนื้อหาเสริม"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ek içerikler"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Додаткові матеріали"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nội dung bổ sung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "附加内容"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "額外內容"
+          }
+        }
+      }
     },
     "FTP sends credentials and media without encryption." : {
       "localizations" : {
@@ -121043,7 +122128,224 @@
       }
     },
     "Featurette" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "فيلم وثائقي قصير"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Кратък документален филм"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reportatge breu"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Krátký dokument"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Minidokumentar"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Featurette"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αφιέρωμα"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reportaje"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "فیلم کوتاه ویژه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lyhytdokumentti"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reportage"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "סרטון מיוחד"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "फ़ीचरेट"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kratki prilog"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kisfilm"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Featurette"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Featurette"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "特集映像"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "특집 영상"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Video khas ringkas"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kortdokumentar"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Featurette"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Materiał specjalny"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Especial"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Material special"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Фильм о фильме"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Krátky dokument"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kratki dokumentarec"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kratki prilog"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kortdokumentär"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "สารคดีสั้น"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kısa belgesel"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Мініфільм"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Phim tài liệu ngắn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "特辑"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "特輯"
+          }
+        }
+      }
     },
     "Fetching it and loading it into the player." : {
       "localizations" : {
@@ -141372,7 +142674,224 @@
       }
     },
     "Interview" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مقابلة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Интервю"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Entrevista"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rozhovor"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Interview"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Interview"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Συνέντευξη"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Entrevista"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مصاحبه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Haastattelu"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Interview"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ריאיון"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "इंटरव्यू"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Intervju"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Interjú"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wawancara"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Intervista"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "インタビュー"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "인터뷰"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Temu Bual"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Intervju"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Interview"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wywiad"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Entrevista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Interviu"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Интервью"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rozhovor"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Intervju"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Intervju"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Intervju"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "บทสัมภาษณ์"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Röportaj"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Інтерв’ю"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Phỏng vấn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "访谈"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "訪談"
+          }
+        }
+      }
     },
     "Intro Skipped" : {
       "comment" : "Brief on-screen confirmation shown after the player automatically skips an intro segment.",
@@ -163085,7 +164604,224 @@
       }
     },
     "Music & Performance" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "الموسيقى والعروض"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Музика и изпълнение"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Música i actuacions"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hudba a vystoupení"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musik og optrædener"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musik & Auftritte"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Μουσική και ερμηνείες"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Música y actuaciones"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "موسیقی و اجرا"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musiikki ja esitykset"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musique et performances"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "מוזיקה והופעות"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "संगीत और प्रस्तुति"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Glazba i nastupi"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zene és előadások"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musik & Pertunjukan"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musica ed esibizioni"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "音楽とパフォーマンス"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "음악 및 공연"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muzik & Persembahan"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musikk og opptredener"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muziek en optredens"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muzyka i występy"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Música e apresentações"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muzică și interpretări"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Музыка и выступления"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hudba a vystúpenia"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Glasba in nastopi"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muzika i nastupi"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Musik och framträdanden"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ดนตรีและการแสดง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Müzik ve performans"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Музика й виступи"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Âm nhạc & biểu diễn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "音乐与表演"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "音樂與演出"
+          }
+        }
+      }
     },
     "Music Player" : {
       "comment" : "Section header and row title in Settings for customizing the music now-playing screen.",
@@ -253457,7 +255193,224 @@
       }
     },
     "Sample" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مقطع"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Откъс"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Clip"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ukázka"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uddrag"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ausschnitt"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Κλιπ"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Muestra"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "نمونه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Näyte"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Extrait"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "קטע לדוגמה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "नमूना क्लिप"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Isječak"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Részlet"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cuplikan"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Clip"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "サンプル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "샘플"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Klip sampel"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Utdrag"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fragment"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fragment"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trecho"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fragment"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Фрагмент"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ukážka"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odlomek"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Isečak"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Provklipp"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "คลิปตัวอย่าง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Klip"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Фрагмент"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Đoạn mẫu"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "样片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "試看片段"
+          }
+        }
+      }
     },
     "Sand" : {
       "comment" : "Accessibility name for one profile color choice in the profile editor color palette.",
@@ -258753,10 +260706,444 @@
       }
     },
     "Scene" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مشهد"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сцена"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escena"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scéna"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scene"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Szene"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Σκηνή"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escena"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "صحنه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kohtaus"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scène"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "סצנה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "सीन"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jelenet"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adegan"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "シーン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "장면"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adegan"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scene"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scène"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cena"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scenă"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сцена"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scéna"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prizor"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scen"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ฉาก"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sahne"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сцена"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cảnh"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "场景"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "場景"
+          }
+        }
+      }
     },
     "Scene / Sample" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مشهد / مقطع"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сцена / откъс"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escena / clip"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scéna / ukázka"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scene / uddrag"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Szene / Ausschnitt"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Σκηνή / κλιπ"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Escena / muestra"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "صحنه / نمونه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kohtaus / näyte"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scène / extrait"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "סצנה / קטע לדוגמה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "सीन / नमूना क्लिप"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena / isječak"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jelenet / részlet"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adegan / Cuplikan"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena / clip"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "シーン／サンプル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "장면 / 샘플"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adegan / klip sampel"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scene / utdrag"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scène / fragment"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena / fragment"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cena / trecho"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scenă / fragment"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сцена / фрагмент"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scéna / ukážka"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prizor / odlomek"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scena / isečak"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scen / provklipp"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ฉาก / คลิปตัวอย่าง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sahne / klip"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сцена / фрагмент"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cảnh / Đoạn mẫu"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "场景 / 样片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "場景／試看片段"
+          }
+        }
+      }
     },
     "Schedule" : {
       "comment" : "Picker label in iOS Circadian Mode settings for choosing when the warm color schedule runs.",
@@ -277521,7 +279908,224 @@
       }
     },
     "Short" : {
-
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "فيلم قصير"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Късометражен филм"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Curtmetratge"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Krátký film"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kortfilm"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kurzfilm"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ταινία μικρού μήκους"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cortometraje"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "فیلم کوتاه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lyhytelokuva"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Court métrage"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "סרט קצר"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "लघु फ़िल्म"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kratki film"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rövidfilm"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Film Pendek"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cortometraggio"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "短編"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "단편 영상"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Filem Pendek"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kortfilm"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Korte film"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Film krótkometrażowy"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Curta"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scurtmetraj"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Короткий фильм"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Krátky film"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kratki film"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kratki film"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kortfilm"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ภาพยนตร์สั้น"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kısa film"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Короткий фільм"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Phim ngắn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "短片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "短片"
+          }
+        }
+      }
     },
     "Show Box" : {
       "comment" : "Toggle in subtitle appearance settings that shows or hides the background box behind subtitle text, on tvOS and iOS.",
@@ -404013,43 +406617,43 @@
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "قائمة أيقونات مثبَّتة تتوسّع لإظهار الأسماء والمكتبات."
+            "value" : "يبقى الشريط الجانبي المثبّت ظاهراً على اليسار."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Закачен списък с икони, който се разгъва и показва имената и медиатеките."
+            "value" : "Закачената странична лента остава видима отляво."
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Una llista d'icones fixada s'expandeix per mostrar etiquetes i biblioteques."
+            "value" : "La barra lateral fixada es manté visible a l'esquerra."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Připnutý pruh ikon se rozbalí a zobrazí názvy a knihovny."
+            "value" : "Připnutý postranní panel zůstává viditelný vlevo."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "En fastgjort ikonliste udvides og viser navne og biblioteker."
+            "value" : "Den fastgjorte sidebjælke forbliver synlig i venstre side."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Eine fixierte Symbolliste klappt auf und zeigt Bezeichnungen und Medienbibliotheken."
+            "value" : "Die fixierte Seitenleiste bleibt links sichtbar."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Μια καρφιτσωμένη λίστα εικονιδίων επεκτείνεται και εμφανίζει ετικέτες και βιβλιοθήκες."
+            "value" : "Η σταθερή πλαϊνή στήλη παραμένει ορατή στα αριστερά."
           }
         },
         "en" : {
@@ -404061,175 +406665,175 @@
         "es" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Una lista de iconos fija se expande para mostrar etiquetas y bibliotecas."
+            "value" : "La barra lateral fija permanece visible a la izquierda."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "فهرست نمادهای سنجاق‌شده باز می‌شود و عنوان‌ها و کتابخانه‌ها را نشان می‌دهد."
+            "value" : "نوار کناری سنجاق‌شده در سمت چپ نمایان می‌ماند."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kiinnitetty kuvakeluettelo laajenee ja näyttää nimet ja kirjastot."
+            "value" : "Kiinnitetty sivupalkki pysyy näkyvissä vasemmalla."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Une liste d’icônes épinglée se déploie pour afficher les libellés et les bibliothèques."
+            "value" : "La barre latérale épinglée reste visible à gauche."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "רשימת סמלים מוצמדת שנפתחת ומציגה שמות וספריות."
+            "value" : "סרגל הצד המוצמד נשאר גלוי בצד שמאל."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "पिन की गई आइकन सूची खुलकर नाम और लाइब्रेरी दिखाती है."
+            "value" : "पिन किया गया साइडबार बाईं ओर दिखाई देता रहता है।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Prikvačeni popis ikona proširuje se i prikazuje nazive i knjižnice."
+            "value" : "Prikvačena bočna traka ostaje vidljiva s lijeve strane."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "A rögzített ikonsáv kinyílva megjeleníti a neveket és a könyvtárakat."
+            "value" : "A rögzített oldalsáv bal oldalon látható marad."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Daftar ikon tersemat meluas untuk menampilkan label dan pustaka."
+            "value" : "Bar samping tersemat tetap terlihat di sebelah kiri."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Un elenco di icone fisso si espande per mostrare etichette e librerie."
+            "value" : "La barra laterale fissa resta visibile a sinistra."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "常時表示のアイコン列が展開し、名称とライブラリを表示します。"
+            "value" : "固定サイドバーは左側に常に表示されます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "고정된 아이콘 목록이 펼쳐지며 이름과 미디어 보관함을 표시합니다."
+            "value" : "고정 사이드바가 왼쪽에 계속 표시됩니다."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Senarai ikon tersemat berkembang untuk menunjukkan label dan pustaka."
+            "value" : "Bar sisi tersemat kekal kelihatan di sebelah kiri."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "En festet ikonliste utvides og viser navn og biblioteker."
+            "value" : "Det festede sidepanelet er alltid synlig til venstre."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Een vastgezette lijst met symbolen klapt uit en toont labels en bibliotheken."
+            "value" : "De vastgezette zijbalk blijft links zichtbaar."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Przypięta lista ikon rozwija się, pokazując nazwy i biblioteki."
+            "value" : "Przypięty pasek boczny pozostaje widoczny po lewej stronie."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Uma lista de ícones fixa se expande para mostrar rótulos e bibliotecas."
+            "value" : "A barra lateral fixa permanece visível à esquerda."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Lista fixată de pictograme se extinde și afișează denumirile și bibliotecile."
+            "value" : "Bara laterală fixată rămâne vizibilă în stânga."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Закреплённый ряд значков разворачивается и показывает названия и медиатеки."
+            "value" : "Закреплённая боковая панель остаётся видимой слева."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pripnutý zoznam ikon sa rozbalí a zobrazí názvy a knižnice."
+            "value" : "Pripnutý bočný panel zostáva viditeľný vľavo."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Pripeti seznam ikon se razširi in prikaže oznake ter knjižnice."
+            "value" : "Pripeta stranska vrstica ostane vidna na levi."
           }
         },
         "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Prikačena lista ikona se širi i prikazuje nazive i biblioteke."
+            "value" : "Prikačena bočna traka ostaje vidljiva sa leve strane."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "En fäst ikonlista fälls ut och visar namn och bibliotek."
+            "value" : "Det fästa sidofältet förblir synligt till vänster."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "รายการไอคอนที่ปักหมุดไว้จะขยายเพื่อแสดงชื่อและไลบรารี"
+            "value" : "แถบด้านข้างที่ปักหมุดไว้จะแสดงอยู่ทางซ้ายเสมอ"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sabit simge listesi genişleyerek etiketleri ve kitaplıkları gösterir."
+            "value" : "Sabitlenmiş kenar çubuğu solda görünür kalır."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Закріплений список піктограм розгортається й показує назви та медіатеки."
+            "value" : "Закріплена бічна панель залишається видимою ліворуч."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Danh sách biểu tượng cố định mở rộng để hiện nhãn và thư viện."
+            "value" : "Thanh bên cố định luôn hiển thị ở bên trái."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "常驻图标列表展开后显示名称和媒体库。"
+            "value" : "固定边栏始终显示在左侧。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "常駐圖示列表展開後會顯示名稱與媒體庫。"
+            "value" : "固定側邊欄會持續顯示在左側。"
           }
         }
       }
@@ -404241,43 +406845,43 @@
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "زر واحد يفتح الشريط الجانبي للنظام."
+            "value" : "يُفتح الشريط الجانبي المدمج في النظام من الزاوية العلوية اليسرى."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Един бутон отваря системната странична лента."
+            "value" : "Системната странична лента се отваря от горния ляв ъгъл."
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Un sol botó obre la barra lateral del sistema."
+            "value" : "La barra lateral nativa s'obre des de la part superior esquerra."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Jedno tlačítko otevře systémový postranní panel."
+            "value" : "Systémový postranní panel se otevírá zleva nahoře."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Én knap åbner systemets sidebjælke."
+            "value" : "Systemets sidebjælke åbnes fra øverste venstre hjørne."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Eine Taste öffnet die Seitenleiste des Systems."
+            "value" : "Die native Seitenleiste öffnet sich oben links."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Ένα κουμπί ανοίγει την πλαϊνή στήλη του συστήματος."
+            "value" : "Η πλαϊνή στήλη του συστήματος ανοίγει από επάνω αριστερά."
           }
         },
         "en" : {
@@ -404289,175 +406893,175 @@
         "es" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Un solo botón abre la barra lateral del sistema."
+            "value" : "La barra lateral del sistema se abre desde la esquina superior izquierda."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "یک دکمه نوار کناری سیستم را باز می‌کند."
+            "value" : "نوار کناری سیستم از گوشهٔ بالا سمت چپ باز می‌شود."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Yksi painike avaa järjestelmän sivupalkin."
+            "value" : "Järjestelmän sivupalkki avautuu vasemmasta yläkulmasta."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Un seul bouton ouvre la barre latérale du système."
+            "value" : "La barre latérale du système s’ouvre en haut à gauche."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "כפתור אחד פותח את סרגל הצד של המערכת."
+            "value" : "סרגל הצד של המערכת נפתח מהפינה השמאלית העליונה."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "एक बटन सिस्टम साइडबार खोलता है."
+            "value" : "नेटिव साइडबार ऊपर बाईं ओर से खुलता है।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Jedan gumb otvara sustavsku bočnu traku."
+            "value" : "Sustavska bočna traka otvara se iz gornjeg lijevog kuta."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Egyetlen gomb nyitja meg a rendszer oldalsávját."
+            "value" : "A natív oldalsáv a bal felső sarokból nyílik meg."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Satu tombol membuka bar samping sistem."
+            "value" : "Bar samping bawaan sistem terbuka dari kiri atas."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Un solo pulsante apre la barra laterale di sistema."
+            "value" : "La barra laterale nativa si apre dall’angolo in alto a sinistra."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ボタン1つでシステムのサイドバーを開きます。"
+            "value" : "システムのサイドバーは左上から開きます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "버튼 하나로 시스템 사이드바를 엽니다."
+            "value" : "시스템 사이드바가 왼쪽 상단에서 열립니다."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Satu butang membuka bar sisi sistem."
+            "value" : "Bar sisi sistem dibuka dari bahagian kiri atas."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Én knapp åpner systemets sidepanel."
+            "value" : "Systemets sidepanel åpnes fra øverst til venstre."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Eén knop opent de systeemzijbalk."
+            "value" : "De systeemzijbalk opent linksboven."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Jeden przycisk otwiera systemowy pasek boczny."
+            "value" : "Systemowy pasek boczny rozwija się z lewego górnego rogu."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Um único botão abre a barra lateral do sistema."
+            "value" : "A barra lateral do sistema abre pelo canto superior esquerdo."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Un singur buton deschide bara laterală de sistem."
+            "value" : "Bara laterală nativă se deschide din colțul din stânga sus."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Одна кнопка открывает системную боковую панель."
+            "value" : "Системная боковая панель открывается из левого верхнего угла."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Jedno tlačidlo otvorí systémový bočný panel."
+            "value" : "Systémový bočný panel sa otvára z ľavého horného rohu."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "En gumb odpre sistemsko stransko vrstico."
+            "value" : "Sistemska stranska vrstica se odpre zgoraj levo."
           }
         },
         "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Jedno dugme otvara sistemsku bočnu traku."
+            "value" : "Sistemska bočna traka otvara se iz gornjeg levog ugla."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "En knapp öppnar systemets sidofält."
+            "value" : "Systemets sidofält öppnas från det övre vänstra hörnet."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "ปุ่มเดียวเปิดแถบด้านข้างของระบบ"
+            "value" : "แถบด้านข้างของระบบจะเปิดจากมุมซ้ายบน"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tek bir düğme sistem kenar çubuğunu açar."
+            "value" : "Yerleşik kenar çubuğu sol üstten açılır."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Одна кнопка відкриває системну бічну панель."
+            "value" : "Системна бічна панель відкривається з верхнього лівого кута."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Một nút mở thanh bên hệ thống."
+            "value" : "Thanh bên hệ thống mở từ góc trên bên trái."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "一个按钮即可打开系统边栏。"
+            "value" : "系统边栏从左上角打开。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "一個按鈕即可開啟系統側邊欄。"
+            "value" : "系統側邊欄會從左上角開啟。"
           }
         }
       }
@@ -404469,43 +407073,43 @@
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "تظهر علامات التبويب في شريط أعلى كل صفحة."
+            "value" : "تبقى علامات تبويب النظام ممتدة في الأعلى."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Разделите са в лента в горната част на всяка страница."
+            "value" : "Системните раздели остават в горната част."
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Les pestanyes es mostren en una barra a la part superior de cada pàgina."
+            "value" : "Les pestanyes natives es mantenen a la part superior."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Karty jsou v pruhu v horní části každé stránky."
+            "value" : "Systémové karty zůstávají nahoře."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Faneblade sidder i en bjælke øverst på hver side."
+            "value" : "Systemets faneblade forbliver øverst."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tabs befinden sich in einer Leiste am oberen Rand jeder Seite."
+            "value" : "Die nativen Tabs bleiben oben sichtbar."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Οι καρτέλες βρίσκονται σε μια γραμμή στο επάνω μέρος κάθε σελίδας."
+            "value" : "Οι καρτέλες του συστήματος παραμένουν στο επάνω μέρος."
           }
         },
         "en" : {
@@ -404517,175 +407121,175 @@
         "es" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Las pestañas aparecen en una barra en la parte superior de cada página."
+            "value" : "Las pestañas nativas permanecen en la parte superior."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "تب‌ها در نواری در بالای هر صفحه قرار دارند."
+            "value" : "تب‌های سیستم در بالای صفحه باقی می‌مانند."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Välilehdet ovat palkissa jokaisen sivun yläreunassa."
+            "value" : "Järjestelmän välilehdet pysyvät yläreunassa."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Les onglets s’affichent dans une barre en haut de chaque page."
+            "value" : "Les onglets du système restent affichés en haut."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "הכרטיסיות ממוקמות בשורה בראש כל עמוד."
+            "value" : "כרטיסיות המערכת נשארות לאורך החלק העליון."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "हर पेज के ऊपर बार में टैब दिखते हैं."
+            "value" : "नेटिव टैब ऊपर दिखाई देते रहते हैं।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kartice su u traci na vrhu svake stranice."
+            "value" : "Sustavske kartice ostaju pri vrhu."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Lapok a lap tetején lévő sávban helyezkednek el."
+            "value" : "A natív fülek felül maradnak."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tab berada di bilah di bagian atas setiap halaman."
+            "value" : "Tab bawaan tetap berjajar di bagian atas."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "I pannelli si trovano in una barra nella parte superiore di ogni pagina."
+            "value" : "Le schede native restano in alto."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "各ページの上部にタブバーが配置されます。"
+            "value" : "標準のタブは上部に常に表示されます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "탭이 각 페이지 상단의 바에 위치합니다."
+            "value" : "시스템 탭이 상단에 계속 표시됩니다."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tab terletak dalam bar merentasi bahagian atas setiap halaman."
+            "value" : "Tab sistem kekal merentasi bahagian atas."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Faner ligger i en linje øverst på hver side."
+            "value" : "Systemets faner ligger alltid øverst."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tabbladen staan in een balk boven elke pagina."
+            "value" : "Systeemtabbladen blijven bovenaan zichtbaar."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Karty są na pasku u góry każdej strony."
+            "value" : "Systemowe karty pozostają u góry ekranu."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "As abas ficam em uma barra no topo de cada página."
+            "value" : "As abas do sistema ficam no topo."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Filele se află într-o bară în partea de sus a fiecărei pagini."
+            "value" : "Filele native rămân în partea de sus."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Вкладки расположены в панели в верхней части каждой страницы."
+            "value" : "Системные вкладки остаются вверху."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Karty sú v paneli pozdĺž hornej časti každej stránky."
+            "value" : "Systémové karty zostávajú navrchu."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Zavihki so v vrstici na vrhu vsake strani."
+            "value" : "Sistemski zavihki ostanejo na vrhu."
           }
         },
         "sr-Latn" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Kartice su u traci na vrhu svake stranice."
+            "value" : "Sistemske kartice ostaju na vrhu."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Flikarna ligger i en rad högst upp på varje sida."
+            "value" : "Systemets flikar ligger kvar högst upp."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "แท็บอยู่ในแถบด้านบนของแต่ละหน้า"
+            "value" : "แท็บของระบบจะแสดงอยู่ด้านบนตลอดเวลา"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Sekmeler her sayfanın üst kısmındaki çubukta yer alır."
+            "value" : "Yerleşik sekmeler üst kısımda görünür kalır."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Вкладки розташовано на панелі вгорі кожної сторінки."
+            "value" : "Системні вкладки залишаються вгорі."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Tab nằm trong một thanh ở trên cùng của mỗi trang."
+            "value" : "Các tab hệ thống luôn hiển thị ở phía trên."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "标签页位于每页顶部。"
+            "value" : "系统标签页始终显示在顶部。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "分頁列橫跨於每個頁面的頂端。"
+            "value" : "系統分頁列會持續顯示在頂端。"
           }
         }
       }

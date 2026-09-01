@@ -124,8 +124,8 @@ struct HelpDiagnosticsDetailView: View {
     private var sendDiagnosticsPanel: some View {
         SendDiagnosticsCard(
             canSend: canSendDiagnostics,
-            idleDescription: "Something not working? Send your recent activity straight to the developer — the quickest way to help track down a bug. Sent anonymously: no logins, tokens, servers, or titles.",
-            disabledDescription: "Turn on Share Crash Reports below to enable this. Your recent activity is then sent anonymously — no logins, tokens, servers, or titles."
+            idleDescription: "Send recent app logs to help diagnose a problem. Logins, servers, and media titles are excluded.",
+            disabledDescription: "Turn on Share Crash Reports below to send recent app logs."
         )
     }
 

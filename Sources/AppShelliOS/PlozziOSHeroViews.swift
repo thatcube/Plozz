@@ -2079,6 +2079,9 @@ private struct PlozziOSDetailHeroForeground: View {
                     capsuleWidth: 60,
                     resumeTrailingStyle: resume
                 )
+                // ViewThatFits can only collapse lower-priority actions when the
+                // Play label reports its readable width instead of truncating.
+                .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
         }

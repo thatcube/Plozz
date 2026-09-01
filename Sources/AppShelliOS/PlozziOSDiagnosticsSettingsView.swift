@@ -31,11 +31,11 @@ struct PlozziOSDiagnosticsSettingsView: View {
     private var crashReportingFooter: LocalizedStringResource {
         switch AppReleaseChannel.current {
         case .debug:
-            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. Local build."
+            "Anonymous crash and freeze reports. No servers, logins, credentials, or viewing activity. Local build."
         case .testflight:
-            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. TestFlight build."
+            "Anonymous crash and freeze reports. No servers, logins, credentials, or viewing activity. TestFlight build."
         case .production:
-            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. App Store build."
+            "Anonymous crash and freeze reports. No servers, logins, credentials, or viewing activity. App Store build."
         }
     }
 

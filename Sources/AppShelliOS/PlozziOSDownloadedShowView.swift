@@ -48,10 +48,27 @@ struct PlozziOSDownloadedShowView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button(role: .destructive) {
-                            pendingBulkDeletion = .show(show)
+                        Menu {
+                            if show.records.contains(where: \.isActiveDownload) {
+                                Button {
+                                    Task { await model.pause(show.records) }
+                                } label: {
+                                    Label("Pause Show", systemImage: "pause.fill")
+                                }
+                            } else if show.records.contains(where: \.isResumableDownload) {
+                                Button {
+                                    Task { await model.resume(show.records) }
+                                } label: {
+                                    Label("Resume Show", systemImage: "play.fill")
+                                }
+                            }
+                            Button(role: .destructive) {
+                                pendingBulkDeletion = .show(show)
+                            } label: {
+                                Label("Remove Show", systemImage: "trash")
+                            }
                         } label: {
-                            Label("Remove Show", systemImage: "trash")
+                            Image(systemName: "ellipsis.circle")
                         }
                     }
                 }
@@ -109,6 +126,23 @@ struct PlozziOSDownloadedShowView: View {
             HStack {
                 Text(season.title)
                 Spacer()
+                if season.records.contains(where: \.isActiveDownload) {
+                    Button {
+                        Task { await model.pause(season.records) }
+                    } label: {
+                        Image(systemName: "pause.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Pause \(season.title)")
+                } else if season.records.contains(where: \.isResumableDownload) {
+                    Button {
+                        Task { await model.resume(season.records) }
+                    } label: {
+                        Image(systemName: "play.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Resume \(season.title)")
+                }
                 Button(role: .destructive) {
                     pendingBulkDeletion = .season(season, showTitle: show.title)
                 } label: {
@@ -157,6 +191,33 @@ struct PlozziOSDownloadedShowView: View {
                 Task { await model.remove(record) }
             }
         }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if record.isActiveDownload {
+                Button {
+                    Task { await model.pause(record) }
+                } label: {
+                    Label("Pause", systemImage: "pause.fill")
+                }
+                .tint(.orange)
+            } else if record.isResumableDownload {
+                Button {
+                    Task { await model.resume(record) }
+                } label: {
+                    Label("Resume", systemImage: "play.fill")
+                }
+                .tint(.blue)
+            }
+        }
+    }
+}
+
+private extension DownloadedMediaRecord {
+    var isActiveDownload: Bool {
+        status == .queued || status == .preparing || status == .downloading
+    }
+
+    var isResumableDownload: Bool {
+        status == .paused || status == .failed
     }
 }
 

@@ -6,6 +6,8 @@ public enum MediaDownloadError: Error, Sendable, Equatable {
     case unsupportedSource
     case cannotOpenSource
     case destinationUnavailable
+    case unexpectedEndOfFile(expected: Int64, actual: Int64)
+    case invalidChunk(expectedMaximum: Int, actual: Int)
 }
 
 /// A random-access byte reader for one open download source. Abstracts the
@@ -44,8 +46,16 @@ public protocol DownloadPolicyApplying: Sendable {
     func applyDownloadPolicy(_ policy: DownloadNetworkPolicy)
 }
 
+public protocol DownloadPersistentWorkCancelling: Sendable {
+    func discardPersistentWork(identityKey: String) async
+}
+
 /// Routes durable records to the transport-specific byte mover.
-public struct RoutingMediaDownloadEngine: MediaDownloadEngine, DownloadPolicyApplying {
+public struct RoutingMediaDownloadEngine:
+    MediaDownloadEngine,
+    DownloadPolicyApplying,
+    DownloadPersistentWorkCancelling
+{
     private let directShare: any MediaDownloadEngine
     private let managedHTTP: any MediaDownloadEngine
 
@@ -81,6 +91,11 @@ public struct RoutingMediaDownloadEngine: MediaDownloadEngine, DownloadPolicyApp
     public func applyDownloadPolicy(_ policy: DownloadNetworkPolicy) {
         (directShare as? any DownloadPolicyApplying)?.applyDownloadPolicy(policy)
         (managedHTTP as? any DownloadPolicyApplying)?.applyDownloadPolicy(policy)
+    }
+
+    public func discardPersistentWork(identityKey: String) async {
+        await (managedHTTP as? any DownloadPersistentWorkCancelling)?
+            .discardPersistentWork(identityKey: identityKey)
     }
 }
 
@@ -135,33 +150,47 @@ final class TransportCursorByteReader: DownloadByteReader, @unchecked Sendable {
 /// (the OS can't continue a stateful-socket transfer while suspended).
 public struct TransportCursorDownloadEngine:
     MediaDownloadEngine,
+    DownloadPolicyApplying,
     @unchecked Sendable
 {
     private let opener: any DownloadByteSourceOpening
     private let chunkSize: Int
     private let fileManager: FileManager
+    private let rateLimiter: DownloadRateLimiter
 
     public init(
         opener: any DownloadByteSourceOpening,
         chunkSize: Int = 4 * 1_024 * 1_024,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        rateLimiter: DownloadRateLimiter = DownloadRateLimiter()
     ) {
         self.opener = opener
         self.chunkSize = max(64 * 1_024, chunkSize)
         self.fileManager = fileManager
+        self.rateLimiter = rateLimiter
     }
 
     /// Convenience: build the engine directly from a transport resolver.
     public init(
         resolver: any MediaTransportNetworkFileResolving,
         chunkSize: Int = 4 * 1_024 * 1_024,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        rateLimiter: DownloadRateLimiter = DownloadRateLimiter()
     ) {
         self.init(
             opener: MediaTransportByteSourceOpener(resolver: resolver),
             chunkSize: chunkSize,
-            fileManager: fileManager
+            fileManager: fileManager,
+            rateLimiter: rateLimiter
         )
+    }
+
+    public func applyDownloadPolicy(_ policy: DownloadNetworkPolicy) {
+        Task {
+            await rateLimiter.update(
+                maximumBytesPerSecond: policy.maximumBytesPerSecond
+            )
+        }
     }
 
     public func download(
@@ -200,9 +229,10 @@ public struct TransportCursorDownloadEngine:
     ) async throws -> Int64 {
         let total = reader.byteSize
         // A resume offset past EOF (file shrank/changed) means start over.
-        var offset = min(max(0, startOffset), total)
-        if offset != startOffset {
-            try truncate(destination, to: offset)
+        var offset = max(0, startOffset)
+        if offset > total {
+            offset = 0
+            try truncate(destination, to: 0)
         }
 
         guard let handle = FileHandle(forWritingAtPath: destination.path) else {
@@ -215,20 +245,79 @@ public struct TransportCursorDownloadEngine:
         while offset < total {
             try Task.checkCancellation()
             let length = Int(min(Int64(chunkSize), total - offset))
+            try await rateLimiter.waitToTransfer(byteCount: length)
             let data = try await reader.read(at: offset, length: length)
-            if data.isEmpty { break }
+            guard !data.isEmpty else {
+                throw MediaDownloadError.unexpectedEndOfFile(
+                    expected: total,
+                    actual: offset
+                )
+            }
+            guard data.count <= length else {
+                throw MediaDownloadError.invalidChunk(
+                    expectedMaximum: length,
+                    actual: data.count
+                )
+            }
             try handle.write(contentsOf: data)
             offset += Int64(data.count)
             await onProgress(offset, total)
         }
         try handle.synchronize()
-        return total
+        guard offset == total else {
+            throw MediaDownloadError.unexpectedEndOfFile(
+                expected: total,
+                actual: offset
+            )
+        }
+        return offset
     }
 
     private func ensureParentDirectory(of url: URL) throws {
         let dir = url.deletingLastPathComponent()
         if !fileManager.fileExists(atPath: dir.path) {
             try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+    }
+
+    /// Shared leaky-bucket scheduler used by every foreground byte mover. Waiting
+    /// happens before each source read, so the configured value limits aggregate
+    /// download traffic rather than disk writes.
+    public actor DownloadRateLimiter {
+        private let clock = ContinuousClock()
+        private var maximumBytesPerSecond: Int64?
+        private var nextTransfer: ContinuousClock.Instant?
+
+        public init(maximumBytesPerSecond: Int64? = nil) {
+            self.maximumBytesPerSecond = maximumBytesPerSecond
+        }
+
+        public func update(maximumBytesPerSecond: Int64?) {
+            self.maximumBytesPerSecond = maximumBytesPerSecond.flatMap {
+                $0 > 0 ? $0 : nil
+            }
+            nextTransfer = nil
+        }
+
+        public func waitToTransfer(byteCount: Int) async throws {
+            guard byteCount > 0,
+                  let maximumBytesPerSecond,
+                  maximumBytesPerSecond > 0 else {
+                return
+            }
+
+            let now = clock.now
+            let start = nextTransfer.map { max($0, now) } ?? now
+            let nanoseconds = Int64(
+                (Double(byteCount) / Double(maximumBytesPerSecond))
+                    * 1_000_000_000
+            )
+            nextTransfer = start.advanced(
+                by: .nanoseconds(max(1, nanoseconds))
+            )
+            if start > now {
+                try await clock.sleep(until: start)
+            }
         }
     }
 

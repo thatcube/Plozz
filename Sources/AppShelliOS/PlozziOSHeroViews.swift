@@ -1671,6 +1671,7 @@ private struct PlozziOSDetailHeroForeground: View {
     @Environment(PlozziOSAppModel.self) private var appModel
     @State private var downloadRecord: DownloadedMediaRecord?
     @State private var downloadError: String?
+    @State private var showsDownloadConfirmation = false
 
     let item: MediaItem
     let rootItem: MediaItem
@@ -1901,6 +1902,46 @@ private struct PlozziOSDetailHeroForeground: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(verbatim: downloadError ?? "")
+        }
+        .confirmationDialog(
+            downloadItem.map {
+                if currentDownloadRecord?.status == .completed {
+                    return Text("Change Offline Copy of ")
+                        + Text(verbatim: $0.title)
+                        + Text("?")
+                }
+                return Text("Download ") + Text(verbatim: $0.title) + Text("?")
+            } ?? Text("Download?"),
+            isPresented: $showsDownloadConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(
+                currentDownloadRecord?.status == .completed
+                    ? "Use Original"
+                    : "Download Original"
+            ) {
+                Task { await startDownload(quality: .original) }
+            }
+            if let providerKind = selectedSource?.providerKind,
+               [.plex, .jellyfin, .emby].contains(providerKind) {
+                Button("Download 1080p • 20 Mbps") {
+                    Task { await startDownload(quality: .hd1080) }
+                }
+                Button("Download 720p • 4 Mbps") {
+                    Task { await startDownload(quality: .hd720) }
+                }
+                Button("Download 480p • 1.5 Mbps") {
+                    Task { await startDownload(quality: .sd480) }
+                }
+            }
+            if currentDownloadRecord?.status == .completed {
+                Button("Remove Download", role: .destructive) {
+                    Task { await removeDownload() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(downloadConfirmationMessage)
         }
     }
 
@@ -2317,7 +2358,7 @@ private struct PlozziOSDetailHeroForeground: View {
     /// entries translators had to keep in sync by hand.
     private var downloadActionTitle: LocalizedStringResource {
         switch currentDownloadRecord?.status {
-        case .queued, .downloading:
+        case .queued, .preparing, .downloading:
             return MediaItemAction.pauseDownload.title
         case .paused, .failed:
             return MediaItemAction.resumeDownload.title
@@ -2330,7 +2371,7 @@ private struct PlozziOSDetailHeroForeground: View {
 
     private var downloadActionSymbol: String {
         switch currentDownloadRecord?.status {
-        case .queued, .downloading:
+        case .queued, .preparing, .downloading:
             return "pause.circle"
         case .paused, .failed:
             return "arrow.clockwise.circle"
@@ -2343,14 +2384,18 @@ private struct PlozziOSDetailHeroForeground: View {
 
     private func performDownloadAction() async {
         switch currentDownloadRecord?.status {
-        case .queued, .downloading:
+        case .queued, .preparing, .downloading:
             await pauseDownload()
         case .paused, .failed:
             await resumeDownload()
         case .completed:
-            await removeDownload()
+            showsDownloadConfirmation = true
         case nil:
-            await startDownload()
+            if appModel.downloads.asksBeforeDownloading {
+                showsDownloadConfirmation = true
+            } else {
+                await startDownload()
+            }
         }
     }
 
@@ -2361,7 +2406,9 @@ private struct PlozziOSDetailHeroForeground: View {
         } ?? downloadRecord
     }
 
-    private func startDownload() async {
+    private func startDownload(
+        quality: DownloadQuality? = nil
+    ) async {
         guard let downloadItem else { return }
         do {
             guard let provider = appModel.provider(for: downloadItem) else {
@@ -2370,11 +2417,20 @@ private struct PlozziOSDetailHeroForeground: View {
             }
             downloadRecord = try await appModel.downloads.enqueue(
                 item: downloadItem,
-                provider: provider
+                provider: provider,
+                quality: quality
             )
         } catch {
             downloadError = error.localizedDescription
         }
+    }
+
+    private var downloadConfirmationMessage: String {
+        let source = selectedSource?.displayName ?? "Selected server"
+        let size = selectedVersion?.sizeBytes.map {
+            $0.formatted(.byteCount(style: .file))
+        } ?? "Size unavailable"
+        return "\(source) • \(size). Reduced qualities are transcoded by your media server."
     }
 
     private func pauseDownload() async {

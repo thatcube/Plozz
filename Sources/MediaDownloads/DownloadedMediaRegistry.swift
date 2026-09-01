@@ -11,6 +11,8 @@ import Foundation
 public actor DownloadedMediaRegistry {
     private let store: any DownloadedMediaStoring
     private var state: DownloadedMediaRegistryState
+    private var lastProgressPersistence:
+        [String: (date: Date, bytes: Int64)] = [:]
 
     private var continuations: [UUID: AsyncStream<DownloadProgressEvent>.Continuation] = [:]
 
@@ -133,6 +135,10 @@ public actor DownloadedMediaRegistry {
         state.records.values.filter { $0.groupID == groupID }
     }
 
+    public func records(inBatch batchID: String) -> [DownloadedMediaRecord] {
+        state.records.values.filter { $0.batchID == batchID }
+    }
+
     // MARK: - Writes
 
     /// Persists the initial (or refreshed) record for a download BEFORE fetching
@@ -181,6 +187,18 @@ public actor DownloadedMediaRegistry {
         return stored
     }
 
+    /// Replaces an existing record with a newly queued quality while its prior
+    /// media remains in the deterministic replacement-backup folder.
+    @discardableResult
+    public func beginQualityReplacement(
+        _ record: DownloadedMediaRecord
+    ) throws -> DownloadedMediaRecord {
+        var replacement = record
+        replacement.updatedAt = Date()
+        try persist(replacement)
+        return replacement
+    }
+
     @discardableResult
     public func setArtworkFileName(
         identityKey: String,
@@ -203,11 +221,28 @@ public actor DownloadedMediaRegistry {
         totalBytes: Int64?
     ) throws {
         guard var record = state.records[identityKey] else { return }
+        guard record.status == .queued
+            || record.status == .preparing
+            || record.status == .downloading else {
+            return
+        }
         record.bytesDownloaded = bytesDownloaded
         if let totalBytes { record.totalBytes = totalBytes }
         if record.status != .downloading { record.status = .downloading }
-        record.updatedAt = Date()
-        try persist(record)
+        record.pauseReason = nil
+        record.failureReason = nil
+        let now = Date()
+        record.updatedAt = now
+        state.records[identityKey] = record
+        let previous = lastProgressPersistence[identityKey]
+        if previous == nil
+            || now.timeIntervalSince(previous!.date) >= 1
+            || bytesDownloaded - previous!.bytes >= 4 * 1_024 * 1_024 {
+            try store.save(state)
+            lastProgressPersistence[identityKey] = (now, bytesDownloaded)
+        }
+        emit(.item(record))
+        emitAggregates(forGroup: record.groupID)
     }
 
     /// Transitions a record's status (e.g. to `.paused`/`.failed`/`.completed`),
@@ -215,12 +250,15 @@ public actor DownloadedMediaRegistry {
     public func setStatus(
         identityKey: String,
         _ status: DownloadStatus,
-        failureReason: String? = nil
+        failureReason: String? = nil,
+        pauseReason: DownloadPauseReason? = nil
     ) throws {
         guard var record = state.records[identityKey] else { return }
         record.status = status
         record.failureReason = failureReason
+        record.pauseReason = status == .paused ? pauseReason : nil
         record.updatedAt = Date()
+        lastProgressPersistence[identityKey] = nil
         try persist(record)
     }
 
@@ -231,7 +269,9 @@ public actor DownloadedMediaRegistry {
         record.bytesDownloaded = totalBytes
         record.totalBytes = totalBytes
         record.failureReason = nil
+        record.pauseReason = nil
         record.updatedAt = Date()
+        lastProgressPersistence[identityKey] = nil
         try persist(record)
     }
 
@@ -239,6 +279,7 @@ public actor DownloadedMediaRegistry {
     public func remove(identityKey: String) throws {
         guard state.records[identityKey] != nil else { return }
         state.records[identityKey] = nil
+        lastProgressPersistence[identityKey] = nil
         try store.save(state)
         emit(.removed(identityKey: identityKey))
         emitAggregates(forGroup: nil)
@@ -259,7 +300,14 @@ public actor DownloadedMediaRegistry {
     ) -> DownloadedMediaRecord {
         guard let existing else { return record }
         if existing.status == .completed {
-            return existing
+            var merged = existing
+            merged.groupID = record.groupID
+            merged.batchID = record.batchID
+            merged.batchKind = record.batchKind
+            merged.batchTitle = record.batchTitle
+            merged.batchExpectedCount = record.batchExpectedCount
+            merged.updatedAt = Date()
+            return merged
         }
         var merged = record
         merged.bytesDownloaded = max(
@@ -268,6 +316,7 @@ public actor DownloadedMediaRegistry {
         )
         merged.totalBytes = record.totalBytes ?? existing.totalBytes
         merged.createdAt = existing.createdAt
+        merged.pauseReason = existing.pauseReason
         if merged.snapshot.artworkFileName == nil {
             merged.snapshot.artworkFileName = existing.snapshot.artworkFileName
         }

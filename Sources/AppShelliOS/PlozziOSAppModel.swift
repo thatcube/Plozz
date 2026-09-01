@@ -1693,8 +1693,70 @@ final class PlozziOSAppModel {
                     let playback = try await provider.playbackInfo(
                         for: source.itemID,
                         mediaSourceID: source.mediaSourceID,
-                        forceTranscode: false
+                        forceTranscode: source.quality != .original
                     )
+                    if case .constrained(let constraint) = source.quality {
+                        let streamURL: URL
+                        if case .authenticatedHTTP(let locator) =
+                            playback.playbackSource {
+                            streamURL = try await authenticatedHTTPResolver.resolve(
+                                locator
+                            )
+                        } else if let legacyURL = playback.streamURL {
+                            streamURL = legacyURL
+                        } else {
+                            throw MediaTransportError.unsupportedCapability(
+                                "This server did not provide an offline rendition."
+                            )
+                        }
+                        guard
+                              var components = URLComponents(
+                                url: streamURL,
+                                resolvingAgainstBaseURL: false
+                              ) else {
+                            throw MediaTransportError.unsupportedCapability(
+                                "This server did not provide an offline rendition."
+                            )
+                        }
+                        var items = components.queryItems ?? []
+                        func setQueryItem(_ name: String, _ value: String) {
+                            items.removeAll {
+                                $0.name.caseInsensitiveCompare(name) == .orderedSame
+                            }
+                            items.append(URLQueryItem(name: name, value: value))
+                        }
+                        switch source.provider {
+                        case .plex:
+                            setQueryItem(
+                                "videoBitrate",
+                                String(constraint.maximumVideoBitrateBps / 1_000)
+                            )
+                            setQueryItem(
+                                "videoResolution",
+                                "\(constraint.maximumHeight * 16 / 9)x\(constraint.maximumHeight)"
+                            )
+                        case .jellyfin, .emby:
+                            setQueryItem(
+                                "VideoBitrate",
+                                String(constraint.maximumVideoBitrateBps)
+                            )
+                            setQueryItem(
+                                "MaxHeight",
+                                String(constraint.maximumHeight)
+                            )
+                        default:
+                            throw MediaTransportError.unsupportedCapability(
+                                "This server cannot create reduced-quality downloads."
+                            )
+                        }
+                        components.queryItems = items
+                        guard let constrainedURL = components.url else {
+                            throw MediaTransportError.unsupportedCapability(
+                                "The offline rendition URL was invalid."
+                            )
+                        }
+                        return constrainedURL
+                    }
                     guard case .authenticatedHTTP(let locator) =
                             playback.downloadableOriginalSource,
                           locator.deliveryMode == .directFile else {

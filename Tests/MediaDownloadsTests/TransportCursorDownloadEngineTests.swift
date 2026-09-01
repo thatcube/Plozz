@@ -90,4 +90,34 @@ final class TransportCursorDownloadEngineTests: XCTestCase {
             XCTAssertEqual(error, .unsupportedSource)
         }
     }
+
+    func testPrematureEOFDoesNotReportCompletion() async throws {
+        let payload = makeData(100)
+        let reader = FakeByteReader(
+            bytes: payload,
+            maxChunk: 40,
+            reportedByteSize: 150
+        )
+        let engine = TransportCursorDownloadEngine(
+            opener: FakeOpener([reader]),
+            chunkSize: 40
+        )
+        let dir = DownloadTestFactory.tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let destination = dir.appendingPathComponent("media.mkv")
+        let record = try DownloadTestFactory.record()
+
+        do {
+            _ = try await engine.download(
+                record: record,
+                to: destination
+            ) { _, _ in }
+            XCTFail("expected premature EOF")
+        } catch let error as MediaDownloadError {
+            XCTAssertEqual(
+                error,
+                .unexpectedEndOfFile(expected: 150, actual: 100)
+            )
+        }
+    }
 }

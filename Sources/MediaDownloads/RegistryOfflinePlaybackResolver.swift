@@ -23,12 +23,35 @@ public struct RegistryOfflinePlaybackResolver:
     }
 
     public func localPlaybackURL(for item: MediaItem, versionID: String?) async -> URL? {
-        guard let record = await registry.record(for: item, versionID: versionID),
-              record.status == .completed,
-              let url = try? storage.pinnedFileURL(for: record),
-              fileManager.fileExists(atPath: url.path) else {
+        guard let record = await registry.record(
+            for: item,
+            versionID: versionID
+        ) else {
             return nil
         }
-        return url
+        if record.status == .completed,
+           let url = try? storage.pinnedFileURL(for: record),
+           fileManager.fileExists(atPath: url.path) {
+            return url
+        }
+        guard let recordURL = try? storage.replacementBackupRecordURL(
+            forKey: record.identityKey
+        ),
+              let data = try? Data(contentsOf: recordURL),
+              let backupRecord = try? JSONDecoder().decode(
+                  DownloadedMediaRecord.self,
+                  from: data
+              ),
+              let backupFolder = try? storage.replacementBackupFolderURL(
+                  forKey: record.identityKey
+              ) else {
+            return nil
+        }
+        let backupURL = backupFolder.appendingPathComponent(
+            backupRecord.localFileName
+        )
+        return fileManager.fileExists(atPath: backupURL.path)
+            ? backupURL
+            : nil
     }
 }

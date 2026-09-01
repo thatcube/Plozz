@@ -8,7 +8,10 @@ public final class NWPathDownloadNetworkObserver: DownloadNetworkObserving, @unc
     private let monitor: NWPathMonitor
     private let queue = DispatchQueue(label: "com.plozz.downloads.pathmonitor")
     private let lock = NSLock()
-    private var latest: DownloadNetworkConditions = .unknownSatisfied
+    private var latest: DownloadNetworkConditions = .unsatisfied
+    private var continuations: [
+        UUID: AsyncStream<DownloadNetworkConditions>.Continuation
+    ] = [:]
 
     public init() {
         self.monitor = NWPathMonitor()
@@ -21,7 +24,11 @@ public final class NWPathDownloadNetworkObserver: DownloadNetworkObserving, @unc
             )
             self.lock.lock()
             self.latest = conditions
+            let continuations = Array(self.continuations.values)
             self.lock.unlock()
+            for continuation in continuations {
+                continuation.yield(conditions)
+            }
         }
         monitor.start(queue: queue)
     }
@@ -32,6 +39,23 @@ public final class NWPathDownloadNetworkObserver: DownloadNetworkObserving, @unc
 
     public func currentConditions() async -> DownloadNetworkConditions {
         snapshot()
+    }
+
+    public func updates() -> AsyncStream<DownloadNetworkConditions> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            lock.lock()
+            continuations[id] = continuation
+            let latest = self.latest
+            lock.unlock()
+            continuation.yield(latest)
+            continuation.onTermination = { [weak self] _ in
+                guard let self else { return }
+                self.lock.lock()
+                self.continuations[id] = nil
+                self.lock.unlock()
+            }
+        }
     }
 
     private func snapshot() -> DownloadNetworkConditions {

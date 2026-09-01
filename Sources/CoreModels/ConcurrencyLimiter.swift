@@ -21,22 +21,49 @@ import Foundation
 /// idempotent — operation) rather than leaking the permit. Use only for
 /// best-effort background work, never to gate a user-blocking path.
 public actor ConcurrencyLimiter {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Bool, Never>
+    }
+
     private var available: Int
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [Waiter] = []
 
     /// - Parameter limit: maximum number of concurrent operations (clamped to ≥1).
     public init(limit: Int) {
         self.available = max(1, limit)
     }
 
-    private func acquire() async {
+    private func acquire(cancellable: Bool = false) async -> Bool {
+        if cancellable, Task.isCancelled { return false }
         if available > 0 {
             available -= 1
+            return true
+        }
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation {
+                (continuation: CheckedContinuation<Bool, Never>) in
+                if cancellable, Task.isCancelled {
+                    continuation.resume(returning: false)
+                } else {
+                    waiters.append(
+                        Waiter(id: id, continuation: continuation)
+                    )
+                }
+            }
+        } onCancel: {
+            guard cancellable else { return }
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else {
             return
         }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            waiters.append(continuation)
-        }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(returning: false)
     }
 
     private func release() {
@@ -45,7 +72,7 @@ public actor ConcurrencyLimiter {
         } else {
             // Hand the just-freed permit directly to the longest-waiting task
             // (FIFO) so permits never leak and the count stays balanced.
-            waiters.removeFirst().resume()
+            waiters.removeFirst().continuation.resume(returning: true)
         }
     }
 
@@ -53,7 +80,7 @@ public actor ConcurrencyLimiter {
     /// at most `limit` operations run concurrently. The operation executes off
     /// this actor's executor.
     public nonisolated func run<T: Sendable>(_ operation: @Sendable () async -> T) async -> T {
-        await acquire()
+        _ = await acquire()
         let result = await operation()
         await release()
         return result
@@ -64,7 +91,7 @@ public actor ConcurrencyLimiter {
     /// permanently shrink the gate). Used to serialize fallible background work
     /// such as YouTubeKit's JavaScriptCore stream extraction.
     public nonisolated func run<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
-        await acquire()
+        _ = await acquire()
         do {
             let result = try await operation()
             await release()
@@ -73,5 +100,16 @@ public actor ConcurrencyLimiter {
             await release()
             throw error
         }
+    }
+
+    /// Cancellation-aware variant for queued work. Returns `false` without
+    /// starting `operation` when cancellation happens while waiting for a permit.
+    public nonisolated func runUnlessCancelled(
+        _ operation: @Sendable () async -> Void
+    ) async -> Bool {
+        guard await acquire(cancellable: true) else { return false }
+        await operation()
+        await release()
+        return true
     }
 }

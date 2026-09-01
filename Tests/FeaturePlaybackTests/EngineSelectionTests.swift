@@ -59,6 +59,13 @@ final class EngineSelectionTests: XCTestCase {
         XCTAssertEqual(route(req, plozzigenAvailable: false), .native)
     }
 
+    func testDownloadedAssetPackageRoutesToNativeAVFoundation() {
+        let req = request(
+            streamURL: URL(fileURLWithPath: "/downloads/media.movpkg")
+        )
+        XCTAssertEqual(route(req, plozzigenAvailable: true), .native)
+    }
+
     func testNetworkFileAlwaysRoutesToPlozzigen() throws {
         let identity = try RemoteFileIdentity(kind: .strongETag, value: "\"movie-v1\"")
         let representation = try RemoteFileRepresentation(

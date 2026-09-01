@@ -43,21 +43,24 @@ final class FakeByteReader: DownloadByteReader, @unchecked Sendable {
     let maxChunk: Int
     let failAtOffset: Int64?
     let failure: Error
+    let reportedByteSize: Int64
     private(set) var closed = false
 
     init(
         bytes: Data,
         maxChunk: Int = Int.max,
         failAtOffset: Int64? = nil,
-        failure: Error = CancellationError()
+        failure: Error = CancellationError(),
+        reportedByteSize: Int64? = nil
     ) {
         self.bytes = bytes
         self.maxChunk = max(1, maxChunk)
         self.failAtOffset = failAtOffset
         self.failure = failure
+        self.reportedByteSize = reportedByteSize ?? Int64(bytes.count)
     }
 
-    var byteSize: Int64 { Int64(bytes.count) }
+    var byteSize: Int64 { reportedByteSize }
 
     func read(at offset: Int64, length: Int) async throws -> Data {
         if let failAtOffset, offset >= failAtOffset { throw failure }
@@ -165,7 +168,8 @@ enum DownloadTestFactory {
         bytesDownloaded: Int64 = 0,
         totalBytes: Int64? = nil,
         groupID: String? = nil,
-        localFileName: String = "media.mkv"
+        localFileName: String = "media.mkv",
+        quality: DownloadQuality = .original
     ) throws -> DownloadedMediaRecord {
         DownloadedMediaRecord(
             identity: identity ?? imdbIdentity(),
@@ -173,6 +177,7 @@ enum DownloadTestFactory {
             versionLabel: versionLabel,
             groupID: groupID,
             sourceKind: .directShare,
+            quality: quality,
             status: status,
             directShareSource: try directShareSource(),
             localFileName: localFileName,
@@ -191,12 +196,14 @@ enum DownloadTestFactory {
 
     static func request(
         identity: MediaIdentity? = nil,
-        groupID: String? = nil
+        groupID: String? = nil,
+        quality: DownloadQuality = .original
     ) throws -> DownloadRequest {
         DownloadRequest(
             identity: identity ?? imdbIdentity(),
             groupID: groupID,
             sourceKind: .directShare,
+            quality: quality,
             directShareSource: try directShareSource(),
             contentType: "video/x-matroska",
             fileExtension: "mkv",

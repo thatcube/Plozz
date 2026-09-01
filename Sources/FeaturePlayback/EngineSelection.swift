@@ -22,8 +22,13 @@ enum EngineSelection {
         capabilities: MediaCapabilities,
         subtitleRule: SubtitlePolicy.Rule
     ) -> PlaybackEngineKind {
-        if request.streamURL?.isFileURL == true, plozzigenAvailable {
-            return .plozzigen
+        if let streamURL = request.streamURL, streamURL.isFileURL {
+            if streamURL.pathExtension.lowercased() == "movpkg" {
+                return .native
+            }
+            if plozzigenAvailable {
+                return .plozzigen
+            }
         }
         if case .some(.networkFile) = request.playbackSource {
             return .plozzigen

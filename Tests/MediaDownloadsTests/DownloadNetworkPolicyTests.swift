@@ -44,11 +44,23 @@ final class DownloadNetworkPolicyTests: XCTestCase {
     func testPolicyIsCodable() throws {
         let policy = DownloadNetworkPolicy(
             allowsExpensiveNetwork: true,
-            quality: .dataSaver,
+            quality: .hd1080,
             storageBudgetBytes: 5_000,
-            maxConcurrentDownloads: 2
+            maxConcurrentDownloads: 2,
+            maximumBytesPerSecond: 1_250_000,
+            cappedBackgroundBehavior: .continueAtFullSpeed,
+            includesAllAudioTracks: true,
+            includesTextSubtitleTracks: false
         )
         let data = try JSONEncoder().encode(policy)
         XCTAssertEqual(try JSONDecoder().decode(DownloadNetworkPolicy.self, from: data), policy)
+    }
+
+    func testLegacyDataSaverDecodesAsStandardDefinition() throws {
+        let decoded = try JSONDecoder().decode(
+            DownloadQuality.self,
+            from: Data(#""dataSaver""#.utf8)
+        )
+        XCTAssertEqual(decoded, .sd480)
     }
 }

@@ -168,6 +168,9 @@ public struct PlozziOSRootView: View {
         }
         .task(id: scenePhase) {
             appModel.setBackgroundWorkAllowed(scenePhase == .active)
+            await appModel.downloads.setApplicationActive(
+                scenePhase == .active
+            )
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -979,15 +982,17 @@ private struct PlozziOSTabShell: View {
     /// finishes and the next queued episode starts.
     private var downloadsNavigationProgress: Double? {
         let active = appModel.downloads.records.filter {
-            $0.status == .queued || $0.status == .downloading
+            $0.status == .queued
+                || $0.status == .preparing
+                || $0.status == .downloading
         }
         guard !active.isEmpty else { return nil }
 
         let activeKeys = Set(active.map(\.identityKey))
-        let activeGroupIDs = Set(active.compactMap(\.groupID))
+        let activeBatchIDs = Set(active.compactMap(\.batchID))
         let tracked = appModel.downloads.records.filter {
             activeKeys.contains($0.identityKey)
-                || $0.groupID.map(activeGroupIDs.contains) == true
+                || $0.batchID.map(activeBatchIDs.contains) == true
         }
 
         // Keep one aggregation strategy for the lifetime of the cohort. Total

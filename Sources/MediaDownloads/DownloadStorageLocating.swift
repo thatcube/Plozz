@@ -29,6 +29,16 @@ public extension DownloadStorageLocating {
         try pinnedFolderURL(forKey: record.identityKey)
             .appendingPathComponent(record.localFileName, isDirectory: false)
     }
+
+    func replacementBackupFolderURL(forKey identityKey: String) throws -> URL {
+        try pinnedFolderURL(forKey: identityKey)
+            .appendingPathExtension("replacement-backup")
+    }
+
+    func replacementBackupRecordURL(forKey identityKey: String) throws -> URL {
+        try replacementBackupFolderURL(forKey: identityKey)
+            .appendingPathComponent(".record.json", isDirectory: false)
+    }
 }
 
 /// The platform selection axis, exposed so tests can exercise BOTH policies on any

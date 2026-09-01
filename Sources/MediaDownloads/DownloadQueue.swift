@@ -51,9 +51,24 @@ public actor DownloadQueue {
 
     /// Updates the active policy (e.g. the user toggled Wi‑Fi‑only). Applies to
     /// the next scheduling decision; the concurrency cap is fixed at init.
-    public func updatePolicy(_ policy: DownloadNetworkPolicy) {
+    public func updatePolicy(_ policy: DownloadNetworkPolicy) async {
         self.policy = policy
         (engine as? any DownloadPolicyApplying)?.applyDownloadPolicy(policy)
+        await networkConditionsDidChange(
+            await observer.currentConditions()
+        )
+    }
+
+    public func networkConditionsDidChange(
+        _ conditions: DownloadNetworkConditions
+    ) async {
+        if policy.allows(conditions) {
+            await resumePaused(reason: .networkPolicy)
+            return
+        }
+        for identityKey in Array(running.keys) {
+            await pause(identityKey: identityKey, reason: .networkPolicy)
+        }
     }
 
     // MARK: - Enqueue
@@ -63,6 +78,13 @@ public actor DownloadQueue {
     @discardableResult
     public func enqueue(_ request: DownloadRequest) async throws -> DownloadedMediaRecord {
         let record = makeRecord(for: request)
+        if let existing = await registry.record(forKey: record.identityKey),
+           existing.quality != record.quality {
+            try await prepareQualityReplacement(
+                existing: existing,
+                replacement: record
+            )
+        }
         // Idempotency: the `.downloading`/`.queued` marker is persisted BEFORE any
         // byte is fetched, so a kill leaves a recoverable record.
         let stored = try await registry.beginDownload(record)
@@ -75,9 +97,17 @@ public actor DownloadQueue {
     /// Enqueues a whole group (e.g. a season) under one `groupID`.
     @discardableResult
     public func enqueueGroup(_ requests: [DownloadRequest]) async throws -> [DownloadedMediaRecord] {
-        let stored = try await registry.beginDownloads(
-            requests.map(makeRecord(for:))
-        )
+        let records = requests.map(makeRecord(for:))
+        for record in records {
+            if let existing = await registry.record(forKey: record.identityKey),
+               existing.quality != record.quality {
+                try await prepareQualityReplacement(
+                    existing: existing,
+                    replacement: record
+                )
+            }
+        }
+        let stored = try await registry.beginDownloads(records)
         for record in stored where record.status != .completed {
             schedule(record.identityKey)
         }
@@ -92,12 +122,17 @@ public actor DownloadQueue {
             versionID: request.versionID,
             versionLabel: request.versionLabel,
             groupID: request.groupID,
+            batchID: request.batchID,
+            batchKind: request.batchKind,
+            batchTitle: request.batchTitle,
+            batchExpectedCount: request.batchExpectedCount,
             sourceKind: request.sourceKind,
             quality: request.quality,
             status: .queued,
             directShareSource: request.directShareSource,
             managedHTTPSource: request.managedHTTPSource,
             localFileName: request.makeLocalFileName(),
+            totalBytes: request.expectedBytes,
             contentType: request.contentType,
             snapshot: request.snapshot
         )
@@ -105,32 +140,89 @@ public actor DownloadQueue {
 
     // MARK: - Controls
 
-    public func pause(identityKey: String) async {
-        running[identityKey]?.cancel()
+    public func pause(
+        identityKey: String,
+        reason: DownloadPauseReason = .manual
+    ) async {
+        guard let record = await registry.record(forKey: identityKey),
+              record.status != .completed else {
+            return
+        }
+        try? await registry.setStatus(
+            identityKey: identityKey,
+            .paused,
+            failureReason: pauseDescription(reason),
+            pauseReason: reason
+        )
+        let task = running[identityKey]
+        task?.cancel()
+        await task?.value
     }
 
     public func resume(identityKey: String) async {
         guard let record = await registry.record(forKey: identityKey),
               record.status != .completed else { return }
-        if record.status == .failed {
-            try? await registry.setStatus(identityKey: identityKey, .queued)
-        }
+        try? await registry.setStatus(identityKey: identityKey, .queued)
         schedule(identityKey)
     }
 
+    public func pause(batchID: String, reason: DownloadPauseReason = .manual) async {
+        for record in await registry.records(inBatch: batchID)
+        where record.status.isActive {
+            await pause(identityKey: record.identityKey, reason: reason)
+        }
+    }
+
+    public func resume(batchID: String) async {
+        for record in await registry.records(inBatch: batchID)
+        where record.status == .paused || record.status == .failed {
+            await resume(identityKey: record.identityKey)
+        }
+    }
+
+    public func resumePaused(reason: DownloadPauseReason) async {
+        for record in await registry.all()
+        where record.status == .paused && record.pauseReason == reason {
+            await resume(identityKey: record.identityKey)
+        }
+    }
+
     public func cancelAndRemove(identityKey: String) async throws {
-        running[identityKey]?.cancel()
+        if let persistentEngine = engine as? any DownloadPersistentWorkCancelling {
+            await persistentEngine.discardPersistentWork(identityKey: identityKey)
+        }
+        let task = running[identityKey]
+        task?.cancel()
+        await task?.value
         running[identityKey] = nil
         if let folder = try? storage.pinnedFolderURL(forKey: identityKey) {
             try? fileManager.removeItem(at: folder)
         }
+        if let backup = try? storage.replacementBackupFolderURL(
+            forKey: identityKey
+        ) {
+            try? fileManager.removeItem(at: backup)
+        }
         try await registry.remove(identityKey: identityKey)
     }
 
-    /// Restarts every resumable (queued/paused/downloading) record that isn't
-    /// already running — call on launch or when the network returns.
+    public func discardPersistentWork(identityKey: String) async {
+        guard let persistentEngine = engine as? any DownloadPersistentWorkCancelling else {
+            return
+        }
+        await persistentEngine.discardPersistentWork(identityKey: identityKey)
+    }
+
+    /// Restarts work interrupted by process termination. Explicitly paused records
+    /// stay paused until the corresponding user/policy action resumes them.
     public func resumeInterrupted() async {
         for record in await registry.all() where record.status.isActive {
+            if record.status != .queued {
+                try? await registry.setStatus(
+                    identityKey: record.identityKey,
+                    .queued
+                )
+            }
             schedule(record.identityKey)
         }
     }
@@ -147,7 +239,8 @@ public actor DownloadQueue {
     }
 
     private func limiterRun(_ identityKey: String) async {
-        await limiter.run { [weak self] in
+        _ = await limiter.runUnlessCancelled { [weak self] in
+            guard !Task.isCancelled else { return }
             await self?.performDownload(identityKey)
         }
         running[identityKey] = nil
@@ -162,7 +255,8 @@ public actor DownloadQueue {
         guard policy.allows(conditions) else {
             try? await registry.setStatus(
                 identityKey: identityKey, .paused,
-                failureReason: "Waiting for an allowed network"
+                failureReason: "Waiting for an allowed network",
+                pauseReason: .networkPolicy
             )
             return
         }
@@ -183,16 +277,44 @@ public actor DownloadQueue {
             )
             return
         }
+        try? fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if let totalBytes = record.totalBytes,
+           let freeBytes = try? destination.deletingLastPathComponent()
+            .resourceValues(forKeys: [
+                .volumeAvailableCapacityKey
+            ])
+            .volumeAvailableCapacity,
+           max(0, totalBytes - record.bytesDownloaded) > Int64(freeBytes) {
+            try? await registry.setStatus(
+                identityKey: identityKey,
+                .failed,
+                failureReason: "Not enough device storage"
+            )
+            return
+        }
 
         var attempt = 0
         while true {
             do {
-                try? await registry.setStatus(identityKey: identityKey, .downloading)
+                try? await registry.setStatus(
+                    identityKey: identityKey,
+                    record.quality == .original ? .downloading : .preparing
+                )
                 let registry = self.registry
                 let total = try await engine.download(
                     record: record,
                     to: destination
                 ) { bytes, total in
+                    if bytes > 0,
+                       await registry.record(forKey: identityKey)?.status == .preparing {
+                        try? await registry.setStatus(
+                            identityKey: identityKey,
+                            .downloading
+                        )
+                    }
                     try? await registry.updateProgress(
                         identityKey: identityKey,
                         bytesDownloaded: bytes,
@@ -200,12 +322,21 @@ public actor DownloadQueue {
                     )
                 }
                 try? await registry.markCompleted(identityKey: identityKey, totalBytes: total)
+                if let backup = try? storage.replacementBackupFolderURL(
+                    forKey: identityKey
+                ) {
+                    try? fileManager.removeItem(at: backup)
+                }
                 return
             } catch is CancellationError {
-                try? await registry.setStatus(
-                    identityKey: identityKey, .paused,
-                    failureReason: "Paused"
-                )
+                if await registry.record(forKey: identityKey)?.status != .paused {
+                    try? await registry.setStatus(
+                        identityKey: identityKey,
+                        .paused,
+                        failureReason: "Paused",
+                        pauseReason: .manual
+                    )
+                }
                 return
             } catch {
                 attempt += 1
@@ -218,18 +349,99 @@ public actor DownloadQueue {
                 }
                 await backoff(attempt)
                 if Task.isCancelled {
-                    try? await registry.setStatus(
-                        identityKey: identityKey, .paused,
-                        failureReason: "Paused"
-                    )
+                    if await registry.record(forKey: identityKey)?.status != .paused {
+                        try? await registry.setStatus(
+                            identityKey: identityKey,
+                            .paused,
+                            failureReason: "Paused",
+                            pauseReason: .manual
+                        )
+                    }
                     return
                 }
             }
         }
     }
 
+    private func prepareQualityReplacement(
+        existing: DownloadedMediaRecord,
+        replacement: DownloadedMediaRecord
+    ) async throws {
+        if let persistentEngine = engine as? any DownloadPersistentWorkCancelling {
+            await persistentEngine.discardPersistentWork(
+                identityKey: existing.identityKey
+            )
+        }
+        let task = running[existing.identityKey]
+        task?.cancel()
+        await task?.value
+        running[existing.identityKey] = nil
+
+        let folder = try storage.pinnedFolderURL(forKey: existing.identityKey)
+        let backup = try storage.replacementBackupFolderURL(
+            forKey: existing.identityKey
+        )
+        if existing.status == .completed {
+            let hasFolder = fileManager.fileExists(atPath: folder.path)
+            let hasBackup = fileManager.fileExists(atPath: backup.path)
+            if hasFolder {
+                if hasBackup {
+                    try fileManager.removeItem(at: backup)
+                }
+                let recordURL = folder.appendingPathComponent(
+                    ".record.json",
+                    isDirectory: false
+                )
+                try JSONEncoder().encode(existing).write(
+                    to: recordURL,
+                    options: .atomic
+                )
+                try fileManager.moveItem(at: folder, to: backup)
+            }
+        } else {
+            try? fileManager.removeItem(at: folder)
+        }
+
+        do {
+            _ = try await registry.beginQualityReplacement(replacement)
+        } catch {
+            if existing.status == .completed,
+               fileManager.fileExists(atPath: backup.path) {
+                try? fileManager.moveItem(at: backup, to: folder)
+            }
+            throw error
+        }
+
+        if let artworkFileName = replacement.snapshot.artworkFileName {
+            let backupArtwork = backup.appendingPathComponent(artworkFileName)
+            if fileManager.fileExists(atPath: backupArtwork.path) {
+                try fileManager.createDirectory(
+                    at: folder,
+                    withIntermediateDirectories: true
+                )
+                try? fileManager.copyItem(
+                    at: backupArtwork,
+                    to: folder.appendingPathComponent(artworkFileName)
+                )
+            }
+        }
+    }
+
     private func usedBytes() async -> Int64 {
         await registry.all().reduce(Int64(0)) { $0 + $1.bytesDownloaded }
+    }
+
+    private func pauseDescription(_ reason: DownloadPauseReason) -> String {
+        switch reason {
+        case .manual:
+            "Paused"
+        case .networkPolicy:
+            "Waiting for an allowed network"
+        case .backgroundPolicy:
+            "Paused while Plozz is in the background"
+        case .directShareBackground:
+            "This server connection resumes when Plozz is open"
+        }
     }
 
     #if DEBUG

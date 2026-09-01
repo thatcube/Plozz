@@ -23,6 +23,12 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
     public var versionLabel: String?
     /// Optional grouping (e.g. a whole season enqueued together).
     public var groupID: String?
+    /// One explicit user-started season/show operation. Unlike `groupID`, this is
+    /// absent for isolated episode downloads and therefore safe for parent progress.
+    public var batchID: String?
+    public var batchKind: DownloadBatchKind?
+    public var batchTitle: String?
+    public var batchExpectedCount: Int?
 
     public var sourceKind: DownloadSourceKind
     public var quality: DownloadQuality
@@ -41,6 +47,7 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
     public var contentType: String?
     /// Human-readable reason for a `.failed`/`.paused` state (never secret).
     public var failureReason: String?
+    public var pauseReason: DownloadPauseReason?
 
     /// Pinned, offline-renderable metadata (title/kind/year/artwork filename).
     public var snapshot: PinnedMediaSnapshot
@@ -55,6 +62,10 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         versionID: String? = nil,
         versionLabel: String? = nil,
         groupID: String? = nil,
+        batchID: String? = nil,
+        batchKind: DownloadBatchKind? = nil,
+        batchTitle: String? = nil,
+        batchExpectedCount: Int? = nil,
         sourceKind: DownloadSourceKind,
         quality: DownloadQuality = .original,
         status: DownloadStatus = .queued,
@@ -65,6 +76,7 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         totalBytes: Int64? = nil,
         contentType: String? = nil,
         failureReason: String? = nil,
+        pauseReason: DownloadPauseReason? = nil,
         snapshot: PinnedMediaSnapshot,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -74,6 +86,10 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         self.versionID = versionID
         self.versionLabel = versionLabel
         self.groupID = groupID
+        self.batchID = batchID
+        self.batchKind = batchKind
+        self.batchTitle = batchTitle
+        self.batchExpectedCount = batchExpectedCount
         self.sourceKind = sourceKind
         self.quality = quality
         self.status = status
@@ -84,6 +100,7 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         self.totalBytes = totalBytes
         self.contentType = contentType
         self.failureReason = failureReason
+        self.pauseReason = pauseReason
         self.snapshot = snapshot
         self.createdAt = createdAt
         self.updatedAt = updatedAt

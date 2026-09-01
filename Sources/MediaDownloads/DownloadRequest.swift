@@ -13,6 +13,11 @@ public struct DownloadRequest: Sendable {
     /// Pinned human-readable version label for the downloads list.
     public var versionLabel: String?
     public var groupID: String?
+    public var batchID: String?
+    public var batchKind: DownloadBatchKind?
+    public var batchTitle: String?
+    public var batchExpectedCount: Int?
+    public var expectedBytes: Int64?
     public var sourceKind: DownloadSourceKind
     public var quality: DownloadQuality
     public var directShareSource: DirectShareDownloadSource?
@@ -28,6 +33,11 @@ public struct DownloadRequest: Sendable {
         versionID: String? = nil,
         versionLabel: String? = nil,
         groupID: String? = nil,
+        batchID: String? = nil,
+        batchKind: DownloadBatchKind? = nil,
+        batchTitle: String? = nil,
+        batchExpectedCount: Int? = nil,
+        expectedBytes: Int64? = nil,
         sourceKind: DownloadSourceKind,
         quality: DownloadQuality = .original,
         directShareSource: DirectShareDownloadSource? = nil,
@@ -40,6 +50,11 @@ public struct DownloadRequest: Sendable {
         self.versionID = versionID
         self.versionLabel = versionLabel
         self.groupID = groupID
+        self.batchID = batchID
+        self.batchKind = batchKind
+        self.batchTitle = batchTitle
+        self.batchExpectedCount = batchExpectedCount
+        self.expectedBytes = expectedBytes
         self.sourceKind = sourceKind
         self.quality = quality
         self.directShareSource = directShareSource
@@ -56,6 +71,11 @@ public struct DownloadRequest: Sendable {
         versionID: String? = nil,
         versionLabel: String? = nil,
         groupID: String? = nil,
+        batchID: String? = nil,
+        batchKind: DownloadBatchKind? = nil,
+        batchTitle: String? = nil,
+        batchExpectedCount: Int? = nil,
+        expectedBytes: Int64? = nil,
         contentType: String? = nil,
         fileExtension: String? = nil,
         quality: DownloadQuality = .original
@@ -65,6 +85,11 @@ public struct DownloadRequest: Sendable {
             versionID: versionID,
             versionLabel: versionLabel,
             groupID: groupID,
+            batchID: batchID,
+            batchKind: batchKind,
+            batchTitle: batchTitle,
+            batchExpectedCount: batchExpectedCount,
+            expectedBytes: expectedBytes,
             sourceKind: .managedHTTP,
             quality: quality,
             managedHTTPSource: source,
@@ -82,6 +107,11 @@ public struct DownloadRequest: Sendable {
         versionID: String? = nil,
         versionLabel: String? = nil,
         groupID: String? = nil,
+        batchID: String? = nil,
+        batchKind: DownloadBatchKind? = nil,
+        batchTitle: String? = nil,
+        batchExpectedCount: Int? = nil,
+        expectedBytes: Int64? = nil,
         contentType: String? = nil,
         container: String? = nil,
         quality: DownloadQuality = .original
@@ -91,6 +121,11 @@ public struct DownloadRequest: Sendable {
             versionID: versionID,
             versionLabel: versionLabel,
             groupID: groupID,
+            batchID: batchID,
+            batchKind: batchKind,
+            batchTitle: batchTitle,
+            batchExpectedCount: batchExpectedCount,
+            expectedBytes: expectedBytes,
             sourceKind: .directShare,
             quality: quality,
             directShareSource: DirectShareDownloadSource(

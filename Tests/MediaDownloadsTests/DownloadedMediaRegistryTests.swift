@@ -59,6 +59,29 @@ final class DownloadedMediaRegistryTests: XCTestCase {
         XCTAssertEqual(again.bytesDownloaded, 100)
     }
 
+    func testLateProgressDoesNotReopenCompletedRecord() async throws {
+        let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
+        let record = try DownloadTestFactory.record(
+            status: .downloading,
+            bytesDownloaded: 40
+        )
+        _ = try await registry.beginDownload(record)
+        try await registry.markCompleted(
+            identityKey: record.identityKey,
+            totalBytes: 100
+        )
+
+        try await registry.updateProgress(
+            identityKey: record.identityKey,
+            bytesDownloaded: 80,
+            totalBytes: 100
+        )
+
+        let completed = await registry.record(forKey: record.identityKey)
+        XCTAssertEqual(completed?.status, .completed)
+        XCTAssertEqual(completed?.bytesDownloaded, 100)
+    }
+
     func testRecordForItemMatchesAnyCrossServerIdentity() async throws {
         let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
         let identity = DownloadTestFactory.imdbIdentity("tt1375666")

@@ -145,7 +145,8 @@ public extension HomeRow {
     static func rows(
         for content: HomeViewModel.Content,
         isLibraryVisible: (String) -> Bool,
-        isGlobalRowEnabled: (HomeGlobalRow) -> Bool = { _ in true }
+        isGlobalRowEnabled: (HomeGlobalRow) -> Bool = { _ in true },
+        includesEmptyWatchlist: Bool = false
     ) -> [HomeRow] {
         var rows: [HomeRow] = []
 
@@ -161,7 +162,8 @@ public extension HomeRow {
         // library never removes a title the user chose to watchlist. We keep this
         // explicit (rather than relying on watchlist items happening to lack a
         // libraryID) so the guarantee survives even if provenance is added later.
-        if isGlobalRowEnabled(.watchlist), !content.watchlist.isEmpty {
+        if isGlobalRowEnabled(.watchlist),
+           !content.watchlist.isEmpty || includesEmptyWatchlist {
             rows.append(HomeRow(kind: .watchlist, items: content.watchlist))
         }
         if isGlobalRowEnabled(.recentlyAdded) {

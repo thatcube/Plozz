@@ -34,7 +34,7 @@ public struct MediaRowView: View {
     /// name (provider content), and only the caller knows which. `nil` renders no
     /// heading (previously spelled as an empty string).
     private let title: Text?
-    private let showsLoadingPlaceholders: Bool
+    private let loadingPlaceholderCount: Int
     /// Row contents, guaranteed to hold each `id` once.
     ///
     /// `ForEach` over `Identifiable` requires unique ids; duplicates are
@@ -185,7 +185,7 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
-        showsLoadingPlaceholders: Bool = false,
+        loadingPlaceholderCount: Int = 0,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -206,7 +206,7 @@ public struct MediaRowView: View {
             onFocusChange: onFocusChange,
             statusCue: statusCue,
             pendingRemovalIDs: pendingRemovalIDs,
-            showsLoadingPlaceholders: showsLoadingPlaceholders,
+            loadingPlaceholderCount: loadingPlaceholderCount,
             playsOnSelect: playsOnSelect,
             onSelect: onSelect
         )
@@ -229,12 +229,12 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
-        showsLoadingPlaceholders: Bool = false,
+        loadingPlaceholderCount: Int = 0,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
-        self.showsLoadingPlaceholders = showsLoadingPlaceholders
+        self.loadingPlaceholderCount = max(loadingPlaceholderCount, 0)
         let uniqueItems = Self.uniqued(items)
         self.items = uniqueItems
         self.presentation = presentation
@@ -395,7 +395,7 @@ public struct MediaRowView: View {
     }
 
     public var body: some View {
-        if !items.isEmpty {
+        if !items.isEmpty || loadingPlaceholderCount > 0 {
             VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if let title {
                     MediaRowHeader(title: title)
@@ -413,8 +413,8 @@ public struct MediaRowView: View {
                             ForEach(items, id: \.stablePresentationID) { item in
                                 tappableCard(for: item)
                             }
-                            if showsLoadingPlaceholders {
-                                ForEach(0..<5, id: \.self) { _ in
+                            if loadingPlaceholderCount > 0 {
+                                ForEach(0..<loadingPlaceholderCount, id: \.self) { _ in
                                     loadingPlaceholder
                                         .frame(width: cardSlotWidth)
                                 }

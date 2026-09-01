@@ -130,6 +130,9 @@ public final class HomeViewModel {
     /// this remains true during stale-while-revalidate so cached rows can explain
     /// that their complete live contents are still arriving.
     public private(set) var isRefreshing = false
+    /// Exact unresolved Watchlist slots. Resolved cards remain fixed while these
+    /// placeholders are replaced, matching ordinary paged library browsing.
+    public private(set) var watchlistLoadingPlaceholderCount = 0
     /// Prevents a restarted SwiftUI task from starting the launch refresh twice
     /// while the cached rows remain visible.
     @ObservationIgnored private var cachedSnapshotRefreshStarted = false
@@ -299,10 +302,17 @@ public final class HomeViewModel {
                     return group
                 }
             }
+            let cachedWatchlist = cached.watchlist
             cached.watchlist = Self.resolvedWatchlist(
                 candidates: cached.watchlist + cached.latest,
                 fetched: cached.watchlist,
                 lastKnown: cached.watchlist,
+                handler: mediaItemActionHandler
+            )
+            watchlistLoadingPlaceholderCount = Self.watchlistPlaceholderCount(
+                fetched: cachedWatchlist,
+                lastKnown: cachedWatchlist,
+                visible: cached.watchlist,
                 handler: mediaItemActionHandler
             )
             // With NO servers to watch, every SERVER-derived row in the snapshot
@@ -497,6 +507,12 @@ public final class HomeViewModel {
                 lastKnown: onScreenWatchlist,
                 handler: mediaItemActionHandler
             )
+            watchlistLoadingPlaceholderCount = Self.watchlistPlaceholderCount(
+                fetched: merged.watchlist,
+                lastKnown: onScreenWatchlist,
+                visible: durableWatchlist,
+                handler: mediaItemActionHandler
+            )
             content = Content(
                 continueWatching: reconciledCW,
                 latest: merged.latest,
@@ -530,6 +546,12 @@ public final class HomeViewModel {
                     reconciledCW + unmerged.latest + unmerged.watchlist,
                 fetched: unmerged.watchlist,
                 lastKnown: onScreenWatchlist,
+                handler: mediaItemActionHandler
+            )
+            watchlistLoadingPlaceholderCount = Self.watchlistPlaceholderCount(
+                fetched: unmerged.watchlist,
+                lastKnown: onScreenWatchlist,
+                visible: durableWatchlist,
                 handler: mediaItemActionHandler
             )
             content = Content(
@@ -570,7 +592,9 @@ public final class HomeViewModel {
             return
         }
         isShowingCachedSnapshot = false
-        state = content.isEmpty ? .empty : .loaded(content)
+        state = content.isEmpty && watchlistLoadingPlaceholderCount == 0
+            ? .empty
+            : .loaded(content)
         // Record what this content was aggregated for so a later reappearance with
         // an unchanged visibility snapshot is recognised as a no-op (see
         // `loadIfNeeded(for:)`).
@@ -819,7 +843,12 @@ public final class HomeViewModel {
             lastKnown: content.watchlist,
             handler: mediaItemActionHandler
         )
-        state = content.isEmpty ? .empty : .loaded(content)
+        if mediaItemActionHandler.isDurableWatchlistPresentationReady() {
+            watchlistLoadingPlaceholderCount = 0
+        }
+        state = content.isEmpty && watchlistLoadingPlaceholderCount == 0
+            ? .empty
+            : .loaded(content)
         if !content.isEmpty { scheduleDurableWatchlistSave(content) }
     }
 
@@ -831,10 +860,9 @@ public final class HomeViewModel {
     /// constructor AND the first background aggregation, which is why gating the
     /// constructor alone still painted "+" on every launch.
     ///
-    /// A saved Home row contributes last-known tracker/Plozz-only entries during
-    /// that startup window, but it must not hide a larger provider result that just
-    /// arrived. Fresh entries lead so their current ordering wins; the merge retains
-    /// cached-only entries and folds matching cached ownership/artwork into them.
+    /// A saved Home row remains the visible truth during that startup window.
+    /// Provider entries not yet reconciled against library ownership are represented
+    /// by skeleton slots instead of cards with guessed ownership.
     static func resolvedWatchlist(
         candidates: [MediaItem],
         fetched: [MediaItem],
@@ -843,18 +871,60 @@ public final class HomeViewModel {
     ) -> [MediaItem] {
         guard let handler else { return fetched }
         guard handler.isDurableWatchlistPresentationReady() else {
-            let provisional = MediaItemMerger.merge(fetched + lastKnown)
-            var seen = Set<String>()
-            let unique = provisional.filter {
-                seen.insert($0.stablePresentationID).inserted
-            }
             return handler.rehydratePersistedArtwork(
-                Array(unique.prefix(10_000))
+                lastKnown.filter {
+                    !TitleClassifier.isNotOwnedForBadge($0)
+                }
             )
         }
-        return handler.rehydratePersistedArtwork(
+        let authoritative = handler.rehydratePersistedArtwork(
             handler.durableWatchlistItems(from: candidates)
         )
+        return stabilizedWatchlist(
+            current: lastKnown,
+            authoritative: authoritative
+        )
+    }
+
+    static func stabilizedWatchlist(
+        current: [MediaItem],
+        authoritative: [MediaItem]
+    ) -> [MediaItem] {
+        var authoritativeIDs = Set<String>()
+        let uniqueAuthoritative = authoritative.filter {
+            authoritativeIDs.insert($0.stablePresentationID).inserted
+        }
+        guard !current.isEmpty else { return uniqueAuthoritative }
+        var refreshedByID = Dictionary(
+            uniqueAuthoritative.map { ($0.stablePresentationID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var retainedIDs = Set<String>()
+        var stable: [MediaItem] = []
+        for item in current
+        where retainedIDs.insert(item.stablePresentationID).inserted {
+            if let refreshed = refreshedByID.removeValue(
+                forKey: item.stablePresentationID
+            ) {
+                stable.append(refreshed)
+            }
+        }
+        stable.append(contentsOf: uniqueAuthoritative.filter {
+            refreshedByID.removeValue(forKey: $0.stablePresentationID) != nil
+        })
+        return stable
+    }
+
+    private static func watchlistPlaceholderCount(
+        fetched: [MediaItem],
+        lastKnown: [MediaItem],
+        visible: [MediaItem],
+        handler: (any MediaItemActionHandling)?
+    ) -> Int {
+        guard let handler,
+              !handler.isDurableWatchlistPresentationReady() else { return 0 }
+        let unresolvedTotal = MediaItemMerger.merge(fetched + lastKnown).count
+        return max(unresolvedTotal - visible.count, 0)
     }
 
     /// Restores credentials on cached library-tile art before first paint.
@@ -1013,13 +1083,39 @@ public final class HomeViewModel {
     }
 
     private func persistSnapshot(_ content: Content) {
-        guard !unconfirmedContinueWatchingIDs.isEmpty else {
-            contentStore.save(content)
-            return
-        }
         var durable = content
-        durable.continueWatching.removeAll { unconfirmedContinueWatchingIDs.contains($0.id) }
+        if let mediaItemActionHandler,
+           !mediaItemActionHandler.isDurableWatchlistPresentationReady() {
+            // Save fresh non-Watchlist rows without replacing the last complete
+            // Watchlist with provider records whose ownership is still unresolved.
+            durable.watchlist = Self.overlayWatchlistUpdates(
+                content.watchlist,
+                on: contentStore.load()?.watchlist ?? []
+            )
+        }
+        if !unconfirmedContinueWatchingIDs.isEmpty {
+            durable.continueWatching.removeAll {
+                unconfirmedContinueWatchingIDs.contains($0.id)
+            }
+        }
         contentStore.save(durable)
+    }
+
+    private static func overlayWatchlistUpdates(
+        _ updates: [MediaItem],
+        on previous: [MediaItem]
+    ) -> [MediaItem] {
+        var updatesByID = Dictionary(
+            updates.map { ($0.stablePresentationID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var result = previous.map { item in
+            updatesByID.removeValue(forKey: item.stablePresentationID) ?? item
+        }
+        result.append(contentsOf: updates.filter {
+            updatesByID.removeValue(forKey: $0.stablePresentationID) != nil
+        })
+        return result
     }
 
     /// Recomputes which cards are on the row without any server having returned

@@ -35,11 +35,19 @@ public struct WatchlistBrowseView: View {
         ContentStateView(
             state: viewModel.state,
             emptyMessage: "Your Watchlist is empty.",
-            onRetry: { Task { await viewModel.load() } }
+            onRetry: { Task { await viewModel.load() } },
+            loadingContent: {
+                watchlistContent(
+                    [],
+                    loadingPlaceholderCount:
+                        max(metrics.posterColumns.count * 2, 6)
+                )
+            }
         ) { content in
             watchlistContent(
                 content.watchlist,
-                isRefreshing: viewModel.isRefreshing
+                loadingPlaceholderCount:
+                    viewModel.watchlistLoadingPlaceholderCount
             )
         }
         .task(id: visibility) {
@@ -82,9 +90,9 @@ public struct WatchlistBrowseView: View {
     @ViewBuilder
     private func watchlistContent(
         _ items: [MediaItem],
-        isRefreshing: Bool
+        loadingPlaceholderCount: Int
     ) -> some View {
-        if items.isEmpty, !isRefreshing {
+        if items.isEmpty, loadingPlaceholderCount == 0 {
             ContentUnavailableView {
                 Label("Your Watchlist is empty", systemImage: "bookmark")
             } description: {
@@ -114,9 +122,9 @@ public struct WatchlistBrowseView: View {
                                 onSelect(item)
                             }
                         }
-                        if isRefreshing {
+                        if loadingPlaceholderCount > 0 {
                             ForEach(
-                                0..<max(metrics.posterColumns.count * 2, 6),
+                                0..<loadingPlaceholderCount,
                                 id: \.self
                             ) { _ in
                                 SkeletonCardView(style: .poster)
@@ -142,10 +150,9 @@ public struct WatchlistBrowseView: View {
 
     private func isPendingRemoval(_ item: MediaItem) -> Bool {
         _ = watchlistIntentRevision
-        guard let mediaItemActionHandler,
-              mediaItemActionHandler.isDurableWatchlistPresentationReady()
-        else { return false }
-        return !mediaItemActionHandler.isWatchlisted(item)
+        guard let mediaItemActionHandler else { return false }
+        return mediaItemActionHandler
+            .isActivelyRemovingFromWatchlist(item)
     }
 }
 

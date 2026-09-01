@@ -310,7 +310,9 @@ public struct HomeView: View {
             let rows = HomeRow.rows(
                 for: content,
                 isLibraryVisible: { visibility.isVisible($0) },
-                isGlobalRowEnabled: { visibility.visibility.isGlobalRowEnabled($0) }
+                isGlobalRowEnabled: { visibility.visibility.isGlobalRowEnabled($0) },
+                includesEmptyWatchlist:
+                    viewModel.watchlistLoadingPlaceholderCount > 0
             )
             let isAwaitingLiveContinueWatching = viewModel.isShowingCachedSnapshot
             let heroContent = HomeHeroLaunchPolicy.content(
@@ -1024,7 +1026,8 @@ public struct HomeView: View {
                     for: row.items,
                     revision: watchlistIntentRevision
                 ),
-                showsLoadingPlaceholders: viewModel.isRefreshing,
+                loadingPlaceholderCount:
+                    viewModel.watchlistLoadingPlaceholderCount,
                 onSelect: onSelectItem
             )
         case .recentlyAdded:
@@ -1040,12 +1043,13 @@ public struct HomeView: View {
         for items: [MediaItem],
         revision _: Int
     ) -> Set<String> {
-        guard let mediaItemActionHandler,
-              mediaItemActionHandler.isDurableWatchlistPresentationReady()
-        else { return [] }
+        guard let mediaItemActionHandler else { return [] }
         return Set(
             items.lazy
-                .filter { !mediaItemActionHandler.isWatchlisted($0) }
+                .filter {
+                    mediaItemActionHandler
+                        .isActivelyRemovingFromWatchlist($0)
+                }
                 .map(\.stablePresentationID)
         )
     }

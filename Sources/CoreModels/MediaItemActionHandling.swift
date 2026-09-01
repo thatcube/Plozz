@@ -29,6 +29,10 @@ public protocol MediaItemActionHandling: AnyObject {
     /// Current Plozz-owned membership. Must be an immutable in-memory lookup.
     func isWatchlisted(_ item: MediaItem) -> Bool
 
+    /// Whether the viewer explicitly requested removal and that local write is
+    /// still pending. Never infer this from membership or refresh results.
+    func isActivelyRemovingFromWatchlist(_ item: MediaItem) -> Bool
+
     /// Resolves the durable ordered row against current presentation candidates.
     func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem]
 
@@ -60,6 +64,7 @@ public protocol MediaItemActionHandling: AnyObject {
 public extension MediaItemActionHandling {
     func invalidateAccountCaches() {}
     func isWatchlisted(_ item: MediaItem) -> Bool { false }
+    func isActivelyRemovingFromWatchlist(_ item: MediaItem) -> Bool { false }
     func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem] {
         candidates.filter(\.isFavorite)
     }

@@ -44,7 +44,7 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         )
     }
 
-    func testDurableFrontInsertionRefreshesHomeRowImmediately() {
+    func testDurableAdditionAppendsWithoutMovingExistingCards() {
         let older = MediaItem(
             id: "older",
             title: "Older",
@@ -73,10 +73,10 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         guard case .loaded(let content) = model.state else {
             return XCTFail("Expected loaded content")
         }
-        XCTAssertEqual(content.watchlist.map(\.title), ["New", "Older"])
+        XCTAssertEqual(content.watchlist.map(\.title), ["Older", "New"])
         XCTAssertEqual(
             content.watchlist.map(\.stablePresentationID),
-            [newlyAdded.stablePresentationID, older.stablePresentationID]
+            [older.stablePresentationID, newlyAdded.stablePresentationID]
         )
     }
 
@@ -133,10 +133,9 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         XCTAssertEqual(refreshed.watchlist.map(\.id), ["explicit"])
     }
 
-    /// The first provider aggregation starts before native-cache restoration too.
-    /// It must expand a bounded launch snapshot as soon as the larger provider
-    /// result arrives, without dropping cached-only tracker/Plozz entries.
-    func testBackgroundAggregationExpandsLastKnownRowBeforeCacheIsReady() {
+    /// Provider records are not ownership answers. Keep the resolved launch row
+    /// fixed and use skeleton slots until durable reconciliation is ready.
+    func testBackgroundAggregationKeepsResolvedRowBeforeCacheIsReady() {
         let freshlyFetched = (0..<177).map {
             MediaItem(id: "item-\($0)", title: "Item \($0)", kind: .movie)
         }
@@ -159,12 +158,10 @@ final class UniversalWatchlistHomeTests: XCTestCase {
             lastKnown: cached,
             handler: handler
         )
-        XCTAssertEqual(beforeCache.count, 178)
-        XCTAssertEqual(beforeCache.prefix(177).map(\.id), freshlyFetched.map(\.id))
-        XCTAssertEqual(beforeCache.last?.id, "tracker-only")
+        XCTAssertEqual(beforeCache.map(\.id), cached.map(\.id))
         XCTAssertTrue(
             beforeCache.last?.locallyValidatedPlayableSource == true,
-            "Cached-only tracker or Plozz entries remain visible until durable reconciliation"
+            "Resolved cached entries remain visible until durable reconciliation"
         )
 
         handler.ready = true
@@ -175,6 +172,57 @@ final class UniversalWatchlistHomeTests: XCTestCase {
             handler: handler
         )
         XCTAssertEqual(afterCache.map(\.id), freshlyFetched.map(\.id))
+    }
+
+    func testAuthoritativeRefreshPreservesExistingPositionsAndAppendsNewItems() {
+        let first = MediaItem(
+            id: "first",
+            title: "First",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let second = MediaItem(
+            id: "second",
+            title: "Second",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let new = MediaItem(
+            id: "new",
+            title: "New",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+
+        let stable = HomeViewModel.stabilizedWatchlist(
+            current: [first, second],
+            authoritative: [new, second, first]
+        )
+
+        XCTAssertEqual(stable.map(\.id), ["first", "second", "new"])
+    }
+
+    func testAuthoritativeRefreshDeduplicatesStablePresentationIDs() {
+        let aliasID = MediaAliasID()
+        let stale = MediaItem(
+            id: "stale",
+            title: "Stale",
+            kind: .movie,
+            watchlistAliasID: aliasID
+        )
+        let refreshed = MediaItem(
+            id: "refreshed",
+            title: "Refreshed",
+            kind: .movie,
+            watchlistAliasID: aliasID
+        )
+
+        let stable = HomeViewModel.stabilizedWatchlist(
+            current: [stale, stale],
+            authoritative: [refreshed, refreshed]
+        )
+
+        XCTAssertEqual(stable.map(\.id), ["refreshed"])
     }
 
     func testReadyDurableWatchlistCanAuthoritativelyClearLastKnownRow() {
@@ -193,6 +241,43 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         )
 
         XCTAssertTrue(resolved.isEmpty)
+    }
+
+    func testProvisionalSavePreservesUnresolvedCardsAndUpdatesVisibleCards() {
+        let unresolved = MediaItem(
+            id: "unresolved",
+            title: "Unresolved",
+            kind: .movie,
+            availability: .unknown,
+            locallyValidatedPlayableSource: false
+        )
+        let owned = MediaItem(
+            id: "owned",
+            title: "Owned",
+            kind: .movie,
+            locallyValidatedPlayableSource: true
+        )
+        let store = UniversalWatchlistHomeStore(
+            content: .init(watchlist: [unresolved, owned]),
+            clearsOnRequest: false
+        )
+        let handler = UniversalWatchlistHomeHandler(
+            items: [unresolved, owned],
+            ready: false
+        )
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: store,
+            mediaItemActionHandler: handler
+        )
+
+        model.applyWatchedState(
+            MediaItemMutation(itemIDs: [owned.id], played: true)
+        )
+
+        let saved = store.load()?.watchlist
+        XCTAssertEqual(saved?.map(\.id), [unresolved.id, owned.id])
+        XCTAssertEqual(saved?.last?.isPlayed, true)
     }
 
     func testFirstPaintRehydratesOwnedArtworkBeforePublishing() {
@@ -303,7 +388,14 @@ private final class UniversalWatchlistHomeStore:
     HomeContentStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var content: HomeViewModel.Content?
-    init(content: HomeViewModel.Content?) { self.content = content }
+    private let clearsOnRequest: Bool
+    init(
+        content: HomeViewModel.Content?,
+        clearsOnRequest: Bool = true
+    ) {
+        self.content = content
+        self.clearsOnRequest = clearsOnRequest
+    }
     func load() -> HomeViewModel.Content? {
         lock.lock()
         defer { lock.unlock() }
@@ -316,7 +408,7 @@ private final class UniversalWatchlistHomeStore:
     }
     func clear() {
         lock.lock()
-        content = nil
+        if clearsOnRequest { content = nil }
         lock.unlock()
     }
     func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? { nil }

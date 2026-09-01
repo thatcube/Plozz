@@ -299,7 +299,9 @@ struct PlozziOSHomeView: View {
         let rows = HomeRow.rows(
             for: content,
             isLibraryVisible: visibility.isVisibleOnHome,
-            isGlobalRowEnabled: visibility.isGlobalRowEnabled
+            isGlobalRowEnabled: visibility.isGlobalRowEnabled,
+            includesEmptyWatchlist:
+                viewModel.watchlistLoadingPlaceholderCount > 0
         )
         let heroStyle: HeroArtworkStyle = horizontalSizeClass == .compact
             ? .compactPortrait
@@ -379,7 +381,9 @@ struct PlozziOSHomeView: View {
                         PlozziOSHomeRowView(
                             row: row,
                             appModel: appModel,
-                            watchlistIntentRevision: watchlistIntentRevision
+                            watchlistIntentRevision: watchlistIntentRevision,
+                            watchlistLoadingPlaceholderCount:
+                                viewModel.watchlistLoadingPlaceholderCount
                         )
                     }
                 } else {
@@ -387,7 +391,9 @@ struct PlozziOSHomeView: View {
                         PlozziOSHomeRowView(
                             row: row,
                             appModel: appModel,
-                            watchlistIntentRevision: watchlistIntentRevision
+                            watchlistIntentRevision: watchlistIntentRevision,
+                            watchlistLoadingPlaceholderCount:
+                                viewModel.watchlistLoadingPlaceholderCount
                         )
                     }
                     if content.librarySections.isEmpty {
@@ -429,7 +435,8 @@ struct PlozziOSHomeView: View {
                         PlozziOSHomeRowView(
                             row: libraries,
                             appModel: appModel,
-                            watchlistIntentRevision: watchlistIntentRevision
+                            watchlistIntentRevision: watchlistIntentRevision,
+                            watchlistLoadingPlaceholderCount: 0
                         )
                     }
                 }
@@ -1844,6 +1851,7 @@ private struct PlozziOSHomeRowView: View {
     let row: HomeRow
     let appModel: PlozziOSAppModel
     let watchlistIntentRevision: Int
+    let watchlistLoadingPlaceholderCount: Int
 
     var body: some View {
         Group {
@@ -1884,6 +1892,9 @@ private struct PlozziOSHomeRowView: View {
                     interaction: row.kind == .continueWatching ? .play : .openDetail,
                     prefetchesArtwork: row.kind == .continueWatching,
                     pendingRemovalIDs: pendingWatchlistRemovalIDs,
+                    loadingPlaceholderCount: row.kind == .watchlist
+                        ? watchlistLoadingPlaceholderCount
+                        : 0,
                     // Continue Watching identifies cards by show art + logo unless
                     // the user has turned that off in Customize Home.
                     showsSeriesArtwork: row.kind == .continueWatching
@@ -1895,13 +1906,13 @@ private struct PlozziOSHomeRowView: View {
 
     private var pendingWatchlistRemovalIDs: Set<String> {
         _ = watchlistIntentRevision
-        guard row.kind == .watchlist,
-              appModel.mediaItemActionHandler
-                  .isDurableWatchlistPresentationReady()
-        else { return [] }
+        guard row.kind == .watchlist else { return [] }
         return Set(
             row.items.lazy
-                .filter { !appModel.mediaItemActionHandler.isWatchlisted($0) }
+                .filter {
+                    appModel.mediaItemActionHandler
+                        .isActivelyRemovingFromWatchlist($0)
+                }
                 .map(\.stablePresentationID)
         )
     }
@@ -1965,6 +1976,7 @@ private struct PlozziOSHomeMediaRail: View {
     /// rail at launch when per-library rows are enabled.
     var prefetchesArtwork: Bool = false
     var pendingRemovalIDs: Set<String> = []
+    var loadingPlaceholderCount = 0
     /// Identify each card by its show — artwork plus logo — instead of by the
     /// item's own thumbnail.
     var showsSeriesArtwork: Bool = false
@@ -2013,6 +2025,20 @@ private struct PlozziOSHomeMediaRail: View {
                             if prefetchesArtwork {
                                 prefetchArtwork(around: item)
                             }
+                        }
+                        ForEach(0..<loadingPlaceholderCount, id: \.self) { _ in
+                            PlozziOSPosterCard(
+                                item: nil,
+                                style: style,
+                                showsSeriesArtwork: showsSeriesArtwork
+                            )
+                            .frame(
+                                width: metrics.cardSlotWidth(
+                                    for: style,
+                                    cardStyle: cardStyle,
+                                    showsSeriesArtwork: showsSeriesArtwork
+                                )
+                            )
                         }
                     }
                 }

@@ -96,6 +96,23 @@ final class WatchlistIntentTests: XCTestCase {
         XCTAssertTrue(durable.saved.contains(subject.id))
     }
 
+    func testRemovingPresentationRequiresAnExplicitPendingRemoval() async {
+        let durable = DurableDouble()
+        durable.saved.insert(item.id)
+        durable.shouldGate = true
+        let coordinator = makeCoordinator(durable)
+
+        XCTAssertFalse(coordinator.isActivelyRemovingFromWatchlist(item))
+
+        coordinator.perform(.removeFromWatchlist, on: item, context: .none)
+        await settle { durable.gate != nil }
+
+        XCTAssertTrue(coordinator.isActivelyRemovingFromWatchlist(item))
+
+        durable.release()
+        await settle { !coordinator.isActivelyRemovingFromWatchlist(item) }
+    }
+
     /// Spamming the button leaves the durable state on the LAST press, and never
     /// runs two writes for one title at once.
     func testBurstOfPressesConvergesOnTheLastPress() async {

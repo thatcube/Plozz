@@ -704,6 +704,10 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             : item.isFavorite
     }
 
+    public func isActivelyRemovingFromWatchlist(_ item: MediaItem) -> Bool {
+        watchlistIntents[Self.membershipKey(item)] == false
+    }
+
     public func durableWatchlistItems(
         from candidates: [MediaItem]
     ) -> [MediaItem] {

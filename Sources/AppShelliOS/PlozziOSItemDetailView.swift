@@ -2088,7 +2088,7 @@ private struct PlozziOSDownloadControl: View {
     private func statusIcon(_ state: MediaDownloadBadgeState) -> some View {
         switch state {
         case .completed:
-            Image(systemName: "arrow.down.circle.fill")
+            Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 25, weight: .regular))
                 .foregroundStyle(.green)
                 .accessibilityLabel("Downloaded")

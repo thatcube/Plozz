@@ -86,11 +86,9 @@ public struct WatchlistBrowseView: View {
     ) -> some View {
         if items.isEmpty {
             if isRefreshing {
-                VStack(spacing: PlozzTheme.Spacing.medium) {
-                    ProgressView()
-                    Text("Loading your full Watchlist…")
-                        .plozzForeground(.secondary)
-                }
+                ProgressView()
+                    .controlSize(.large)
+                    .accessibilityLabel(Text("Refreshing Watchlist"))
             } else {
                 ContentUnavailableView {
                     Label("Your Watchlist is empty", systemImage: "bookmark")
@@ -104,10 +102,7 @@ public struct WatchlistBrowseView: View {
                     alignment: .leading,
                     spacing: metrics.sectionTitleSpacing
                 ) {
-                    WatchlistBrowseHeader(
-                        itemCount: items.count,
-                        isRefreshing: isRefreshing
-                    )
+                    WatchlistBrowseHeader(isRefreshing: isRefreshing)
                         .padding(.leading, contentLeadingPadding)
                         .padding(.trailing, HomeLayout.horizontalPadding)
 
@@ -124,6 +119,15 @@ public struct WatchlistBrowseView: View {
                             ) {
                                 onSelect(item)
                             }
+                        }
+                        if isRefreshing {
+                            ProgressView()
+                                .controlSize(.large)
+                                .frame(
+                                    width: metrics.posterWidth,
+                                    height: metrics.posterHeight
+                                )
+                                .accessibilityLabel(Text("Refreshing Watchlist"))
                         }
                     }
                     .padding(.leading, contentLeadingPadding)
@@ -153,25 +157,17 @@ public struct WatchlistBrowseView: View {
 }
 
 private struct WatchlistBrowseHeader: View {
-    let itemCount: Int
     let isRefreshing: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PlozzTheme.Spacing.small) {
+        HStack(spacing: PlozzTheme.Spacing.small) {
             Text("Watchlist")
                 .font(.largeTitle.bold())
-
-            HStack(spacing: PlozzTheme.Spacing.small) {
-                Text("\(itemCount) items")
-                    .plozzForeground(.secondary)
-                if isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading your full Watchlist…")
-                        .plozzForeground(.secondary)
-                }
+            if isRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(Text("Refreshing Watchlist"))
             }
-            .font(.callout)
         }
     }
 }

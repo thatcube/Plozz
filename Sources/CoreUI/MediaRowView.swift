@@ -34,7 +34,7 @@ public struct MediaRowView: View {
     /// name (provider content), and only the caller knows which. `nil` renders no
     /// heading (previously spelled as an empty string).
     private let title: Text?
-    private let loadingStatus: LocalizedStringResource?
+    private let showsLoadingIndicator: Bool
     /// Row contents, guaranteed to hold each `id` once.
     ///
     /// `ForEach` over `Identifiable` requires unique ids; duplicates are
@@ -185,7 +185,7 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
-        loadingStatus: LocalizedStringResource? = nil,
+        showsLoadingIndicator: Bool = false,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -206,7 +206,7 @@ public struct MediaRowView: View {
             onFocusChange: onFocusChange,
             statusCue: statusCue,
             pendingRemovalIDs: pendingRemovalIDs,
-            loadingStatus: loadingStatus,
+            showsLoadingIndicator: showsLoadingIndicator,
             playsOnSelect: playsOnSelect,
             onSelect: onSelect
         )
@@ -229,12 +229,12 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
-        loadingStatus: LocalizedStringResource? = nil,
+        showsLoadingIndicator: Bool = false,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
-        self.loadingStatus = loadingStatus
+        self.showsLoadingIndicator = showsLoadingIndicator
         let uniqueItems = Self.uniqued(items)
         self.items = uniqueItems
         self.presentation = presentation
@@ -384,7 +384,7 @@ public struct MediaRowView: View {
 
     private struct MediaRowHeader: View {
         let title: Text
-        let loadingStatus: LocalizedStringResource?
+        let showsLoadingIndicator: Bool
         @Environment(\.plozzMetrics) private var metrics
 
         var body: some View {
@@ -393,12 +393,10 @@ public struct MediaRowView: View {
                     .font(PlozzRailTitle.font(
                         sectionHeaderFontSize: metrics.sectionHeaderFontSize
                     ))
-                if let loadingStatus {
+                if showsLoadingIndicator {
                     ProgressView()
                         .controlSize(.small)
-                    Text(loadingStatus)
-                        .font(.callout)
-                        .plozzForeground(.secondary)
+                        .accessibilityLabel(Text("Refreshing Watchlist"))
                 }
             }
         }
@@ -408,7 +406,10 @@ public struct MediaRowView: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if let title {
-                    MediaRowHeader(title: title, loadingStatus: loadingStatus)
+                    MediaRowHeader(
+                        title: title,
+                        showsLoadingIndicator: showsLoadingIndicator
+                    )
                         .padding(.leading, leadingInset + navigationContentInset)
                 }
 
@@ -422,6 +423,15 @@ public struct MediaRowView: View {
                         LazyHStack(spacing: layoutMetrics.cardSpacing) {
                             ForEach(items, id: \.stablePresentationID) { item in
                                 tappableCard(for: item)
+                            }
+                            if showsLoadingIndicator {
+                                ProgressView()
+                                    .controlSize(.large)
+                                    .frame(
+                                        width: cardSlotWidth,
+                                        height: layoutMetrics.posterHeight
+                                    )
+                                    .accessibilityLabel(Text("Refreshing Watchlist"))
                             }
                         }
                         // The row's ordinary page gutter, unchanged from before the

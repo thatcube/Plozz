@@ -1024,9 +1024,7 @@ public struct HomeView: View {
                     for: row.items,
                     revision: watchlistIntentRevision
                 ),
-                loadingStatus: viewModel.isRefreshing
-                    ? Self.loadingFullWatchlist
-                    : nil,
+                showsLoadingIndicator: viewModel.isRefreshing,
                 onSelect: onSelectItem
             )
         case .recentlyAdded:
@@ -1035,12 +1033,6 @@ public struct HomeView: View {
             librariesRow(row.libraries)
         }
     }
-
-    private static let loadingFullWatchlist = LocalizedStringResource(
-        "watchlist.loadingFull",
-        defaultValue: "Loading your full Watchlist…",
-        comment: "Shown beside a partial cached Watchlist while all saved items are still loading."
-    )
 
     /// A card still present in the durable row but no longer considered watchlisted
     /// is the exact stale-presentation window the removal treatment needs to cover.

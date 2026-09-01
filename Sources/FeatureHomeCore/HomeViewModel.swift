@@ -60,16 +60,15 @@ public final class HomeViewModel {
                 && libraries.isEmpty && librarySections.isEmpty
         }
 
-        /// A copy bounded to at most `perRow` items in each media row (libraries
-        /// kept whole — they're few and cheap). Used before persisting a snapshot so
-        /// the on-disk cache stays small; the first launch paint only needs enough
-        /// to fill the hero + the top of each row anyway. Preserves the merge flag
-        /// and per-library blocks so an unmerged snapshot paints in the right layout.
-        func bounded(perRow: Int) -> Content {
+        /// A copy bounded for launch persistence. Ordinary Home preview rows keep
+        /// only enough cards for the first paint, while Watchlist keeps its complete
+        /// presentation: unlike the previews, that same snapshot backs a dedicated
+        /// browse destination and must not strand navigation at 30 items.
+        func bounded(perRow: Int, watchlistLimit: Int) -> Content {
             Content(
                 continueWatching: Array(continueWatching.prefix(perRow)),
                 latest: Array(latest.prefix(perRow)),
-                watchlist: Array(watchlist.prefix(perRow)),
+                watchlist: Array(watchlist.prefix(watchlistLimit)),
                 libraries: libraries,
                 mergeLibraries: mergeLibraries,
                 librarySections: librarySections.map {
@@ -832,10 +831,10 @@ public final class HomeViewModel {
     /// constructor AND the first background aggregation, which is why gating the
     /// constructor alone still painted "+" on every launch.
     ///
-    /// A saved Home row is the complete last-known presentation and wins during
-    /// that startup window. On a genuine first run there is no saved row, so the
-    /// freshly fetched provider row is the honest thing to show until native
-    /// resolution is ready.
+    /// A saved Home row contributes last-known tracker/Plozz-only entries during
+    /// that startup window, but it must not hide a larger provider result that just
+    /// arrived. Fresh entries lead so their current ordering wins; the merge retains
+    /// cached-only entries and folds matching cached ownership/artwork into them.
     static func resolvedWatchlist(
         candidates: [MediaItem],
         fetched: [MediaItem],
@@ -844,8 +843,13 @@ public final class HomeViewModel {
     ) -> [MediaItem] {
         guard let handler else { return fetched }
         guard handler.isDurableWatchlistPresentationReady() else {
+            let provisional = MediaItemMerger.merge(fetched + lastKnown)
+            var seen = Set<String>()
+            let unique = provisional.filter {
+                seen.insert($0.stablePresentationID).inserted
+            }
             return handler.rehydratePersistedArtwork(
-                lastKnown.isEmpty ? fetched : lastKnown
+                Array(unique.prefix(10_000))
             )
         }
         return handler.rehydratePersistedArtwork(

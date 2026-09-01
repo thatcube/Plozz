@@ -124,6 +124,7 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     private let legacyWatchlistSeedFileURL: URL?
     private let legacyWatchlistSourceFileURL: URL?
     private let maxItemsPerRow: Int
+    private let maxWatchlistItems: Int
     private let maxAge: TimeInterval
     private let heroMaxAge: TimeInterval
 
@@ -188,10 +189,12 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         namespace: String? = nil,
         directory: URL? = HomeContentStore.defaultDirectory(),
         maxItemsPerRow: Int = 30,
+        maxWatchlistItems: Int = 10_000,
         maxAge: TimeInterval = 60 * 60 * 24 * 14,
         heroMaxAge: TimeInterval = 60 * 60 * 24
     ) {
         self.maxItemsPerRow = maxItemsPerRow
+        self.maxWatchlistItems = maxWatchlistItems
         self.maxAge = maxAge
         self.heroMaxAge = heroMaxAge
         guard let directory else {
@@ -324,7 +327,10 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         guard let fileURL else { return }
         let stored = Stored(
             content: content
-                .bounded(perRow: maxItemsPerRow)
+                .bounded(
+                    perRow: maxItemsPerRow,
+                    watchlistLimit: maxWatchlistItems
+                )
                 .sanitizedForPersistence(),
             savedAt: Date()
         )

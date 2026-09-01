@@ -131,6 +131,57 @@ final class UniversalWatchlistMembershipCache {
     }
 }
 
+enum NativeWatchlistOwnershipResolution {
+    static let maximumConcurrentLookups = 8
+
+    static func resolve(
+        _ entries: [(MediaAliasID, WatchlistDestinationEntry)],
+        known: [MediaAliasID: WatchlistLibraryCopy],
+        maximumConcurrentLookups: Int = maximumConcurrentLookups,
+        using resolver:
+            (@Sendable (WatchlistDestinationEntry) async -> WatchlistLibraryCopy?)?
+    ) async -> [WatchlistLibraryCopy?] {
+        var resolved = entries.map { known[$0.0] }
+        guard let resolver else { return resolved }
+
+        let pending = entries.indices.filter {
+            resolved[$0]?.presentation == nil
+        }
+        guard !pending.isEmpty else { return resolved }
+
+        let limit = max(1, maximumConcurrentLookups)
+        await withTaskGroup(
+            of: (Int, WatchlistLibraryCopy?).self
+        ) { group in
+            var next = 0
+
+            func submit(_ pendingOffset: Int) {
+                let index = pending[pendingOffset]
+                let entry = entries[index].1
+                group.addTask {
+                    (index, await resolver(entry))
+                }
+            }
+
+            while next < min(limit, pending.count) {
+                submit(next)
+                next += 1
+            }
+
+            while let (index, copy) = await group.next() {
+                if let copy {
+                    resolved[index] = copy
+                }
+                if next < pending.count {
+                    submit(next)
+                    next += 1
+                }
+            }
+        }
+        return resolved
+    }
+}
+
 @MainActor
 public protocol UniversalWatchlistHost: AnyObject {
     var runtimeFeatureFlags: RuntimeFeatureFlags { get }
@@ -1090,22 +1141,19 @@ public extension UniversalWatchlistHost {
                 uniquingKeysWith: { first, _ in first }
             )
             let resolver = await reconciler.libraryResolver(for: read.destinationID)
-            var entries: [NativeWatchlistEntry] = []
-            for (offset, resolved) in resolvedByDestination[
+            let destinationEntries = resolvedByDestination[
                 read.destinationID,
                 default: []
-            ].enumerated() {
+            ]
+            let ownedCopies = await NativeWatchlistOwnershipResolution.resolve(
+                destinationEntries,
+                known: known,
+                using: resolver
+            )
+            var entries: [NativeWatchlistEntry] = []
+            for (offset, resolved) in destinationEntries.enumerated() {
                 let (aliasID, entry) = resolved
-                var owned = known[aliasID]
-                if owned?.presentation == nil, let resolver,
-                   let refreshed = await resolver(entry) {
-                    // Also refresh an older cached ownership that has a source
-                    // but predates `ownedPresentation`. Without this, the source
-                    // made the badge instant but the missing presentation could
-                    // never heal — `owned != nil` suppressed the only lookup that
-                    // knew the local poster.
-                    owned = refreshed
-                }
+                let owned = ownedCopies[offset]
                 guard let value = NativeWatchlistEntry(
                     aliasID: aliasID,
                     kind: entry.kind,

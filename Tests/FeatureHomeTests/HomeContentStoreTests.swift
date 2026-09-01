@@ -45,13 +45,17 @@ final class HomeContentStoreTests: XCTestCase {
         XCTAssertEqual(loaded?.continueWatching.first?.id, "i0")
     }
 
-    func testSaveBoundsEachRow() {
+    func testSaveBoundsPreviewRowsButPreservesFullWatchlist() {
         let store = HomeContentStore(namespace: nil, directory: tempDir, maxItemsPerRow: 10)
         store.save(content(cw: 50, latest: 40, watchlist: 25))
         let loaded = store.load()
         XCTAssertEqual(loaded?.continueWatching.count, 10, "Continue Watching is capped")
         XCTAssertEqual(loaded?.latest.count, 10, "Latest is capped")
-        XCTAssertEqual(loaded?.watchlist.count, 10, "Watchlist is capped")
+        XCTAssertEqual(
+            loaded?.watchlist.count,
+            25,
+            "Watchlist backs full browsing and must not use the preview-row cap"
+        )
         // Bounding keeps the leading (most relevant) items.
         XCTAssertEqual(loaded?.continueWatching.first?.id, "i0")
         XCTAssertEqual(loaded?.continueWatching.last?.id, "i9")

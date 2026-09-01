@@ -134,44 +134,47 @@ final class UniversalWatchlistHomeTests: XCTestCase {
     }
 
     /// The first provider aggregation starts before native-cache restoration too.
-    /// Gating only `HomeViewModel.init` fixed the first frame and then this pass
-    /// immediately replaced it with the same explicit-only runtime answer.
-    func testBackgroundAggregationKeepsLastKnownRowUntilCacheIsReady() {
-        let cached = MediaItem(
-            id: "owned",
-            title: "Last-known owned copy",
-            kind: .movie,
-            locallyValidatedPlayableSource: true
-        )
-        let freshlyFetched = MediaItem(
-            id: "discover",
-            title: "Fresh Discover row",
-            kind: .movie,
-            availability: .unknown,
-            locallyValidatedPlayableSource: false
-        )
+    /// It must expand a bounded launch snapshot as soon as the larger provider
+    /// result arrives, without dropping cached-only tracker/Plozz entries.
+    func testBackgroundAggregationExpandsLastKnownRowBeforeCacheIsReady() {
+        let freshlyFetched = (0..<177).map {
+            MediaItem(id: "item-\($0)", title: "Item \($0)", kind: .movie)
+        }
+        let cached = Array(freshlyFetched.prefix(30)) + [
+            MediaItem(
+                id: "tracker-only",
+                title: "Tracker only",
+                kind: .series,
+                locallyValidatedPlayableSource: true
+            )
+        ]
         let handler = UniversalWatchlistHomeHandler(
-            items: [freshlyFetched],
+            items: freshlyFetched,
             ready: false
         )
 
         let beforeCache = HomeViewModel.resolvedWatchlist(
-            candidates: [freshlyFetched],
-            fetched: [freshlyFetched],
-            lastKnown: [cached],
+            candidates: freshlyFetched,
+            fetched: freshlyFetched,
+            lastKnown: cached,
             handler: handler
         )
-        XCTAssertEqual(beforeCache.map(\.id), ["owned"])
-        XCTAssertTrue(beforeCache[0].locallyValidatedPlayableSource)
+        XCTAssertEqual(beforeCache.count, 178)
+        XCTAssertEqual(beforeCache.prefix(177).map(\.id), freshlyFetched.map(\.id))
+        XCTAssertEqual(beforeCache.last?.id, "tracker-only")
+        XCTAssertTrue(
+            beforeCache.last?.locallyValidatedPlayableSource == true,
+            "Cached-only tracker or Plozz entries remain visible until durable reconciliation"
+        )
 
         handler.ready = true
         let afterCache = HomeViewModel.resolvedWatchlist(
-            candidates: [cached, freshlyFetched],
-            fetched: [freshlyFetched],
-            lastKnown: [cached],
+            candidates: cached + freshlyFetched,
+            fetched: freshlyFetched,
+            lastKnown: cached,
             handler: handler
         )
-        XCTAssertEqual(afterCache.map(\.id), ["discover"])
+        XCTAssertEqual(afterCache.map(\.id), freshlyFetched.map(\.id))
     }
 
     func testReadyDurableWatchlistCanAuthoritativelyClearLastKnownRow() {

@@ -2123,7 +2123,18 @@ private struct PlozziOSEpisodeDownloadRow: View {
             }
             Spacer()
             if let record {
-                if record.status == .paused || record.status == .failed {
+                if record.status == .queued
+                    || record.status == .preparing
+                    || record.status == .downloading {
+                    Button {
+                        Task { await appModel.downloads.pause(record) }
+                    } label: {
+                        PlozziOSDownloadControl(state: record.badgeState)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBusy)
+                    .accessibilityLabel("Pause Download")
+                } else if record.status == .paused || record.status == .failed {
                     Button {
                         Task { await appModel.downloads.resume(record) }
                     } label: {

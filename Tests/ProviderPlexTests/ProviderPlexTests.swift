@@ -1248,7 +1248,7 @@ final class PlexProviderMappingTests: XCTestCase {
             "/video/:/transcode/universal/start.m3u8"
         )
         XCTAssertEqual(locator.deliveryMode, .serverTranscode)
-        XCTAssertEqual(locator.playSessionID, "plozz-d1-77")
+        XCTAssertTrue(locator.playSessionID?.hasPrefix("plozz-d1-77-") == true)
         XCTAssertEqual(
             locator.resource.queryItems.first { $0.name == "protocol" }?.value,
             "hls"

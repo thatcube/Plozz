@@ -1727,14 +1727,24 @@ final class PlozziOSAppModel {
                         }
                         switch source.provider {
                         case .plex:
+                            let approximateWidth = Int(
+                                (
+                                    Double(constraint.maximumHeight)
+                                        * 16.0 / 9.0
+                                ).rounded()
+                            )
+                            let maximumWidth = approximateWidth.isMultiple(of: 2)
+                                ? approximateWidth
+                                : approximateWidth + 1
                             setQueryItem(
-                                "videoBitrate",
+                                "maxVideoBitrate",
                                 String(constraint.maximumVideoBitrateBps / 1_000)
                             )
                             setQueryItem(
                                 "videoResolution",
-                                "\(constraint.maximumHeight * 16 / 9)x\(constraint.maximumHeight)"
+                                "\(maximumWidth)x\(constraint.maximumHeight)"
                             )
+                            setQueryItem("copyts", "1")
                         case .jellyfin, .emby:
                             setQueryItem(
                                 "VideoBitrate",

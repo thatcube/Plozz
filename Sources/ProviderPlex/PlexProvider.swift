@@ -702,9 +702,11 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         }
         let media = mediaList[mediaIndex]
         let partIndex = 0
-        // A stable per-(device,item) session id ties the transcode m3u8 to its
-        // segments; deterministic so it's traceable and testable.
-        let transcodeSessionID = "plozz-\(session.deviceID)-\(itemID)"
+        // Plex identifies each active transcode by this value. Reusing an item-
+        // scoped identifier lets a retry or simultaneous playback tear down the
+        // rendition another request is still fetching.
+        let transcodeSessionID =
+            "plozz-\(session.deviceID)-\(itemID)-\(UUID().uuidString)"
         guard let resolved = client.playbackURL(
             ratingKey: itemID,
             media: media,

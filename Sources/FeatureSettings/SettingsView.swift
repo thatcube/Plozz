@@ -647,7 +647,7 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: nil,
                    route: .appearance) {
-                Text("Theme, navigation, cards, and display size")
+                Text("Theme, navigation, and cards")
                     .font(.footnote)
                     .settingsRowSecondary()
                     .lineLimit(2)

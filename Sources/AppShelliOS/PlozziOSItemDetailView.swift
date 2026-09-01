@@ -165,6 +165,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
     @State private var sourceOverride: String?
     @State private var versionOverride: String?
     @State private var seriesPlayTarget: MediaItem?
+    @State private var presentsSeriesDownloads = false
     /// Whether the hero describes the **show** rather than `seriesPlayTarget`.
     ///
     /// True when there is no resume point to offer — nothing watched, or all of it
@@ -293,15 +294,43 @@ private struct PlozziOSCanonicalItemDetailView: View {
         .background(palette.backgroundBase.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if trailerController.isPlaying,
-               trailerController.activeSurfaceRole == .detail,
-               trailerController.currentItemID == viewModel.state.value?.item.id {
-                ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if let detail = viewModel.state.value,
+                   detail.item.kind == .series,
+                   !isDiscoveryItem,
+                   detail.children.contains(where: {
+                       $0.kind == .season || $0.kind == .episode
+                   }) {
+                    Button {
+                        presentsSeriesDownloads = true
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                    }
+                    .accessibilityLabel("Download Show")
+                }
+
+                if trailerController.isPlaying,
+                   trailerController.activeSurfaceRole == .detail,
+                   trailerController.currentItemID == viewModel.state.value?.item.id {
                     PlozziOSTrailerMuteToolbarButton(
                         isMuted: trailerController.isMuted,
                         onToggle: trailerController.toggleMuted
                     )
                 }
+            }
+        }
+        .sheet(isPresented: $presentsSeriesDownloads) {
+            if let detail = viewModel.state.value {
+                PlozziOSSeriesDownloadPicker(
+                    series: detail.item,
+                    seasons: detail.children.filter { $0.kind == .season },
+                    looseEpisodes: detail.children.filter { $0.kind == .episode },
+                    viewModel: viewModel,
+                    onDownloadSeason: downloadSeason,
+                    onDownloadEpisode: downloadEpisode
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
         }
         .task { await viewModel.load() }
@@ -440,7 +469,6 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         onPlayTargetChange: { seriesPlayTarget = $0 },
                         onHeroShowsSeriesChange: { seriesHeroShowsSeries = $0 },
                         onPlay: play,
-                        onDownloadSeason: downloadSeason,
                         seasonRequestAvailability: isDiscoveryItem
                             ? nil
                             : seasonRequestAvailability,
@@ -673,6 +701,13 @@ private struct PlozziOSCanonicalItemDetailView: View {
             provider: provider
         )
         return records.count
+    }
+
+    private func downloadEpisode(_ episode: MediaItem) async throws {
+        guard let provider = appModel.provider(for: episode) else {
+            throw PlozziOSSeasonDownloadError.serverUnavailable
+        }
+        _ = try await appModel.downloads.enqueue(item: episode, provider: provider)
     }
 
     @ViewBuilder
@@ -1282,9 +1317,6 @@ private struct PlozziOSDownloadAction: View {
 private struct PlozziOSInlineSeriesBrowser: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedSeasonID: String?
-    @State private var isDownloadingSeason = false
-    @State private var seasonDownloadError: String?
-    @State private var seasonDownloadPrompt: PlozziOSSeasonDownloadPrompt?
     @State private var railTargetID: String?
     /// The season the resting target was settled from, so browsing elsewhere
     /// leaves the hero where the viewer actually is.
@@ -1298,7 +1330,6 @@ private struct PlozziOSInlineSeriesBrowser: View {
     /// Whether the hero should describe the show rather than the play target.
     let onHeroShowsSeriesChange: (Bool) -> Void
     let onPlay: (MediaItem, Bool) -> Void
-    let onDownloadSeason: (MediaItem, [MediaItem]) async throws -> Int
     let seasonRequestAvailability: MediaRequestAvailability?
     let isRequestingSeasons: Bool
     let seasonRequestError: LocalizedStringResource?
@@ -1313,8 +1344,6 @@ private struct PlozziOSInlineSeriesBrowser: View {
         onPlayTargetChange: @escaping (MediaItem?) -> Void,
         onHeroShowsSeriesChange: @escaping (Bool) -> Void,
         onPlay: @escaping (MediaItem, Bool) -> Void,
-        onDownloadSeason:
-            @escaping (MediaItem, [MediaItem]) async throws -> Int,
         seasonRequestAvailability: MediaRequestAvailability?,
         isRequestingSeasons: Bool,
         seasonRequestError: LocalizedStringResource?,
@@ -1327,7 +1356,6 @@ private struct PlozziOSInlineSeriesBrowser: View {
         self.onPlayTargetChange = onPlayTargetChange
         self.onHeroShowsSeriesChange = onHeroShowsSeriesChange
         self.onPlay = onPlay
-        self.onDownloadSeason = onDownloadSeason
         self.seasonRequestAvailability = seasonRequestAvailability
         self.isRequestingSeasons = isRequestingSeasons
         self.seasonRequestError = seasonRequestError
@@ -1347,18 +1375,46 @@ private struct PlozziOSInlineSeriesBrowser: View {
             VStack(alignment: .leading, spacing: 14) {
                 if !seasons.isEmpty {
                     HStack(spacing: 10) {
-                        Text("Episodes")
-                            .font(.title3.weight(.semibold))
-                        Spacer(minLength: 12)
-                        PlozziOSSeasonDownloadMenu(
-                            selectedSeasonTitle: selectedSeason?.title,
-                            canDownloadSelectedSeason:
-                                ownedEpisodes?.isEmpty == false,
-                            offersEntireShow: seasons.count > 1,
-                            isBusy: isDownloadingSeason,
-                            onDownloadSeason: beginSeasonDownload,
-                            onDownloadShow: beginShowDownload
-                        )
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal) {
+                                LazyHStack(spacing: 10) {
+                                    ForEach(seasons) { season in
+                                        PlozziOSSeasonButton(
+                                            title: season.title,
+                                            isSelected:
+                                                season.id == selectedSeasonID
+                                        ) {
+                                            selectedSeasonID = season.id
+                                        }
+                                        .id(season.id)
+                                    }
+                                }
+                            }
+                            .contentMargins(
+                                .leading,
+                                pageInset,
+                                for: .scrollContent
+                            )
+                            .contentMargins(
+                                .trailing,
+                                4,
+                                for: .scrollContent
+                            )
+                            .scrollIndicators(.hidden)
+                            .onChange(
+                                of: selectedSeasonID,
+                                initial: true
+                            ) { _, selectedSeasonID in
+                                guard let selectedSeasonID else { return }
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    proxy.scrollTo(
+                                        selectedSeasonID,
+                                        anchor: .center
+                                    )
+                                }
+                            }
+                        }
+
                         if let seasonRequestAvailability,
                            seasonRequestAvailability.hasSeasonRequestContent {
                             PlozziOSSeasonRequestMenu(
@@ -1368,47 +1424,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
                             )
                         }
                     }
-                    .padding(.horizontal, pageInset)
-
-                    ScrollViewReader { proxy in
-                        ScrollView(.horizontal) {
-                            LazyHStack(spacing: 10) {
-                                ForEach(seasons) { season in
-                                    PlozziOSSeasonButton(
-                                        title: season.title,
-                                        isSelected:
-                                            season.id == selectedSeasonID
-                                    ) {
-                                        selectedSeasonID = season.id
-                                    }
-                                    .id(season.id)
-                                }
-                            }
-                        }
-                        .contentMargins(
-                            .leading,
-                            pageInset,
-                            for: .scrollContent
-                        )
-                        .contentMargins(
-                            .trailing,
-                            4,
-                            for: .scrollContent
-                        )
-                        .scrollIndicators(.hidden)
-                        .onChange(
-                            of: selectedSeasonID,
-                            initial: true
-                        ) { _, selectedSeasonID in
-                            guard let selectedSeasonID else { return }
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                proxy.scrollTo(
-                                    selectedSeasonID,
-                                    anchor: .center
-                                )
-                            }
-                        }
-                    }
+                    .padding(.trailing, pageInset)
 
                     if let seasonRequestError {
                         Text(seasonRequestError)
@@ -1455,39 +1471,6 @@ private struct PlozziOSInlineSeriesBrowser: View {
             .onChange(of: displayedEpisodes, initial: true) {
                 publishPlayTarget()
             }
-            .alert(
-                "Download Failed",
-                isPresented: Binding(
-                    get: { seasonDownloadError != nil },
-                    set: { if !$0 { seasonDownloadError = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(verbatim: seasonDownloadError ?? "")
-            }
-            .confirmationDialog(
-                seasonDownloadPrompt.map { Text($0.title) } ?? Text(verbatim: ""),
-                isPresented: Binding(
-                    get: { seasonDownloadPrompt != nil },
-                    set: { if !$0 { seasonDownloadPrompt = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                if let prompt = seasonDownloadPrompt {
-                    Button("Download \(prompt.count) Episodes") {
-                        seasonDownloadPrompt = nil
-                        performDownload(prompt)
-                    }
-                    Button("Cancel", role: .cancel) {
-                        seasonDownloadPrompt = nil
-                    }
-                }
-            } message: {
-                if let prompt = seasonDownloadPrompt {
-                    Text(prompt.message)
-                }
-            }
         }
     }
 
@@ -1526,99 +1509,6 @@ private struct PlozziOSInlineSeriesBrowser: View {
 
     private var pageInset: CGFloat {
         PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass)
-    }
-
-    private var selectedSeason: MediaItem? {
-        guard let selectedSeasonID else { return nil }
-        return seasons.first { $0.id == selectedSeasonID }
-    }
-
-    private func beginSeasonDownload() {
-        guard let selectedSeason,
-              let ownedEpisodes,
-              !ownedEpisodes.isEmpty else {
-            return
-        }
-        // A single episode is a one-tap action; bulk grabs require an explicit
-        // "are you sure" so a 300-episode season can't be started by accident.
-        if ownedEpisodes.count > 1 {
-            seasonDownloadPrompt = PlozziOSSeasonDownloadPrompt(
-                scope: .season(selectedSeason.title),
-                batches: [
-                    .init(season: selectedSeason, episodes: ownedEpisodes)
-                ]
-            )
-        } else {
-            performSeasonDownload(selectedSeason, episodes: ownedEpisodes)
-        }
-    }
-
-    private func beginShowDownload() {
-        guard !seasons.isEmpty else { return }
-        isDownloadingSeason = true
-        Task {
-            var batches: [PlozziOSSeasonDownloadPrompt.Batch] = []
-            for season in seasons {
-                await viewModel.loadEpisodes(for: season.id)
-                guard let episodes = viewModel.seasonLoadState(for: season.id)
-                    .authoritativeEpisodes else {
-                    seasonDownloadError =
-                        "Couldn’t load \(season.title). Check the server and try again."
-                    isDownloadingSeason = false
-                    return
-                }
-                if !episodes.isEmpty {
-                    batches.append(.init(season: season, episodes: episodes))
-                }
-            }
-
-            isDownloadingSeason = false
-            guard !batches.isEmpty else {
-                seasonDownloadError = "This show has no episodes available to download."
-                return
-            }
-            let showTitle = viewModel.state.value?.item.title ?? "this show"
-            seasonDownloadPrompt = PlozziOSSeasonDownloadPrompt(
-                scope: .show(showTitle),
-                batches: batches
-            )
-        }
-    }
-
-    private func performDownload(_ prompt: PlozziOSSeasonDownloadPrompt) {
-        isDownloadingSeason = true
-        Task {
-            var completedBatches = 0
-            do {
-                for batch in prompt.batches {
-                    _ = try await onDownloadSeason(
-                        batch.season,
-                        batch.episodes
-                    )
-                    completedBatches += 1
-                }
-            } catch {
-                seasonDownloadError = completedBatches > 0
-                    ? "Some seasons were queued, but the remaining download failed: \(error.localizedDescription)"
-                    : error.localizedDescription
-            }
-            isDownloadingSeason = false
-        }
-    }
-
-    private func performSeasonDownload(
-        _ season: MediaItem,
-        episodes: [MediaItem]
-    ) {
-        isDownloadingSeason = true
-        Task {
-            do {
-                _ = try await onDownloadSeason(season, episodes)
-            } catch {
-                seasonDownloadError = error.localizedDescription
-            }
-            isDownloadingSeason = false
-        }
     }
 
     /// Settles what Play starts, and whether the hero describes that episode or
@@ -1676,48 +1566,298 @@ private enum PlozziOSSeasonDownloadError: LocalizedError {
     }
 }
 
-private struct PlozziOSSeasonDownloadMenu: View {
-    let selectedSeasonTitle: String?
-    let canDownloadSelectedSeason: Bool
-    let offersEntireShow: Bool
-    let isBusy: Bool
-    let onDownloadSeason: () -> Void
-    let onDownloadShow: () -> Void
+private struct PlozziOSSeriesDownloadPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var isBusy = false
+    @State private var errorMessage: String?
+    @State private var prompt: PlozziOSSeasonDownloadPrompt?
+
+    let series: MediaItem
+    let seasons: [MediaItem]
+    let looseEpisodes: [MediaItem]
+    let viewModel: ItemDetailViewModel
+    let onDownloadSeason: (MediaItem, [MediaItem]) async throws -> Int
+    let onDownloadEpisode: (MediaItem) async throws -> Void
 
     var body: some View {
-        Menu {
-            if let selectedSeasonTitle {
-                Button(action: onDownloadSeason) {
-                    Label(
-                        "Download \(selectedSeasonTitle)",
-                        systemImage: "arrow.down.circle"
-                    )
+        NavigationStack {
+            List {
+                Section {
+                    Button(action: beginShowDownload) {
+                        HStack {
+                            Label(
+                                "Download Entire Show",
+                                systemImage: "arrow.down.circle"
+                            )
+                            Spacer()
+                            if isBusy {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isBusy)
                 }
-                .disabled(!canDownloadSelectedSeason)
-            }
-            if offersEntireShow {
-                Button(action: onDownloadShow) {
-                    Label(
-                        "Download Entire Show",
-                        systemImage: "square.and.arrow.down"
-                    )
+
+                if !seasons.isEmpty {
+                    Section("Seasons") {
+                        ForEach(seasons) { season in
+                            NavigationLink {
+                                PlozziOSSeasonDownloadPicker(
+                                    season: season,
+                                    viewModel: viewModel,
+                                    isBusy: isBusy,
+                                    onDownloadSeason: {
+                                        beginSeasonDownload(
+                                            season,
+                                            episodes: $0
+                                        )
+                                    },
+                                    onDownloadEpisode: beginEpisodeDownload
+                                )
+                            } label: {
+                                Label(
+                                    season.title,
+                                    systemImage: "rectangle.stack"
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if !looseEpisodes.isEmpty {
+                    Section("Episodes") {
+                        ForEach(looseEpisodes) { episode in
+                            PlozziOSEpisodeDownloadRow(
+                                episode: episode,
+                                isBusy: isBusy,
+                                onDownload: beginEpisodeDownload
+                            )
+                        }
+                    }
                 }
             }
-        } label: {
-            HStack(spacing: 7) {
-                if isBusy {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.down.circle")
+            .navigationTitle(Text("Download ") + Text(verbatim: series.title))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                    .disabled(isBusy)
                 }
-                Text("Download")
             }
-            .font(.subheadline.weight(.semibold))
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .disabled(isBusy || selectedSeasonTitle == nil)
+        .interactiveDismissDisabled(isBusy)
+        .confirmationDialog(
+            prompt.map { Text($0.title) } ?? Text(verbatim: ""),
+            isPresented: Binding(
+                get: { prompt != nil },
+                set: { if !$0 { prompt = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let prompt {
+                Button("Download \(prompt.count) Episodes") {
+                    self.prompt = nil
+                    performDownload(prompt)
+                }
+                Button("Cancel", role: .cancel) {
+                    self.prompt = nil
+                }
+            }
+        } message: {
+            if let prompt {
+                Text(prompt.message)
+            }
+        }
+        .alert(
+            "Download Failed",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(verbatim: errorMessage ?? "")
+        }
+    }
+
+    private func beginShowDownload() {
+        isBusy = true
+        Task {
+            var batches: [PlozziOSSeasonDownloadPrompt.Batch] = []
+            for season in seasons {
+                await viewModel.loadEpisodes(for: season.id)
+                guard let episodes = viewModel.seasonLoadState(for: season.id)
+                    .authoritativeEpisodes else {
+                    errorMessage =
+                        "Couldn’t load \(season.title). Check the server and try again."
+                    isBusy = false
+                    return
+                }
+                if !episodes.isEmpty {
+                    batches.append(.init(season: season, episodes: episodes))
+                }
+            }
+            if !looseEpisodes.isEmpty {
+                batches.append(.init(season: series, episodes: looseEpisodes))
+            }
+
+            isBusy = false
+            guard !batches.isEmpty else {
+                errorMessage = "This show has no episodes available to download."
+                return
+            }
+            prompt = PlozziOSSeasonDownloadPrompt(
+                scope: .show(series.title),
+                batches: batches
+            )
+        }
+    }
+
+    private func beginSeasonDownload(
+        _ season: MediaItem,
+        episodes: [MediaItem]
+    ) {
+        guard !episodes.isEmpty else { return }
+        if episodes.count == 1, let episode = episodes.first {
+            beginEpisodeDownload(episode)
+        } else {
+            prompt = PlozziOSSeasonDownloadPrompt(
+                scope: .season(season.title),
+                batches: [.init(season: season, episodes: episodes)]
+            )
+        }
+    }
+
+    private func beginEpisodeDownload(_ episode: MediaItem) {
+        isBusy = true
+        Task {
+            do {
+                try await onDownloadEpisode(episode)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isBusy = false
+        }
+    }
+
+    private func performDownload(_ prompt: PlozziOSSeasonDownloadPrompt) {
+        isBusy = true
+        Task {
+            var completedBatches = 0
+            do {
+                for batch in prompt.batches {
+                    _ = try await onDownloadSeason(
+                        batch.season,
+                        batch.episodes
+                    )
+                    completedBatches += 1
+                }
+            } catch {
+                errorMessage = completedBatches > 0
+                    ? "Some seasons were queued, but the remaining download failed: \(error.localizedDescription)"
+                    : error.localizedDescription
+            }
+            isBusy = false
+        }
+    }
+}
+
+private struct PlozziOSSeasonDownloadPicker: View {
+    let season: MediaItem
+    let viewModel: ItemDetailViewModel
+    let isBusy: Bool
+    let onDownloadSeason: ([MediaItem]) -> Void
+    let onDownloadEpisode: (MediaItem) -> Void
+
+    var body: some View {
+        Group {
+            switch viewModel.seasonLoadState(for: season.id) {
+            case .notLoaded:
+                ProgressView("Loading Episodes")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .failed:
+                ContentUnavailableView {
+                    Label("Couldn’t Load Episodes", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text("Check the server and try again.")
+                } actions: {
+                    Button("Try Again") {
+                        Task { await viewModel.loadEpisodes(for: season.id) }
+                    }
+                }
+            case .loaded(let episodes):
+                if episodes.isEmpty {
+                    ContentUnavailableView(
+                        "No Episodes",
+                        systemImage: "play.rectangle"
+                    )
+                } else {
+                    List {
+                        Section {
+                            Button {
+                                onDownloadSeason(episodes)
+                            } label: {
+                                Label(
+                                    "Download Season",
+                                    systemImage: "arrow.down.circle"
+                                )
+                            }
+                            .disabled(isBusy)
+                        }
+
+                        Section("Episodes") {
+                            ForEach(episodes) { episode in
+                                PlozziOSEpisodeDownloadRow(
+                                    episode: episode,
+                                    isBusy: isBusy,
+                                    onDownload: onDownloadEpisode
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(Text(verbatim: season.title))
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: season.id) {
+            guard case .notLoaded = viewModel.seasonLoadState(for: season.id)
+            else { return }
+            await viewModel.loadEpisodes(for: season.id)
+        }
+    }
+}
+
+private struct PlozziOSEpisodeDownloadRow: View {
+    let episode: MediaItem
+    let isBusy: Bool
+    let onDownload: (MediaItem) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                if let number = episode.episodeNumber {
+                    Text("Episode \(number)")
+                        .font(.caption)
+                        .plozzForeground(.secondary)
+                }
+                Text(verbatim: episode.title)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Button {
+                onDownload(episode)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .disabled(isBusy)
+            .accessibilityLabel(Text("Download ") + Text(verbatim: episode.title))
+        }
     }
 }
 

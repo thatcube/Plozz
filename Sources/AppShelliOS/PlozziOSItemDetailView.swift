@@ -1585,21 +1585,17 @@ private struct PlozziOSSeriesDownloadPicker: View {
             List {
                 Section {
                     Button(action: beginShowDownload) {
-                        HStack {
-                            Label(
-                                "Download Entire Show",
-                                systemImage: "arrow.down.circle"
-                            )
+                        HStack(spacing: 12) {
+                            Text("Download Entire Show")
                             Spacer()
-                            if isBusy {
-                                ProgressView()
-                            } else if let showDownloadState {
-                                PlozziOSListDownloadBadge(
-                                    state: showDownloadState
-                                )
-                            }
+                            PlozziOSDownloadControl(
+                                state: showDownloadState,
+                                isPreparing: isBusy
+                            )
                         }
+                        .foregroundStyle(.primary)
                     }
+                    .buttonStyle(.plain)
                     .disabled(isBusy)
                 }
 
@@ -1804,11 +1800,14 @@ private struct PlozziOSSeasonDownloadRow: View {
         HStack(spacing: 12) {
             PlozziOSDownloadThumbnail(
                 item: season,
-                style: .season,
-                downloadState: downloadState
+                style: .season
             )
             Text(verbatim: season.title)
                 .lineLimit(2)
+            Spacer()
+            if let downloadState {
+                PlozziOSDownloadControl(state: downloadState)
+            }
         }
     }
 
@@ -1830,6 +1829,8 @@ private struct PlozziOSSeasonDownloadRow: View {
 }
 
 private struct PlozziOSSeasonDownloadPicker: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
+
     let season: MediaItem
     let viewModel: ItemDetailViewModel
     let isBusy: Bool
@@ -1864,11 +1865,17 @@ private struct PlozziOSSeasonDownloadPicker: View {
                             Button {
                                 onDownloadSeason(episodes)
                             } label: {
-                                Label(
-                                    "Download Season",
-                                    systemImage: "arrow.down.circle"
-                                )
+                                HStack(spacing: 12) {
+                                    Text("Download Season")
+                                    Spacer()
+                                    PlozziOSDownloadControl(
+                                        state: downloadState(for: episodes),
+                                        isPreparing: isBusy
+                                    )
+                                }
+                                .foregroundStyle(.primary)
                             }
+                            .buttonStyle(.plain)
                             .disabled(isBusy)
                         }
 
@@ -1893,6 +1900,21 @@ private struct PlozziOSSeasonDownloadPicker: View {
             await viewModel.loadEpisodes(for: season.id)
         }
     }
+
+    private func downloadState(
+        for episodes: [MediaItem]
+    ) -> MediaDownloadBadgeState? {
+        downloadCollectionBadgeState(
+            records: matchingDownloadRecords(
+                downloads: appModel.downloads,
+                episodes: episodes,
+                seriesID: season.seriesID,
+                sourceAccountID: season.sourceAccountID,
+                seasonNumber: season.seasonNumber
+            ),
+            expectedCount: episodes.count
+        )
+    }
 }
 
 private struct PlozziOSEpisodeDownloadRow: View {
@@ -1907,8 +1929,7 @@ private struct PlozziOSEpisodeDownloadRow: View {
         HStack(spacing: 12) {
             PlozziOSDownloadThumbnail(
                 item: episode,
-                style: .episode,
-                downloadState: record?.badgeState
+                style: .episode
             )
             VStack(alignment: .leading, spacing: 3) {
                 if let number = episode.episodeNumber {
@@ -1930,21 +1951,24 @@ private struct PlozziOSEpisodeDownloadRow: View {
                     Button {
                         Task { await appModel.downloads.resume(record) }
                     } label: {
-                        Image(systemName: "arrow.clockwise.circle")
-                            .font(.title3)
+                        PlozziOSDownloadControl(
+                            state: record.badgeState,
+                            fallbackSystemImage: "arrow.clockwise"
+                        )
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
                     .disabled(isBusy)
                     .accessibilityLabel("Resume Download")
+                } else if let state = record.badgeState {
+                    PlozziOSDownloadControl(state: state)
                 }
             } else {
                 Button {
                     onDownload(episode)
                 } label: {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.title3)
+                    PlozziOSDownloadControl()
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .disabled(isBusy)
                 .accessibilityLabel(Text("Download ") + Text(verbatim: episode.title))
             }
@@ -1988,17 +2012,6 @@ private struct PlozziOSDownloadThumbnail: View {
 
     let item: MediaItem
     let style: Style
-    let downloadState: MediaDownloadBadgeState?
-
-    init(
-        item: MediaItem,
-        style: Style,
-        downloadState: MediaDownloadBadgeState? = nil
-    ) {
-        self.item = item
-        self.style = style
-        self.downloadState = downloadState
-    }
 
     @ViewBuilder
     var body: some View {
@@ -2020,12 +2033,6 @@ private struct PlozziOSDownloadThumbnail: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
             )
             .plozzMediaEdge(cornerRadius: 6)
-            .overlay(alignment: .bottomTrailing) {
-                if let downloadState {
-                    PlozziOSListDownloadBadge(state: downloadState)
-                        .padding(3)
-                }
-            }
 
         case .episode:
             FallbackAsyncImage(
@@ -2048,23 +2055,33 @@ private struct PlozziOSDownloadThumbnail: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
             )
             .plozzMediaEdge(cornerRadius: 6)
-            .overlay(alignment: .bottomTrailing) {
-                if let downloadState {
-                    PlozziOSListDownloadBadge(state: downloadState)
-                        .padding(3)
-                }
-            }
         }
     }
 }
 
-private struct PlozziOSListDownloadBadge: View {
-    let state: MediaDownloadBadgeState
+private struct PlozziOSDownloadControl: View {
+    var state: MediaDownloadBadgeState?
+    var isPreparing = false
+    var fallbackSystemImage = "arrow.down"
 
     var body: some View {
-        MediaDownloadBadge(state: state, size: 18)
-            .padding(2)
-            .background(.black.opacity(0.55), in: Circle())
+        ZStack {
+            Circle()
+                .fill(.black.opacity(0.58))
+            if isPreparing {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
+            } else if let state {
+                MediaDownloadBadge(state: state, size: 20)
+            } else {
+                Image(systemName: fallbackSystemImage)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 32, height: 32)
+        .contentShape(Circle())
     }
 }
 

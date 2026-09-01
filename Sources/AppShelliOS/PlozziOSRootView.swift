@@ -581,6 +581,7 @@ private enum ServerPromptFollowUp {
 
 private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {
     case home
+    case watchlist
     case downloads
     case search
 
@@ -589,6 +590,7 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {
     var title: LocalizedStringResource {
         switch self {
         case .home: "Home"
+        case .watchlist: "Watchlist"
         case .downloads: "Downloads"
         case .search: "Search"
         }
@@ -597,6 +599,7 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {
     var systemImage: String {
         switch self {
         case .home: "house"
+        case .watchlist: "bookmark"
         case .downloads: "arrow.down.circle"
         case .search: "magnifyingglass"
         }
@@ -627,6 +630,7 @@ private struct PlozziOSTabShell: View {
     private var sidebarGeometry
     @State private var settingsPresentationColorScheme: ColorScheme = .dark
     @State private var selectedDestination: PlozziOSDestination = .home
+    @State private var sharedHomeViewModel: HomeViewModel
     /// The profile picker opened deliberately (from Settings) rather than at
     /// launch. Presented from the ROOT so the Parental PIN and profile-lock gates
     /// it can raise aren't asked for from underneath the Settings sheet — the
@@ -655,6 +659,47 @@ private struct PlozziOSTabShell: View {
     @Binding var deferredPairingURL: URL?
     let systemColorScheme: ColorScheme
 
+    init(
+        appModel: PlozziOSAppModel,
+        onAddServer: @escaping () -> Void,
+        showingSettings: Binding<Bool>,
+        showingProfileSwitcher: Binding<Bool>,
+        deferredPairingURL: Binding<URL?>,
+        systemColorScheme: ColorScheme
+    ) {
+        self.appModel = appModel
+        self.onAddServer = onAddServer
+        _showingSettings = showingSettings
+        _showingProfileSwitcher = showingProfileSwitcher
+        _deferredPairingURL = deferredPairingURL
+        self.systemColorScheme = systemColorScheme
+        _sharedHomeViewModel = State(
+            initialValue: Self.makeHomeViewModel(appModel: appModel)
+        )
+    }
+
+    private static func makeHomeViewModel(
+        appModel: PlozziOSAppModel
+    ) -> HomeViewModel {
+        HomeViewModel(
+            accounts: appModel.accountsProviders.homeAccounts,
+            contentStore: HomeContentStore(
+                namespace: appModel.profiles.activeNamespace
+            ),
+            identitySources: appModel.identityIndex.identitySourcesProvider,
+            currentVisibility: { [weak appModel] in
+                appModel?.settings.homeVisibility.visibility ?? .default
+            },
+            pendingWatchMutations: { [weak appModel] in
+                await appModel?.pendingWatchMutations() ?? []
+            },
+            recentlyAppliedRecency: { [weak appModel] in
+                await appModel?.appliedWatchRecency() ?? [:]
+            },
+            mediaItemActionHandler: appModel.mediaItemActionHandler
+        )
+    }
+
     var body: some View {
         TabView(selection: $selectedDestination) {
             Tab(
@@ -666,6 +711,7 @@ private struct PlozziOSTabShell: View {
                     PlozziOSDestinationView(
                         destination: .home,
                         appModel: appModel,
+                        sharedHomeViewModel: sharedHomeViewModel,
                         onAddServer: onAddServer,
                         onShowSettings: showSettings
                     )
@@ -677,6 +723,27 @@ private struct PlozziOSTabShell: View {
                 .background { AppBackground(palette: palette) }
             }
 
+            if appModel.settings.navigation.showsWatchlist {
+                Tab(
+                    "Watchlist",
+                    systemImage: "bookmark",
+                    value: PlozziOSDestination.watchlist
+                ) {
+                    NavigationStack {
+                        PlozziOSDestinationView(
+                            destination: .watchlist,
+                            appModel: appModel,
+                            sharedHomeViewModel: sharedHomeViewModel,
+                            onAddServer: onAddServer,
+                            onShowSettings: showSettings
+                        )
+                        .plozziOSItemNavigation(appModel: appModel)
+                    }
+                    .toolbarBackground(.hidden, for: .navigationBar)
+                    .background { AppBackground(palette: palette) }
+                }
+            }
+
             Tab(
                 "Downloads",
                 systemImage: "arrow.down.circle",
@@ -686,6 +753,7 @@ private struct PlozziOSTabShell: View {
                     PlozziOSDestinationView(
                         destination: .downloads,
                         appModel: appModel,
+                        sharedHomeViewModel: sharedHomeViewModel,
                         onAddServer: onAddServer,
                         onShowSettings: showSettings
                     )
@@ -711,6 +779,7 @@ private struct PlozziOSTabShell: View {
                     PlozziOSDestinationView(
                         destination: .search,
                         appModel: appModel,
+                        sharedHomeViewModel: sharedHomeViewModel,
                         onAddServer: onAddServer,
                         onShowSettings: showSettings
                     )
@@ -721,6 +790,19 @@ private struct PlozziOSTabShell: View {
             }
         }
         .tabViewStyle(.tabBarOnly)
+        .onChange(of: appModel.settings.navigation.showsWatchlist) {
+            _, showsWatchlist in
+            selectedDestination = WatchlistNavigationPolicy.resolvedSelection(
+                selectedDestination,
+                watchlist: .watchlist,
+                home: .home,
+                showsWatchlist: showsWatchlist
+            )
+        }
+        .onChange(of: homeContentIdentity) {
+            _, _ in
+            sharedHomeViewModel = Self.makeHomeViewModel(appModel: appModel)
+        }
         .background { AppBackground(palette: palette) }
         .background(alignment: .topLeading) {
             PlozziOSHomeSidebarOverlapProbe(
@@ -737,7 +819,12 @@ private struct PlozziOSTabShell: View {
                 director: appModel.screenshotDirector,
                 onSelect: { name in
                     guard let destination = PlozziOSDestination(rawValue: name) else { return }
-                    selectedDestination = destination
+                    selectedDestination = WatchlistNavigationPolicy.resolvedSelection(
+                        destination,
+                        watchlist: .watchlist,
+                        home: .home,
+                        showsWatchlist: appModel.settings.navigation.showsWatchlist
+                    )
                 }
             )
             #if DEBUG
@@ -870,6 +957,18 @@ private struct PlozziOSTabShell: View {
         )
     }
 
+    /// The retained Home model is profile/account scoped. Watchlist shares it
+    /// within that scope, then a real profile or credential change replaces it.
+    private var homeContentIdentity: String {
+        let credentials = appModel.accounts
+            .map { "\($0.id):\($0.credentialRevision)" }
+            .joined(separator: "|")
+        let active = appModel.accountsProviders.activeAccountIDs
+            .sorted()
+            .joined(separator: ",")
+        return "\(appModel.profiles.activeProfileID)#\(credentials)#\(active)"
+    }
+
     private func showSettings() {
         settingsPresentationColorScheme = settingsPalette.isLight ? .light : .dark
         showingSettings = true
@@ -881,6 +980,7 @@ private struct PlozziOSDestinationView: View {
     @Environment(\.themePalette) private var palette
     let destination: PlozziOSDestination
     let appModel: PlozziOSAppModel
+    let sharedHomeViewModel: HomeViewModel
     let onAddServer: () -> Void
     let onShowSettings: () -> Void
 
@@ -898,10 +998,17 @@ private struct PlozziOSDestinationView: View {
         case .home:
             PlozziOSHomeLandingView(
                 appModel: appModel,
+                viewModel: sharedHomeViewModel,
                 onAddServer: onAddServer,
                 onShowSettings: onShowSettings
             )
             .id(activeAccountsIdentity)
+        case .watchlist:
+            PlozziOSWatchlistLandingView(
+                appModel: appModel,
+                viewModel: sharedHomeViewModel,
+                onShowSettings: onShowSettings
+            )
         case .search:
             PlozziOSSearchView(
                 appModel: appModel,
@@ -929,8 +1036,145 @@ private struct PlozziOSDestinationView: View {
     }
 }
 
+private struct PlozziOSWatchlistLandingView: View {
+    @Environment(\.mediaItemNavigator) private var navigateToItem
+    @Environment(\.plozzMetrics) private var metrics
+    let appModel: PlozziOSAppModel
+    let viewModel: HomeViewModel
+    let onShowSettings: () -> Void
+    @State private var watchlistIntentRevision = 0
+
+    var body: some View {
+        ContentStateView(
+            state: viewModel.state,
+            emptyMessage: "Your Watchlist is empty.",
+            onRetry: { Task { await viewModel.load() } },
+            loadingContent: {
+                watchlistContent(
+                    [],
+                    loadingPlaceholderCount:
+                        max(metrics.posterColumns.count * 2, 6)
+                )
+            }
+        ) { content in
+            watchlistContent(
+                content.watchlist,
+                loadingPlaceholderCount:
+                    viewModel.watchlistLoadingPlaceholderCount
+            )
+        }
+        .task(
+            id: PlozziOSHomeLoadID(
+                visibility: appModel.settings.homeVisibility.visibility,
+                viewModel: viewModel
+            )
+        ) {
+            await viewModel.loadIfNeeded(
+                for: appModel.settings.homeVisibility.visibility
+            )
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistDidChange
+            )
+        ) { _ in
+            viewModel.scheduleDurableWatchlistRefresh()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistCacheDidLoad
+            )
+        ) { _ in
+            viewModel.scheduleDurableWatchlistRefresh()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistLoadingProgressDidChange
+            )
+        ) { _ in
+            viewModel.refreshWatchlistLoadingProgress()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .watchlistIntentDidChange
+            )
+        ) { _ in
+            watchlistIntentRevision &+= 1
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .mediaItemDidMutate)
+        ) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            }
+        }
+        .navigationTitle("Watchlist")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                PlozziOSSettingsAvatarButton(action: onShowSettings)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func watchlistContent(
+        _ items: [MediaItem],
+        loadingPlaceholderCount: Int
+    ) -> some View {
+        if items.isEmpty, loadingPlaceholderCount == 0 {
+            ContentUnavailableView {
+                Label("Your Watchlist is empty", systemImage: "bookmark")
+            } description: {
+                Text("Add a movie or show from Plozz or any connected Watchlist.")
+            }
+        } else {
+            ScrollView(.vertical) {
+                LazyVGrid(
+                    columns: metrics.posterColumns,
+                    spacing: metrics.gridSpacing
+                ) {
+                    ForEach(MediaRowView.presentationElements(
+                        items: items,
+                        loadingPlaceholderCount: loadingPlaceholderCount
+                    )) { element in
+                        switch element {
+                        case .item(let item):
+                            PosterCardView(
+                                item: item,
+                                style: .poster,
+                                spoilerSettings:
+                                    appModel.settings.spoilers.settings,
+                                isPendingRemoval: isPendingRemoval(item)
+                            ) {
+                                navigateToItem?(item)
+                            }
+                        case .loadingPlaceholder:
+                            SkeletonCardView(style: .poster)
+                        }
+                    }
+                }
+                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                .padding(.vertical, PlozzTheme.Spacing.large)
+            }
+            .onScrollGeometryChange(for: CGFloat.self) {
+                $0.contentOffset.y
+            } action: { oldOffset, newOffset in
+                guard oldOffset != newOffset else { return }
+                viewModel.noteHomeNavigationInteraction()
+            }
+        }
+    }
+
+    private func isPendingRemoval(_ item: MediaItem) -> Bool {
+        _ = watchlistIntentRevision
+        return appModel.mediaItemActionHandler
+            .isActivelyRemovingFromWatchlist(item)
+    }
+}
+
 private struct PlozziOSHomeLandingView: View {
     let appModel: PlozziOSAppModel
+    let viewModel: HomeViewModel
     let onAddServer: () -> Void
     let onShowSettings: () -> Void
     @State private var showingReceive = false
@@ -961,6 +1205,7 @@ private struct PlozziOSHomeLandingView: View {
         } else {
             PlozziOSHomeView(
                 appModel: appModel,
+                viewModel: viewModel,
                 onAddServer: onAddServer,
                 onShowSettings: onShowSettings
             )

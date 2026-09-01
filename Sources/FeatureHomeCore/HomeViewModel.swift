@@ -6,6 +6,68 @@ import CoreNetworking
 public typealias HomeContentPublishing =
     @Sendable (_ continueWatching: [MediaItem], _ latest: [MediaItem]) async -> Void
 
+private actor HomeSnapshotPersistence {
+    static let shared = HomeSnapshotPersistence()
+
+    private var newestGenerationByScope: [String: UInt64] = [:]
+
+    func save(
+        _ content: HomeViewModel.Content,
+        generation: UInt64,
+        to store: any HomeContentStoring,
+        preservePreviousWatchlist: Bool,
+        excludingUnconfirmedContinueWatchingIDs unconfirmedIDs: Set<String>
+    ) {
+        let scope = store.persistenceScope
+        guard generation > newestGenerationByScope[scope, default: 0] else {
+            return
+        }
+        newestGenerationByScope[scope] = generation
+        var durable = content
+        if preservePreviousWatchlist {
+            durable.watchlist = overlay(
+                content.watchlist,
+                on: store.load()?.watchlist ?? []
+            )
+        }
+        if !unconfirmedIDs.isEmpty {
+            durable.continueWatching.removeAll {
+                unconfirmedIDs.contains($0.id)
+            }
+        }
+        store.save(durable)
+    }
+
+    func clear(
+        generation: UInt64,
+        store: any HomeContentStoring
+    ) {
+        let scope = store.persistenceScope
+        guard generation > newestGenerationByScope[scope, default: 0] else {
+            return
+        }
+        newestGenerationByScope[scope] = generation
+        store.clear()
+    }
+
+    private func overlay(
+        _ updates: [MediaItem],
+        on previous: [MediaItem]
+    ) -> [MediaItem] {
+        var updatesByID = Dictionary(
+            updates.map { ($0.stablePresentationID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var result = previous.map { item in
+            updatesByID.removeValue(forKey: item.stablePresentationID) ?? item
+        }
+        result.append(contentsOf: updates.filter {
+            updatesByID.removeValue(forKey: $0.stablePresentationID) != nil
+        })
+        return result
+    }
+}
+
 /// Loads and holds the unified Home screen's content rows, merged across every
 /// active account/provider. Home-visibility filtering of the Libraries row is
 /// applied reactively in the view (against the shared visibility model) so the
@@ -213,6 +275,7 @@ public final class HomeViewModel {
     /// How long to wait for the warm burst to settle before re-folding. Short
     /// enough to feel immediate, long enough to swallow a multi-server burst.
     private static let reenrichDebounce: Duration = .milliseconds(200)
+    private static let watchlistInteractionSettleInterval: TimeInterval = 0.35
 
     /// The full visibility snapshot the currently-loaded content was aggregated
     /// for — Home-hidden **and** app-wide-disabled sets **and** the merge switch.
@@ -328,6 +391,13 @@ public final class HomeViewModel {
                 cached.libraries = []
                 cached.librarySections = []
                 contentStore.clear()
+                let generation = Self.nextSnapshotPersistenceGeneration()
+                Task {
+                    await HomeSnapshotPersistence.shared.clear(
+                        generation: generation,
+                        store: contentStore
+                    )
+                }
             }
             if !cached.isEmpty {
                 self.state = .loaded(cached)
@@ -341,6 +411,8 @@ public final class HomeViewModel {
         unmergedTask?.cancel()
         topShelfPublishTask?.cancel()
         reenrichTask?.cancel()
+        durableWatchlistSaveTask?.cancel()
+        durableWatchlistRefreshTask?.cancel()
     }
 
     /// User-facing name for the greeting header — the primary (first) account.
@@ -500,12 +572,16 @@ public final class HomeViewModel {
             )
             noteUnconfirmed(reconciled: reconciledCW, fetched: merged.continueWatching)
             Self.logOverlay(fetched: merged.continueWatching, reconciled: reconciledCW, pending: pending)
-            let durableWatchlist = Self.resolvedWatchlist(
+            let resolvedWatchlist = Self.resolvedWatchlist(
                 candidates:
                     reconciledCW + merged.latest + merged.watchlist,
                 fetched: merged.watchlist,
                 lastKnown: onScreenWatchlist,
                 handler: mediaItemActionHandler
+            ).filter(keepWatchlisted)
+            let durableWatchlist = watchlistForPublication(
+                authoritative: resolvedWatchlist,
+                current: onScreenWatchlist
             )
             watchlistLoadingPlaceholderCount = Self.watchlistPlaceholderCount(
                 fetched: merged.watchlist,
@@ -516,7 +592,7 @@ public final class HomeViewModel {
             content = Content(
                 continueWatching: reconciledCW,
                 latest: merged.latest,
-                watchlist: durableWatchlist.filter(keepWatchlisted),
+                watchlist: durableWatchlist,
                 libraries: merged.libraries
             )
         } else {
@@ -541,12 +617,16 @@ public final class HomeViewModel {
             )
             noteUnconfirmed(reconciled: reconciledCW, fetched: unmerged.continueWatching)
             Self.logOverlay(fetched: unmerged.continueWatching, reconciled: reconciledCW, pending: pending)
-            let durableWatchlist = Self.resolvedWatchlist(
+            let resolvedWatchlist = Self.resolvedWatchlist(
                 candidates:
                     reconciledCW + unmerged.latest + unmerged.watchlist,
                 fetched: unmerged.watchlist,
                 lastKnown: onScreenWatchlist,
                 handler: mediaItemActionHandler
+            ).filter(keepWatchlisted)
+            let durableWatchlist = watchlistForPublication(
+                authoritative: resolvedWatchlist,
+                current: onScreenWatchlist
             )
             watchlistLoadingPlaceholderCount = Self.watchlistPlaceholderCount(
                 fetched: unmerged.watchlist,
@@ -557,7 +637,7 @@ public final class HomeViewModel {
             content = Content(
                 continueWatching: reconciledCW,
                 latest: unmerged.latest,
-                watchlist: durableWatchlist.filter(keepWatchlisted),
+                watchlist: durableWatchlist,
                 libraries: unmerged.libraries,
                 mergeLibraries: false,
                 librarySections: unmerged.librarySections
@@ -581,7 +661,10 @@ public final class HomeViewModel {
         // the emptiness IS the answer, so fall through and let it stand (which
         // also republishes the Top Shelf, rather than leaving it on the old rows).
         if content.isEmpty, accounts.isEmpty {
-            contentStore.clear()
+            await HomeSnapshotPersistence.shared.clear(
+                generation: Self.nextSnapshotPersistenceGeneration(),
+                store: contentStore
+            )
         } else if content.isEmpty, !showLoadingState, case .loaded = state {
             PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
             lastLoadedVisibility = visibility
@@ -789,8 +872,11 @@ public final class HomeViewModel {
     /// presentation candidates. No provider creation, disk read, or network work.
     @ObservationIgnored private var durableWatchlistSaveTask: Task<Void, Never>?
     @ObservationIgnored private var durableWatchlistSaveGeneration: UInt64 = 0
+    private static var globalSnapshotSaveGeneration: UInt64 = 0
     @ObservationIgnored private var durableWatchlistRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var durableWatchlistRefreshPending = false
+    @ObservationIgnored private var lastWatchlistNavigationInteractionAt: Date?
+    @ObservationIgnored private var pendingAuthoritativeWatchlist: [MediaItem]?
 
     /// Re-folds Home's watchlist row shortly after a change, rather than during it.
     ///
@@ -807,13 +893,17 @@ public final class HomeViewModel {
     /// Navigation input re-arms the same delay, so the O(row × identity) fold
     /// cannot land during an active horizontal browse.
     public func scheduleDurableWatchlistRefresh() {
+        pendingAuthoritativeWatchlist = nil
         durableWatchlistRefreshPending = true
         armDurableWatchlistRefresh()
     }
 
     /// Keeps a pending durable fold off the left/right scrolling hot path.
     public func noteHomeNavigationInteraction() {
-        guard durableWatchlistRefreshPending else { return }
+        lastWatchlistNavigationInteractionAt = Date()
+        guard durableWatchlistRefreshPending
+                || pendingAuthoritativeWatchlist != nil
+        else { return }
         armDurableWatchlistRefresh()
     }
 
@@ -823,6 +913,7 @@ public final class HomeViewModel {
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled, let self else { return }
             self.durableWatchlistRefreshPending = false
+            if self.applyPendingAuthoritativeWatchlist() { return }
             self.refreshDurableWatchlist()
         }
     }
@@ -837,19 +928,66 @@ public final class HomeViewModel {
             $0.sections.flatMap(\.items)
         }
 
-        content.watchlist = Self.resolvedWatchlist(
+        let authoritative = Self.resolvedWatchlist(
             candidates: candidates,
             fetched: content.watchlist,
             lastKnown: content.watchlist,
             handler: mediaItemActionHandler
         )
-        if mediaItemActionHandler.isDurableWatchlistPresentationReady() {
-            watchlistLoadingPlaceholderCount = 0
-        }
+        content.watchlist = watchlistForPublication(
+            authoritative: authoritative,
+            current: content.watchlist
+        )
+        refreshWatchlistLoadingProgress()
         state = content.isEmpty && watchlistLoadingPlaceholderCount == 0
             ? .empty
             : .loaded(content)
         if !content.isEmpty { scheduleDurableWatchlistSave(content) }
+    }
+
+    private func watchlistForPublication(
+        authoritative: [MediaItem],
+        current: [MediaItem]
+    ) -> [MediaItem] {
+        guard let lastInteraction = lastWatchlistNavigationInteractionAt,
+              Date().timeIntervalSince(lastInteraction)
+                < Self.watchlistInteractionSettleInterval
+        else {
+            pendingAuthoritativeWatchlist = nil
+            return authoritative
+        }
+        pendingAuthoritativeWatchlist = authoritative
+        durableWatchlistRefreshPending = true
+        armDurableWatchlistRefresh()
+        return current
+    }
+
+    private func applyPendingAuthoritativeWatchlist() -> Bool {
+        guard let authoritative = pendingAuthoritativeWatchlist,
+              case var .loaded(content) = state
+        else {
+            pendingAuthoritativeWatchlist = nil
+            return false
+        }
+        pendingAuthoritativeWatchlist = nil
+        content.watchlist = authoritative
+        state = .loaded(content)
+        refreshWatchlistLoadingProgress()
+        if content.isEmpty && watchlistLoadingPlaceholderCount == 0 {
+            state = .empty
+        }
+        if !content.isEmpty { scheduleDurableWatchlistSave(content) }
+        return true
+    }
+
+    public func refreshWatchlistLoadingProgress() {
+        guard case let .loaded(content) = state else { return }
+        watchlistLoadingPlaceholderCount = Self.watchlistPlaceholderCount(
+            fetched: content.watchlist,
+            lastKnown: content.watchlist,
+            visible: content.watchlist,
+            handler: mediaItemActionHandler
+        )
     }
 
     /// The one policy for folding the durable watchlist into Home.
@@ -887,32 +1025,13 @@ public final class HomeViewModel {
     }
 
     static func stabilizedWatchlist(
-        current: [MediaItem],
+        current _: [MediaItem],
         authoritative: [MediaItem]
     ) -> [MediaItem] {
         var authoritativeIDs = Set<String>()
-        let uniqueAuthoritative = authoritative.filter {
+        return authoritative.filter {
             authoritativeIDs.insert($0.stablePresentationID).inserted
         }
-        guard !current.isEmpty else { return uniqueAuthoritative }
-        var refreshedByID = Dictionary(
-            uniqueAuthoritative.map { ($0.stablePresentationID, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        var retainedIDs = Set<String>()
-        var stable: [MediaItem] = []
-        for item in current
-        where retainedIDs.insert(item.stablePresentationID).inserted {
-            if let refreshed = refreshedByID.removeValue(
-                forKey: item.stablePresentationID
-            ) {
-                stable.append(refreshed)
-            }
-        }
-        stable.append(contentsOf: uniqueAuthoritative.filter {
-            refreshedByID.removeValue(forKey: $0.stablePresentationID) != nil
-        })
-        return stable
     }
 
     private static func watchlistPlaceholderCount(
@@ -921,8 +1040,14 @@ public final class HomeViewModel {
         visible: [MediaItem],
         handler: (any MediaItemActionHandling)?
     ) -> Int {
-        guard let handler,
-              !handler.isDurableWatchlistPresentationReady() else { return 0 }
+        guard let handler else { return 0 }
+        if let target = handler.durableWatchlistLoadingTargetCount() {
+            return max(
+                target - Set(visible.map(\.stablePresentationID)).count,
+                0
+            )
+        }
+        guard !handler.isDurableWatchlistPresentationReady() else { return 0 }
         let unresolvedTotal = MediaItemMerger.merge(fetched + lastKnown).count
         return max(unresolvedTotal - visible.count, 0)
     }
@@ -967,17 +1092,29 @@ public final class HomeViewModel {
     /// burst writes once instead of once per press.
     private func scheduleDurableWatchlistSave(_ content: Content) {
         durableWatchlistSaveGeneration &+= 1
-        let generation = durableWatchlistSaveGeneration
+        let localGeneration = durableWatchlistSaveGeneration
+        let storeGeneration = Self.nextSnapshotPersistenceGeneration()
         durableWatchlistSaveTask?.cancel()
         durableWatchlistSaveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(1200))
             guard !Task.isCancelled,
                   let self,
-                  self.durableWatchlistSaveGeneration == generation else {
+                  self.durableWatchlistSaveGeneration == localGeneration else {
                 return
             }
             self.durableWatchlistSaveTask = nil
-            self.persistSnapshot(content)
+            let preservePreviousWatchlist =
+                self.mediaItemActionHandler != nil
+                && self.mediaItemActionHandler?
+                    .isDurableWatchlistPresentationReady() == false
+            await HomeSnapshotPersistence.shared.save(
+                content,
+                generation: storeGeneration,
+                to: self.contentStore,
+                preservePreviousWatchlist: preservePreviousWatchlist,
+                excludingUnconfirmedContinueWatchingIDs:
+                    self.unconfirmedContinueWatchingIDs
+            )
         }
     }
 
@@ -1077,45 +1214,28 @@ public final class HomeViewModel {
     /// when the reason has long since expired and no server ever agreed.
     private func saveSnapshot(_ content: Content) {
         durableWatchlistSaveGeneration &+= 1
+        let storeGeneration = Self.nextSnapshotPersistenceGeneration()
         durableWatchlistSaveTask?.cancel()
-        durableWatchlistSaveTask = nil
-        persistSnapshot(content)
-    }
-
-    private func persistSnapshot(_ content: Content) {
-        var durable = content
-        if let mediaItemActionHandler,
-           !mediaItemActionHandler.isDurableWatchlistPresentationReady() {
-            // Save fresh non-Watchlist rows without replacing the last complete
-            // Watchlist with provider records whose ownership is still unresolved.
-            durable.watchlist = Self.overlayWatchlistUpdates(
-                content.watchlist,
-                on: contentStore.load()?.watchlist ?? []
+        let preservePreviousWatchlist =
+            mediaItemActionHandler != nil
+            && mediaItemActionHandler?
+                .isDurableWatchlistPresentationReady() == false
+        let unconfirmedIDs = unconfirmedContinueWatchingIDs
+        let contentStore = contentStore
+        durableWatchlistSaveTask = Task {
+            await HomeSnapshotPersistence.shared.save(
+                content,
+                generation: storeGeneration,
+                to: contentStore,
+                preservePreviousWatchlist: preservePreviousWatchlist,
+                excludingUnconfirmedContinueWatchingIDs: unconfirmedIDs
             )
         }
-        if !unconfirmedContinueWatchingIDs.isEmpty {
-            durable.continueWatching.removeAll {
-                unconfirmedContinueWatchingIDs.contains($0.id)
-            }
-        }
-        contentStore.save(durable)
     }
 
-    private static func overlayWatchlistUpdates(
-        _ updates: [MediaItem],
-        on previous: [MediaItem]
-    ) -> [MediaItem] {
-        var updatesByID = Dictionary(
-            updates.map { ($0.stablePresentationID, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        var result = previous.map { item in
-            updatesByID.removeValue(forKey: item.stablePresentationID) ?? item
-        }
-        result.append(contentsOf: updates.filter {
-            updatesByID.removeValue(forKey: $0.stablePresentationID) != nil
-        })
-        return result
+    private static func nextSnapshotPersistenceGeneration() -> UInt64 {
+        globalSnapshotSaveGeneration &+= 1
+        return globalSnapshotSaveGeneration
     }
 
     /// Recomputes which cards are on the row without any server having returned

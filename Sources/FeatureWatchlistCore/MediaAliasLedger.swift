@@ -16,6 +16,19 @@ public struct MediaAliasEnrichment: Sendable {
     }
 }
 
+public struct MediaAliasResolutionRequest: Sendable {
+    public let evidence: MediaAliasEvidence
+    public let preferredAliasID: MediaAliasID?
+
+    public init(
+        evidence: MediaAliasEvidence,
+        preferredAliasID: MediaAliasID? = nil
+    ) {
+        self.evidence = evidence
+        self.preferredAliasID = preferredAliasID
+    }
+}
+
 public actor MediaAliasLedger: MediaAliasResolving {
     public typealias Snapshot = MediaAliasSnapshot
 
@@ -73,42 +86,82 @@ public actor MediaAliasLedger: MediaAliasResolving {
         evidence: MediaAliasEvidence,
         preferredAliasID: MediaAliasID? = nil
     ) throws -> MediaAliasID {
+        guard let resolved = try resolveOrCreate([
+            MediaAliasResolutionRequest(
+                evidence: evidence,
+                preferredAliasID: preferredAliasID
+            )
+        ]).first else {
+            throw DurableLocalStateError.malformedPayload
+        }
+        return resolved
+    }
+
+    /// Resolves one provider publication with one durable write and one snapshot
+    /// rebuild. Newly created or enriched records are reconciled together, so
+    /// entries in the same page can still collapse onto one canonical alias.
+    public func resolveOrCreate(
+        _ requests: [MediaAliasResolutionRequest]
+    ) throws -> [MediaAliasID] {
+        guard !requests.isEmpty else { return [] }
         let now = Date()
-        if let existing = lookup(
-            evidence: evidence,
-            preferredAliasID: preferredAliasID
-        ) {
-            guard let record = currentSnapshot.record(for: existing) else {
-                throw DurableLocalStateError.malformedPayload
+        let initialSnapshot = currentSnapshot
+        var candidate = records
+        var requestedIDs: [MediaAliasID] = []
+        requestedIDs.reserveCapacity(requests.count)
+
+        for request in requests {
+            if let existing = MediaAliasResolver.lookup(
+                evidence: request.evidence,
+                preferredAliasID: request.preferredAliasID,
+                in: initialSnapshot
+            ) {
+                guard let resolved = initialSnapshot.resolvedAliasID(for: existing),
+                      let record = candidate[resolved] else {
+                    throw DurableLocalStateError.malformedPayload
+                }
+                candidate[resolved] = MediaAliasResolver.enriched(
+                    record,
+                    with: request.evidence,
+                    at: now
+                )
+                requestedIDs.append(resolved)
+                continue
             }
-            let enriched = MediaAliasResolver.enriched(record, with: evidence, at: now)
-            if enriched != record {
-                var candidate = records
-                candidate[enriched.id] = enriched
-                try persistAndPublish(candidate)
+
+            let id = makeID()
+            guard candidate[id] == nil,
+                  let created = MediaAliasRecord(
+                    id: id,
+                    kind: request.evidence.kind,
+                    createdAt: now,
+                    strongEvidence: request.evidence.strong,
+                    weakEvidence: request.evidence.weak.map { [$0] } ?? [],
+                    presentation: request.evidence.presentation,
+                    bindingHints: request.evidence.bindingHints,
+                    locallyValidatedBindings:
+                        request.evidence.locallyValidatedBindings,
+                    localSources: request.evidence.localSources
+                  ) else {
+                throw DurableLocalStateError.writeConflict
             }
-            return existing
+            candidate[id] = created
+            requestedIDs.append(id)
         }
 
-        let id = makeID()
-        guard records[id] == nil,
-              let created = MediaAliasRecord(
-                id: id,
-                kind: evidence.kind,
-                createdAt: now,
-                strongEvidence: evidence.strong,
-                weakEvidence: evidence.weak.map { [$0] } ?? [],
-                presentation: evidence.presentation,
-                bindingHints: evidence.bindingHints,
-                locallyValidatedBindings: evidence.locallyValidatedBindings,
-                localSources: evidence.localSources
-              ) else {
-            throw DurableLocalStateError.writeConflict
+        let final = MediaAliasDuplicateReconciler.reconcile(candidate)
+        let finalSnapshot = MediaAliasSnapshot(records: Array(final.values))
+        let resolvedIDs = try requestedIDs.map { requestedID in
+            guard let resolved = finalSnapshot.resolvedAliasID(for: requestedID)
+            else {
+                throw DurableLocalStateError.malformedPayload
+            }
+            return resolved
         }
-        var candidate = records
-        candidate[id] = created
-        try persistAndPublish(candidate)
-        return id
+        if final != records {
+            try persistAndPublish(final, reconcile: false)
+        }
+        return resolvedIDs
     }
 
     public func enrich(

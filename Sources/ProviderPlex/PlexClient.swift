@@ -982,50 +982,55 @@ public struct PlexClient: Sendable {
     /// own clients put a fresh addition.
     private static let watchlistSort = "watchlistedAt:desc"
 
+    private enum WatchlistPageError: Error {
+        case unsupportedSort
+    }
+
     func watchlist() async throws -> [PlexMetadata] {
+        do {
+            return try await readWatchlist(sort: Self.watchlistSort)
+        } catch WatchlistPageError.unsupportedSort {
+            // Restart from zero because an offset only has meaning within one
+            // ordering. A mixed sorted/unsorted read can repeat and omit titles.
+            PlozzLog.networking.error(
+                "Plex refused the watchlist sort; re-reading in the service's own order"
+            )
+            return try await readWatchlist(sort: nil)
+        }
+    }
+
+    private func readWatchlist(sort: String?) async throws -> [PlexMetadata] {
         let pageSize = 100
         // 10k titles. Far past any real watchlist, and the only purpose is to
         // stop a misbehaving server turning this into an unbounded loop.
         let hardCap = 100
         var collected: [PlexMetadata] = []
+        var seenIdentifiers: Set<String> = []
         var start = 0
         var expectedTotal: Int?
 
-        // A sort the service does not recognise must not cost the viewer their
-        // watchlist. These endpoints are undocumented and change without notice, so
-        // a refusal drops the ordering and re-asks for the same page — worse than
-        // sorted, far better than empty.
-        //
-        // Retried in place rather than probed up front: a probe would spend an
-        // extra request on every read to learn something only a failure can teach.
-        // Once dropped it stays dropped for the rest of the read, so a paged list
-        // cannot come back half ordered and half not, which would look more
-        // scrambled than never having asked.
-        var sort: String? = Self.watchlistSort
-
         for _ in 0..<hardCap {
-            let container: PlexMediaContainer
-            do {
-                container = try await watchlistPage(start: start, size: pageSize, sort: sort)
-            } catch {
-                guard sort != nil else { throw error }
-                // Start the whole read again rather than resuming.
-                //
-                // An offset only means anything within one ordering. Pages already
-                // banked were fetched sorted; continuing unsorted from the same
-                // offset would splice two different orderings together, so the
-                // result would repeat some titles and silently lose others —
-                // materially worse than the unordered list this is falling back to.
-                PlozzLog.networking.error("Plex refused the watchlist sort; re-reading in the service's own order")
-                sort = nil
-                collected.removeAll(keepingCapacity: true)
-                start = 0
-                expectedTotal = nil
-                container = try await watchlistPage(start: 0, size: pageSize, sort: nil)
-            }
+            let container = try await watchlistPage(
+                start: start,
+                size: pageSize,
+                sort: sort
+            )
             let page = container.Metadata ?? []
             if let total = container.totalSize {
-                expectedTotal = max(expectedTotal ?? 0, total)
+                guard total >= 0 else { throw AppError.invalidResponse }
+                if let expectedTotal {
+                    guard total == expectedTotal else {
+                        throw AppError.invalidResponse
+                    }
+                } else {
+                    expectedTotal = total
+                }
+            }
+            if let size = container.size, size != page.count {
+                throw AppError.invalidResponse
+            }
+            if let offset = container.offset, offset != start {
+                throw AppError.invalidResponse
             }
 
             guard !page.isEmpty else {
@@ -1035,21 +1040,33 @@ public struct PlexClient: Sendable {
                 if let expectedTotal, start < expectedTotal {
                     throw AppError.invalidResponse
                 }
-                break
+                return collected
             }
 
+            for item in page {
+                let identifiers = Set(
+                    [item.guid, item.ratingKey]
+                        .compactMap { $0 }
+                        .filter { !$0.isEmpty }
+                )
+                guard !identifiers.isEmpty,
+                      seenIdentifiers.isDisjoint(with: identifiers) else {
+                    throw AppError.invalidResponse
+                }
+                seenIdentifiers.formUnion(identifiers)
+            }
             collected.append(contentsOf: page)
             start += page.count
             if let expectedTotal {
-                if start >= expectedTotal { break }
+                guard start <= expectedTotal else {
+                    throw AppError.invalidResponse
+                }
+                if start == expectedTotal { return collected }
             } else if page.count < pageSize {
-                break
+                return collected
             }
         }
-        if let expectedTotal, start < expectedTotal {
-            throw AppError.invalidResponse
-        }
-        return collected
+        throw AppError.invalidResponse
     }
 
     private func watchlistPage(
@@ -1087,7 +1104,35 @@ public struct PlexClient: Sendable {
             ],
             headers: plexTVHeaders
         )
-        let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistBase)
+        let (data, response) = try await http.sendRaw(
+            endpoint,
+            baseURL: Self.watchlistBase
+        )
+        guard (200...299).contains(response.statusCode) else {
+            // A 400 from a request carrying `sort` is Plex's explicit rejection
+            // of that query. Only this response may discard ordering and retry;
+            // auth, transport, decoding, rate-limit, and server failures must
+            // propagate unchanged.
+            if sort != nil, response.statusCode == 400 {
+                throw WatchlistPageError.unsupportedSort
+            }
+            switch response.statusCode {
+            case 401, 403:
+                throw AppError.unauthorized
+            case 404:
+                throw AppError.notFound
+            case 409:
+                throw AppError.conflict
+            case 429:
+                throw AppError.rateLimited(
+                    retryAfter: response.value(
+                        forHTTPHeaderField: "Retry-After"
+                    ).flatMap(Double.init)
+                )
+            default:
+                throw AppError.invalidResponse
+            }
+        }
         do {
             return try JSONDecoder.plozz.decode(
                 PlexMediaContainerResponse.self,

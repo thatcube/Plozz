@@ -137,24 +137,37 @@ struct MALClient: Sendable {
         let maximumPages = 1_000
         var offset = 0
         var entries: [MALAnimeListEntry] = []
+        var seenIDs: Set<Int> = []
         for _ in 0..<maximumPages {
             let endpoint = Endpoint(
-            method: .get,
-            path: "/users/@me/animelist",
-            queryItems: [
-                URLQueryItem(name: "status", value: "plan_to_watch"),
-                URLQueryItem(name: "limit", value: String(limit)),
-                URLQueryItem(name: "offset", value: String(offset)),
-                URLQueryItem(name: "fields", value: "id,title,start_season"),
-            ],
-            headers: ["Authorization": "Bearer \(accessToken)"]
-        )
+                method: .get,
+                path: "/users/@me/animelist",
+                queryItems: [
+                    URLQueryItem(name: "status", value: "plan_to_watch"),
+                    URLQueryItem(name: "sort", value: "list_updated_at"),
+                    URLQueryItem(name: "limit", value: String(limit)),
+                    URLQueryItem(name: "offset", value: String(offset)),
+                    URLQueryItem(name: "fields", value: "id,title,start_season"),
+                ],
+                headers: ["Authorization": "Bearer \(accessToken)"]
+            )
             let page = try await http.decode(
                 MALAnimeListResponse.self,
                 from: endpoint,
                 baseURL: apiBaseURL
             )
-            let pageEntries = page.data ?? []
+            guard let pageEntries = page.data else {
+                throw WatchlistDestinationError.transient
+            }
+            guard pageEntries.count <= limit else {
+                throw WatchlistDestinationError.transient
+            }
+            for entry in pageEntries {
+                if let id = entry.node?.id,
+                   !seenIDs.insert(id).inserted {
+                    throw WatchlistDestinationError.transient
+                }
+            }
             entries.append(contentsOf: pageEntries)
             guard let next = page.paging?.next else {
                 return MALAnimeListResponse(data: entries, paging: nil)
@@ -164,8 +177,10 @@ struct MALClient: Sendable {
             }
             let nextOffset = URLComponents(string: next)?.queryItems?
                 .first { $0.name == "offset" }?.value.flatMap(Int.init)
-                ?? (offset + pageEntries.count)
-            guard nextOffset > offset else {
+            // MAL exposes no total count; a contiguous next offset plus the
+            // eventual absence of `paging.next` are its only completion proof.
+            guard let nextOffset,
+                  nextOffset == offset + pageEntries.count else {
                 throw WatchlistDestinationError.transient
             }
             offset = nextOffset

@@ -60,10 +60,8 @@ public actor TraktWatchlistDestination:
         let result = try await client.watchlist(
             accessToken: validAccessToken()
         )
-        return result.movies.compactMap {
-            entry(kind: .movie, title: $0)
-        } + result.shows.compactMap {
-            entry(kind: .series, title: $0)
+        return try result.map {
+            try entry(kind: $0.kind, title: $0.title)
         }
     }
 
@@ -158,21 +156,26 @@ public actor TraktWatchlistDestination:
     private func entry(
         kind: MediaItemKind,
         title: TraktWatchlistTitle
-    ) -> WatchlistDestinationEntry? {
+    ) throws -> WatchlistDestinationEntry {
         let externalIDs = Self.externalIDs(title.ids)
         guard let first = externalIDs.first,
               let binding = WatchlistDestinationBinding(
                 destinationID: id,
                 opaqueValue: "\(kind.rawValue)|\(first.namespace.rawValue)|\(first.value)"
-              ) else { return nil }
-        return WatchlistDestinationEntry(
+              ) else {
+            throw WatchlistDestinationError.transient
+        }
+        guard let entry = WatchlistDestinationEntry(
             kind: kind,
             externalIDs: externalIDs,
             binding: binding,
             presentation: title.title.map {
                 MediaAliasPresentation(title: $0, year: title.year)
             }
-        )
+        ) else {
+            throw WatchlistDestinationError.transient
+        }
+        return entry
     }
 
     private static func externalIDs(

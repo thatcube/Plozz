@@ -263,6 +263,33 @@ final class PlexWatchlistTests: XCTestCase {
         )
     }
 
+    func testWatchlistRejectsOverlappingPages() async throws {
+        let stub = StubHTTPClient()
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            """
+            {"MediaContainer":{"size":2,"totalSize":3,"Metadata":[
+              {"ratingKey":"k0","guid":"plex://movie/k0","type":"movie","title":"First"},
+              {"ratingKey":"k1","guid":"plex://movie/k1","type":"movie","title":"Second"}
+            ]}}
+            """,
+            """
+            {"MediaContainer":{"size":1,"totalSize":3,"Metadata":[
+              {"ratingKey":"k1","guid":"plex://movie/k1","type":"movie","title":"Repeated"}
+            ]}}
+            """
+        ])
+
+        do {
+            _ = try await PlexProvider(
+                session: makeSession(),
+                http: stub
+            ).watchlist()
+            XCTFail("Expected overlapping pages to fail")
+        } catch {
+            XCTAssertEqual(error as? AppError, .invalidResponse)
+        }
+    }
+
     /// A later empty page cannot turn a partial read into authoritative success
     /// while the service still reports unseen titles.
     func testWatchlistRejectsIncompleteEmptyPage() async throws {
@@ -441,6 +468,25 @@ final class PlexWatchlistTests: XCTestCase {
         )!
         let reboundResolution = try await destination.resolve(rebound)
         XCTAssertNotNil(reboundResolution)
+    }
+
+    func testUniversalDestinationFailsClosedWhenEntryCannotMap() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
+        {"MediaContainer":{"size":1,"totalSize":1,"Metadata":[
+          {"ratingKey":"abc123","type":"movie","title":"Missing global guid"}
+        ]}}
+        """)
+        let destination = try XCTUnwrap(PlexWatchlistDestination(
+            provider: PlexProvider(session: makeSession(), http: stub)
+        ))
+
+        do {
+            _ = try await destination.fetchEntries()
+            XCTFail("Expected malformed authoritative input to fail")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
     }
 
     private final class MutablePlexDiscoverToken: @unchecked Sendable {
@@ -666,15 +712,53 @@ final class PlexWatchlistOrderTests: XCTestCase {
     func testARefusedSortFallsBackToAnUnorderedReadRatherThanFailing() async throws {
         let stub = StubHTTPClient()
         // First attempt (with the sort) fails; the retry without it succeeds.
-        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
-            "{}",
-            #"{"MediaContainer":{"size":1,"totalSize":1,"Metadata":[{"ratingKey":"k1","type":"movie","title":"Kept","year":2020}]}}"#
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", responses: [
+            (json: #"{"error":"unsupported sort"}"#, status: 400),
+            (json: #"{"MediaContainer":{"size":1,"totalSize":1,"Metadata":[{"ratingKey":"k1","type":"movie","title":"Kept","year":2020}]}}"#, status: 200)
         ])
 
         let items = try await PlexProvider(session: makeSession(), http: stub).watchlist()
 
         XCTAssertEqual(items.map(\.title), ["Kept"], "An unordered watchlist beats no watchlist")
         XCTAssertNil(sortValue(stub), "The retry drops the sort rather than sending an empty one")
+    }
+
+    func testMalformedSortedResponseDoesNotFallBack() async throws {
+        let stub = StubHTTPClient()
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            "{}",
+            #"{"MediaContainer":{"size":0,"totalSize":0,"Metadata":[]}}"#
+        ])
+
+        do {
+            _ = try await PlexProvider(
+                session: makeSession(),
+                http: stub
+            ).watchlist()
+            XCTFail("Expected malformed JSON to propagate")
+        } catch {
+            XCTAssertEqual(error as? AppError, .decoding)
+        }
+        XCTAssertEqual(stub.sentPaths.count, 1)
+    }
+
+    func testAuthenticationErrorDoesNotFallBack() async throws {
+        let stub = StubHTTPClient()
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", responses: [
+            (json: #"{"error":"unauthorized"}"#, status: 401),
+            (json: #"{"MediaContainer":{"size":0,"totalSize":0,"Metadata":[]}}"#, status: 200)
+        ])
+
+        do {
+            _ = try await PlexProvider(
+                session: makeSession(),
+                http: stub
+            ).watchlist()
+            XCTFail("Expected authentication failure to propagate")
+        } catch {
+            XCTAssertEqual(error as? AppError, .unauthorized)
+        }
+        XCTAssertEqual(stub.sentPaths.count, 1)
     }
 }
 
@@ -695,18 +779,18 @@ final class PlexWatchlistSortFallbackPagingTests: XCTestCase {
         let firstPage = (0..<100).map {
             #"{"ratingKey":"k\#($0)","type":"movie","title":"Film \#($0)","year":2020}"#
         }.joined(separator: ",")
-        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", responses: [
             // Page 1 sorted, then the service refuses page 2's sort.
-            "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}",
-            "{}",
+            (json: "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}", status: 200),
+            (json: #"{"error":"unsupported sort"}"#, status: 400),
             // The restart: both pages again, unsorted.
-            "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}",
-            #"""
+            (json: "{\"MediaContainer\":{\"size\":100,\"totalSize\":102,\"Metadata\":[\(firstPage)]}}", status: 200),
+            (json: #"""
             {"MediaContainer":{"size":2,"totalSize":102,"Metadata":[
               {"ratingKey":"k100","type":"movie","title":"Film 100","year":2020},
               {"ratingKey":"k101","type":"movie","title":"Film 101","year":2020}
             ]}}
-            """#
+            """#, status: 200)
         ])
 
         let items = try await PlexProvider(session: makeSession(), http: stub).watchlist()
@@ -720,17 +804,17 @@ final class PlexWatchlistSortFallbackPagingTests: XCTestCase {
         let firstPage = (0..<100).map {
             #"{"ratingKey":"k\#($0)","type":"movie","title":"Film \#($0)","year":2020}"#
         }.joined(separator: ",")
-        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
-            "{\"MediaContainer\":{\"size\":100,\"totalSize\":500,\"Metadata\":[\(firstPage)]}}",
-            "{}",
-            #"""
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", responses: [
+            (json: "{\"MediaContainer\":{\"size\":100,\"totalSize\":500,\"Metadata\":[\(firstPage)]}}", status: 200),
+            (json: #"{"error":"unsupported sort"}"#, status: 400),
+            (json: #"""
             {"MediaContainer":{"size":4,"totalSize":4,"Metadata":[
               {"ratingKey":"u0","type":"movie","title":"Unsorted 0","year":2020},
               {"ratingKey":"u1","type":"movie","title":"Unsorted 1","year":2020},
               {"ratingKey":"u2","type":"movie","title":"Unsorted 2","year":2020},
               {"ratingKey":"u3","type":"movie","title":"Unsorted 3","year":2020}
             ]}}
-            """#
+            """#, status: 200)
         ])
 
         let items = try await PlexProvider(

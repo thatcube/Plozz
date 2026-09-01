@@ -189,11 +189,35 @@ public struct TraktWatchlistTitle: Codable, Hashable, Sendable {
 }
 
 struct TraktWatchlistMovieEntry: Decodable, Sendable {
+    let id: Int
+    let listedAt: String
     let movie: TraktWatchlistTitle
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case listedAt = "listed_at"
+        case movie
+    }
 }
 
 struct TraktWatchlistShowEntry: Decodable, Sendable {
+    let id: Int
+    let listedAt: String
     let show: TraktWatchlistTitle
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case listedAt = "listed_at"
+        case show
+    }
+}
+
+struct TraktWatchlistItem: Sendable {
+    let id: Int
+    let listedAt: Date
+    let kind: MediaItemKind
+    let title: TraktWatchlistTitle
+    let providerOrder: Int
 }
 
 struct TraktWatchlistMutationBody: Encodable, Sendable {

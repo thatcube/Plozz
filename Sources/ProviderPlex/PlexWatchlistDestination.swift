@@ -93,7 +93,10 @@ public struct PlexWatchlistDestination:
             // the truth, and the retry policy handles it.
             throw WatchlistDestinationError.transient
         }
-        return try await provider.watchlist(using: discoverClient).compactMap { item in
+        let items = try await provider.watchlist(using: discoverClient)
+        var entries: [WatchlistDestinationEntry] = []
+        entries.reserveCapacity(items.count)
+        for item in items {
             guard let guid = item.providerIDs["PlexGuid"],
                   let metadataID = PlexClient.watchlistMetadataID(fromGuid: guid),
                   let binding = WatchlistDestinationBinding(
@@ -104,8 +107,12 @@ public struct PlexWatchlistDestination:
                     providerKind: .plex,
                     accountDescriptorID: provider.accountID,
                     providerItemID: metadataID
-                  ) else { return nil }
-            return WatchlistDestinationEntry(
+                  ) else {
+                // A partial Discover decode cannot be published as an
+                // authoritative list: the dropped title would look removed.
+                throw WatchlistDestinationError.transient
+            }
+            guard let entry = WatchlistDestinationEntry(
                 kind: item.kind,
                 externalIDs: Self.externalIDs(item, plexGuid: guid),
                 binding: binding,
@@ -117,8 +124,12 @@ public struct PlexWatchlistDestination:
                     backdropURL: item.backdropURL?.absoluteString
                 ),
                 presentationAccountID: provider.accountID
-            )
+            ) else {
+                throw WatchlistDestinationError.transient
+            }
+            entries.append(entry)
         }
+        return entries
     }
 
     /// Which item in the viewer's own library this watchlist entry is.

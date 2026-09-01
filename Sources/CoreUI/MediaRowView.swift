@@ -30,6 +30,25 @@ public struct MediaRowView: View {
         case episodeColumn
     }
 
+    public enum PresentationElement: Identifiable {
+        public enum ID: Hashable {
+            case item(String)
+            case loadingPlaceholder(Int)
+        }
+
+        case item(MediaItem)
+        case loadingPlaceholder(Int)
+
+        public var id: ID {
+            switch self {
+            case .item(let item):
+                .item(item.stablePresentationID)
+            case .loadingPlaceholder(let index):
+                .loadingPlaceholder(index)
+            }
+        }
+    }
+
     /// Pre-built: a row heading is either a row-kind name (copy) or a library
     /// name (provider content), and only the caller knows which. `nil` renders no
     /// heading (previously spelled as an empty string).
@@ -365,11 +384,24 @@ public struct MediaRowView: View {
     /// First occurrence wins, order otherwise preserved: callers have already
     /// sorted these (Recently Added by date, Continue Watching by progress), so
     /// the survivor must be the one the ordering chose.
-    static func uniqued(_ items: [MediaItem]) -> [MediaItem] {
+    public static func uniqued(_ items: [MediaItem]) -> [MediaItem] {
         var seen = Set<String>()
         return items.filter {
             seen.insert($0.stablePresentationID).inserted
         }
+    }
+
+    /// One stable collection for a row or grid boundary. Real items retain their
+    /// presentation identity, duplicates collapse first-wins, and placeholders are
+    /// siblings rather than being repeated once per item.
+    public static func presentationElements(
+        items: [MediaItem],
+        loadingPlaceholderCount: Int
+    ) -> [PresentationElement] {
+        uniqued(items).map(PresentationElement.item)
+            + (0..<max(loadingPlaceholderCount, 0)).map(
+                PresentationElement.loadingPlaceholder
+            )
     }
 
     static func presentationID(
@@ -410,11 +442,14 @@ public struct MediaRowView: View {
                     ScrollViewReader { proxy in
                         ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: layoutMetrics.cardSpacing) {
-                            ForEach(items, id: \.stablePresentationID) { item in
-                                tappableCard(for: item)
-                            }
-                            if loadingPlaceholderCount > 0 {
-                                ForEach(0..<loadingPlaceholderCount, id: \.self) { _ in
+                            ForEach(Self.presentationElements(
+                                items: items,
+                                loadingPlaceholderCount: loadingPlaceholderCount
+                            )) { element in
+                                switch element {
+                                case .item(let item):
+                                    tappableCard(for: item)
+                                case .loadingPlaceholder:
                                     loadingPlaceholder
                                         .frame(width: cardSlotWidth)
                                 }

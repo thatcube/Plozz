@@ -20,17 +20,18 @@ import CoreModels
 /// encoding and re-signed from the active provider at render time. A decode failure
 /// or stale file is treated as a cache miss (Home just does a normal load), so a
 /// `MediaItem` coding change can never crash a launch.
-public protocol HomeContentStoring: Sendable {
+public protocol HomeContentStoring: AnyObject, Sendable {
+    /// Stable identity for ordering asynchronous writes. On-disk stores use their
+    /// profile-scoped file path so replacement view models share one write stream.
+    var persistenceScope: String { get }
     /// The last persisted snapshot, or `nil` on a miss (no file / stale / decode
     /// failure / empty). Read **synchronously** so `HomeViewModel` can hydrate its
     /// initial state at construction. `HomeContentStore` memoizes the first decode,
     /// so the repeated `load()` calls SwiftUI triggers by re-evaluating the inline
     /// `HomeViewModel(...)` on each `HomeTab.body` pass stay O(1) after the first.
     func load() -> HomeViewModel.Content?
-    /// Persists `content` (bounded) as the newest snapshot. Synchronous (like
-    /// `HomeLayoutStore`): bounded payload, called only a handful of times per
-    /// session (never on a scroll/animation hot path), so the atomic write is a
-    /// negligible one-off cost and a subsequent `load()` reads it back reliably.
+    /// Persists `content` (bounded) as the newest snapshot. The store operation is
+    /// synchronous; callers dispatch it away from interaction-critical actors.
     func save(_ content: HomeViewModel.Content)
     /// Last fully curated hero for the same profile and source configuration.
     /// Kept separate from Home rows because Featured/Random are asynchronous
@@ -52,6 +53,12 @@ public protocol HomeContentStoring: Sendable {
     /// inverts: the emptiness is the answer, and a snapshot of servers the
     /// profile no longer watches would otherwise be repainted at every launch.
     func clear()
+}
+
+public extension HomeContentStoring {
+    var persistenceScope: String {
+        "instance:\(ObjectIdentifier(self))"
+    }
 }
 
 /// The part of ``HeroSettings`` that decides *what the hero contains* — as
@@ -127,6 +134,11 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     private let maxWatchlistItems: Int
     private let maxAge: TimeInterval
     private let heroMaxAge: TimeInterval
+
+    public var persistenceScope: String {
+        fileURL?.standardizedFileURL.path
+            ?? "disabled:\(ObjectIdentifier(self))"
+    }
 
     /// Wire format: the bounded content plus the time it was captured (for
     /// `maxAge`). Kept private so the on-disk shape can evolve behind the protocol.

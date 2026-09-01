@@ -117,6 +117,10 @@ public struct WatchlistSnapshot: Sendable, Equatable {
                 lastReconciledAt: [
                     lhs.metadata.lastReconciledAt,
                     rhs.metadata.lastReconciledAt
+                ].compactMap { $0 }.max(),
+                removalSupersededAt: [
+                    lhs.metadata.removalSupersededAt,
+                    rhs.metadata.removalSupersededAt
                 ].compactMap { $0 }.max()
             )
         )!

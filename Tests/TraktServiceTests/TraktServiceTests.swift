@@ -247,8 +247,11 @@ final class TraktScrobble409SuccessTests: XCTestCase {
 // MARK: - Watchlist
 
 final class TraktWatchlistDestinationTests: XCTestCase {
+    private let older = "2026-01-01T00:00:00.000Z"
+    private let newer = "2026-02-01T00:00:00.000Z"
+
     private func makeDestination(
-        http: RecordingHTTPClient,
+        http: HTTPClient,
         tokens: TraktTokens = TraktTokens(
             accessToken: "acc",
             refreshToken: "ref",
@@ -264,11 +267,11 @@ final class TraktWatchlistDestinationTests: XCTestCase {
 
     func testListDecodesMoviesAndShowsWithTypedIDs() async throws {
         let http = RecordingHTTPClient()
-        http.stub(pathSuffix: "/sync/watchlist/movies", json: """
-        [{"movie":{"title":"Dune","year":2021,"ids":{"trakt":1,"imdb":"tt1160419","tmdb":438631}}}]
+        http.stub(pathSuffix: "/sync/watchlist/movies/added/desc", json: """
+        [{"id":1,"listed_at":"\(newer)","movie":{"title":"Dune","year":2021,"ids":{"trakt":1,"imdb":"tt1160419","tmdb":438631}}}]
         """)
-        http.stub(pathSuffix: "/sync/watchlist/shows", json: """
-        [{"show":{"title":"Severance","year":2022,"ids":{"trakt":2,"tvdb":371980}}}]
+        http.stub(pathSuffix: "/sync/watchlist/shows/added/desc", json: """
+        [{"id":2,"listed_at":"\(older)","show":{"title":"Severance","year":2022,"ids":{"trakt":2,"tvdb":371980}}}]
         """)
 
         let entries = try await makeDestination(http: http).fetchEntries()
@@ -277,30 +280,30 @@ final class TraktWatchlistDestinationTests: XCTestCase {
         XCTAssertTrue(entries[0].externalIDs.contains {
             $0.namespace == .imdb && $0.value == "tt1160419"
         })
-        XCTAssertEqual(
-            http.sentPaths,
-            ["/sync/watchlist/movies", "/sync/watchlist/shows"]
-        )
+        XCTAssertEqual(Set(http.sentPaths), Set([
+            "/sync/watchlist/movies/added/desc",
+            "/sync/watchlist/shows/added/desc",
+        ]))
     }
 
     func testListReadsEveryTraktPaginationPage() async throws {
         let http = RecordingHTTPClient()
         http.stub(
-            pathSuffix: "/sync/watchlist/movies",
+            pathSuffix: "/sync/watchlist/movies/added/desc",
             json: """
-            [{"movie":{"title":"First","ids":{"trakt":1}}}]
+            [{"id":1,"listed_at":"2026-03-01T00:00:00Z","movie":{"title":"First","ids":{"trakt":1}}}]
             """,
             headers: ["X-Pagination-Page-Count": "2"]
         )
         http.stub(
-            pathSuffix: "/sync/watchlist/movies",
+            pathSuffix: "/sync/watchlist/movies/added/desc",
             json: """
-            [{"movie":{"title":"Second","ids":{"trakt":2}}}]
+            [{"id":2,"listed_at":"2026-02-01T00:00:00Z","movie":{"title":"Second","ids":{"trakt":2}}}]
             """,
             headers: ["X-Pagination-Page-Count": "2"]
         )
         http.stub(
-            pathSuffix: "/sync/watchlist/shows",
+            pathSuffix: "/sync/watchlist/shows/added/desc",
             json: "[]",
             headers: ["X-Pagination-Page-Count": "1"]
         )
@@ -309,7 +312,7 @@ final class TraktWatchlistDestinationTests: XCTestCase {
 
         XCTAssertEqual(entries.map { $0.presentation?.title }, ["First", "Second"])
         let movieRequests = http.sent.filter {
-            $0.path.hasSuffix("/sync/watchlist/movies")
+            $0.path.hasSuffix("/sync/watchlist/movies/added/desc")
         }
         XCTAssertEqual(
             movieRequests.compactMap {
@@ -322,9 +325,9 @@ final class TraktWatchlistDestinationTests: XCTestCase {
     func testListRejectsChangingTraktPaginationMetadata() async throws {
         let http = RecordingHTTPClient()
         http.stub(
-            pathSuffix: "/sync/watchlist/movies",
+            pathSuffix: "/sync/watchlist/movies/added/desc",
             json: """
-            [{"movie":{"title":"First","ids":{"trakt":1}}}]
+            [{"id":1,"listed_at":"2026-03-01T00:00:00Z","movie":{"title":"First","ids":{"trakt":1}}}]
             """,
             headers: [
                 "X-Pagination-Page-Count": "2",
@@ -332,9 +335,9 @@ final class TraktWatchlistDestinationTests: XCTestCase {
             ]
         )
         http.stub(
-            pathSuffix: "/sync/watchlist/movies",
+            pathSuffix: "/sync/watchlist/movies/added/desc",
             json: """
-            [{"movie":{"title":"Second","ids":{"trakt":2}}}]
+            [{"id":2,"listed_at":"2026-02-01T00:00:00Z","movie":{"title":"Second","ids":{"trakt":2}}}]
             """,
             headers: [
                 "X-Pagination-Page-Count": "1",
@@ -348,6 +351,133 @@ final class TraktWatchlistDestinationTests: XCTestCase {
         } catch let error as WatchlistDestinationError {
             XCTAssertEqual(error, .transient)
         }
+    }
+
+    func testNewerShowSortsBeforeOlderMovie() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/watchlist/movies/added/desc", json: """
+        [{"id":10,"listed_at":"\(older)","movie":{"title":"Older Movie","ids":{"trakt":10}}}]
+        """)
+        http.stub(pathSuffix: "/sync/watchlist/shows/added/desc", json: """
+        [{"id":20,"listed_at":"\(newer)","show":{"title":"Newer Show","ids":{"trakt":20}}}]
+        """)
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(
+            entries.map { $0.presentation?.title },
+            ["Newer Show", "Older Movie"]
+        )
+    }
+
+    func testEqualListedTimesAcrossKindsUseKindAsDeterministicTieBreak() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/watchlist/movies/added/desc", json: """
+        [{"id":20,"listed_at":"\(newer)","movie":{"title":"Movie","ids":{"trakt":20}}}]
+        """)
+        http.stub(pathSuffix: "/sync/watchlist/shows/added/desc", json: """
+        [{"id":10,"listed_at":"\(newer)","show":{"title":"Show","ids":{"trakt":10}}}]
+        """)
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(
+            entries.map { $0.presentation?.title },
+            ["Movie", "Show"]
+        )
+    }
+
+    func testEqualListedTimesWithinOneKindPreserveProviderOrder() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/watchlist/movies/added/desc", json: """
+        [
+          {"id":20,"listed_at":"\(newer)","movie":{"title":"First","ids":{"trakt":20}}},
+          {"id":10,"listed_at":"\(newer)","movie":{"title":"Second","ids":{"trakt":10}}}
+        ]
+        """)
+        http.stub(
+            pathSuffix: "/sync/watchlist/shows/added/desc",
+            json: "[]"
+        )
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(
+            entries.map { $0.presentation?.title },
+            ["First", "Second"]
+        )
+    }
+
+    func testSameNumericListIDAcrossKindsDoesNotLookLikePaginationOverlap() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/watchlist/movies/added/desc", json: """
+        [{"id":7,"listed_at":"\(newer)","movie":{"title":"Movie","ids":{"trakt":70}}}]
+        """)
+        http.stub(pathSuffix: "/sync/watchlist/shows/added/desc", json: """
+        [{"id":7,"listed_at":"\(newer)","show":{"title":"Show","ids":{"trakt":71}}}]
+        """)
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(
+            entries.map { $0.presentation?.title },
+            ["Movie", "Show"]
+        )
+    }
+
+    func testOverlappingPaginationIDsFailClosed() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(
+            pathSuffix: "/sync/watchlist/movies/added/desc",
+            json: """
+            [{"id":7,"listed_at":"\(newer)","movie":{"title":"First","ids":{"trakt":1}}}]
+            """,
+            headers: ["X-Pagination-Page-Count": "2"]
+        )
+        http.stub(
+            pathSuffix: "/sync/watchlist/movies/added/desc",
+            json: """
+            [{"id":7,"listed_at":"\(older)","movie":{"title":"Overlap","ids":{"trakt":2}}}]
+            """,
+            headers: ["X-Pagination-Page-Count": "2"]
+        )
+        http.stub(
+            pathSuffix: "/sync/watchlist/shows/added/desc",
+            json: "[]",
+            headers: ["X-Pagination-Page-Count": "1"]
+        )
+
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected overlapping pages to fail closed")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
+    }
+
+    func testMalformedRelevantRecordFailsClosed() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/watchlist/movies/added/desc", json: """
+        [{"id":1,"listed_at":"\(newer)","movie":{"title":"No IDs","ids":{}}}]
+        """)
+        http.stub(pathSuffix: "/sync/watchlist/shows/added/desc", json: "[]")
+
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected unresolvable Trakt record to fail the read")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
+    }
+
+    func testMovieAndShowKindsFetchConcurrently() async throws {
+        let http = ConcurrentTraktWatchlistHTTPClient()
+        let destination = makeDestination(http: http)
+
+        _ = try await destination.fetchEntries()
+
+        let maximumConcurrentRequests = await http.maximumConcurrentRequests()
+        XCTAssertEqual(maximumConcurrentRequests, 2)
     }
 
     func testAddAndRemoveUseTypedMovieAndShowPayloads() async throws {
@@ -471,8 +601,8 @@ final class TraktWatchlistDestinationTests: XCTestCase {
             pathSuffix: "/oauth/token",
             json: tokenJSON(access: "new", refresh: "new-ref")
         )
-        http.stub(pathSuffix: "/sync/watchlist/movies", json: "[]")
-        http.stub(pathSuffix: "/sync/watchlist/shows", json: "[]")
+        http.stub(pathSuffix: "/sync/watchlist/movies/added/desc", json: "[]")
+        http.stub(pathSuffix: "/sync/watchlist/shows/added/desc", json: "[]")
         let destination = makeDestination(
             http: http,
             tokens: TraktTokens(
@@ -484,13 +614,68 @@ final class TraktWatchlistDestinationTests: XCTestCase {
 
         _ = try await destination.fetchEntries()
 
-        XCTAssertEqual(
-            http.sentPaths,
-            [
-                "/oauth/token",
-                "/sync/watchlist/movies",
-                "/sync/watchlist/shows"
-            ]
+        XCTAssertEqual(http.sentPaths.first, "/oauth/token")
+        XCTAssertEqual(Set(http.sentPaths.dropFirst()), Set([
+            "/sync/watchlist/movies/added/desc",
+            "/sync/watchlist/shows/added/desc",
+        ]))
+    }
+}
+
+private actor ConcurrentTraktWatchlistHTTPClient: HTTPClient {
+    private var activeRequests = 0
+    private var maximumActiveRequests = 0
+    private var startedRequests = 0
+
+    func send(
+        _ endpoint: Endpoint,
+        baseURL: URL
+    ) async throws -> (Data, HTTPURLResponse) {
+        try await response(for: endpoint, baseURL: baseURL)
+    }
+
+    func sendRaw(
+        _ endpoint: Endpoint,
+        baseURL: URL
+    ) async throws -> (Data, HTTPURLResponse) {
+        try await response(for: endpoint, baseURL: baseURL)
+    }
+
+    func maximumConcurrentRequests() -> Int {
+        maximumActiveRequests
+    }
+
+    private func response(
+        for endpoint: Endpoint,
+        baseURL: URL
+    ) async throws -> (Data, HTTPURLResponse) {
+        activeRequests += 1
+        startedRequests += 1
+        maximumActiveRequests = max(maximumActiveRequests, activeRequests)
+        for _ in 0..<10_000 where startedRequests < 2 {
+            await Task.yield()
+        }
+        activeRequests -= 1
+        let json: String
+        if endpoint.path.contains("/movies/") {
+            json = """
+            [{"id":1,"listed_at":"2026-01-01T00:00:00Z",
+              "movie":{"title":"Movie","ids":{"trakt":1}}}]
+            """
+        } else {
+            json = """
+            [{"id":2,"listed_at":"2026-01-02T00:00:00Z",
+              "show":{"title":"Show","ids":{"trakt":2}}}]
+            """
+        }
+        return (
+            Data(json.utf8),
+            HTTPURLResponse(
+                url: baseURL,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["X-Pagination-Page-Count": "1"]
+            )!
         )
     }
 }

@@ -119,6 +119,10 @@ final class MALWatchlistDestinationTests: XCTestCase {
         XCTAssertEqual(entries[0].presentation?.title, "Sousou no Frieren")
         XCTAssertEqual(entries[0].presentation?.year, 2023)
         XCTAssertEqual(entries[0].externalIDs.first?.namespace, .myAnimeList)
+        XCTAssertEqual(
+            http.sent.first?.queryItems.first { $0.name == "sort" }?.value,
+            "list_updated_at"
+        )
     }
 
     func testReadsEveryPlanToWatchPage() async throws {
@@ -140,6 +144,53 @@ final class MALWatchlistDestinationTests: XCTestCase {
             },
             ["0", "1"]
         )
+    }
+
+    func testRejectsDuplicateEntriesAcrossPages() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/users/@me/animelist", json: """
+        {"data":[{"node":{"id":1,"title":"First"}}],
+         "paging":{"next":"https://api.myanimelist.net/v2/users/@me/animelist?offset=1"}}
+        """)
+        http.stub(pathSuffix: "/users/@me/animelist", json: """
+        {"data":[{"node":{"id":1,"title":"Repeated"}}],"paging":{}}
+        """)
+
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected overlapping pages to fail")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
+    }
+
+    func testRejectsPaginationGap() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/users/@me/animelist", json: """
+        {"data":[{"node":{"id":1,"title":"First"}}],
+         "paging":{"next":"https://api.myanimelist.net/v2/users/@me/animelist?offset=2"}}
+        """)
+
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected a skipped offset to fail")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
+    }
+
+    func testFailsClosedWhenListRecordCannotMap() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/users/@me/animelist", json: """
+        {"data":[{"node":{"title":"Missing id"}}],"paging":{}}
+        """)
+
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected malformed authoritative input to fail")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
     }
 
     func testDisconnectedAccountAsksForSignInRatherThanRetrying() async {

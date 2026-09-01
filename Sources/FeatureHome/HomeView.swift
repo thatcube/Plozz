@@ -662,6 +662,13 @@ public struct HomeView: View {
             // 350ms; every move re-arms it until navigation settles.
             viewModel.scheduleDurableWatchlistRefresh()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistLoadingProgressDidChange
+            )
+        ) { _ in
+            viewModel.refreshWatchlistLoadingProgress()
+        }
         // New content that lands while the viewer sits on Home appears without a
         // navigation round trip. Zero-size and render-isolated — see the type.
         .onMoveCommand { _ in

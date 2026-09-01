@@ -137,6 +137,18 @@ public final class MediaAliasLedgerModel {
         return id
     }
 
+    public func resolveOrCreateBatch(
+        profileID: String,
+        requests: [MediaAliasResolutionRequest]
+    ) async throws -> [MediaAliasID] {
+        guard !requests.isEmpty else { return [] }
+        try reviveProfiles([profileID])
+        let ledger = try await ledger(for: profileID)
+        let ids = try await ledger.resolveOrCreate(requests)
+        publish(await ledger.snapshot(), profileID: profileID)
+        return ids
+    }
+
     public func enrich(
         profileID: String,
         aliasID: MediaAliasID,

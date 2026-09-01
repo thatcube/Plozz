@@ -10,6 +10,7 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
     struct Stub { var status: Int = 200; var body: Data }
 
     var responses: [(suffix: String, stub: Stub)] = []
+    private var queues: [String: [Stub]] = [:]
     var error: AppError?
     /// Guards the request-recording arrays below: the provider now issues several
     /// row requests **concurrently** (library-scoped Continue Watching/Latest fan
@@ -22,6 +23,12 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
 
     func stub(pathSuffix: String, json: String, status: Int = 200) {
         responses.append((pathSuffix, Stub(status: status, body: Data(json.utf8))))
+    }
+
+    func stubSequence(pathSuffix: String, jsons: [String]) {
+        queues[pathSuffix, default: []].append(
+            contentsOf: jsons.map { Stub(body: Data($0.utf8)) }
+        )
     }
 
     /// All query items sent for the most recent request whose path ends in `suffix`.
@@ -50,9 +57,18 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
         sentMethods.append(endpoint.method)
         if let body = endpoint.body { sentBodies[endpoint.path] = body }
         sentQueryItems.append(endpoint.queryItems)
+        let queuedKey = queues.keys.first {
+            endpoint.path.hasSuffix($0) && !(queues[$0]?.isEmpty ?? true)
+        }
+        let queued: Stub? = queuedKey.flatMap { key in
+            queues[key]?.removeFirst()
+        }
         lock.unlock()
         if let error { throw error }
-        guard let match = responses.first(where: { endpoint.path.hasSuffix($0.suffix) })?.stub else {
+        guard let match = queued
+            ?? responses.first(where: {
+                endpoint.path.hasSuffix($0.suffix)
+            })?.stub else {
             throw AppError.notFound
         }
         switch match.status {

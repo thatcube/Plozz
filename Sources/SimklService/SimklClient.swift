@@ -84,7 +84,7 @@ struct SimklClient: Sendable {
     /// `GET /sync/all-items/{type}/plantowatch` — the user's plan-to-watch list.
     ///
     /// Movies and shows are separate endpoints on Simkl, so this is called once
-    /// per kind and the destination concatenates.
+    /// per kind and the destination merges them by `added_to_watchlist_at`.
     func planToWatch(
         type: String,
         accessToken: String
@@ -92,7 +92,9 @@ struct SimklClient: Sendable {
         let endpoint = Endpoint(
             method: .get,
             path: "/sync/all-items/\(type)/plantowatch",
-            queryItems: [URLQueryItem(name: "client_id", value: config.clientID ?? "")],
+            queryItems: [
+                URLQueryItem(name: "client_id", value: config.clientID ?? "")
+            ],
             headers: headers(accessToken: accessToken)
         )
         return try await http.decode(

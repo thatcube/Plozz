@@ -60,7 +60,10 @@ public struct MediaBrowserWatchlistDestination: WatchlistLibraryResolving {
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
-        try await provider.watchlist().compactMap { item in
+        let items = try await provider.watchlist()
+        var entries: [WatchlistDestinationEntry] = []
+        entries.reserveCapacity(items.count)
+        for item in items {
             guard item.kind == .movie || item.kind == .series,
                   let key = MediaAliasProviderBindingKey(
                     providerKind: provider.kind,
@@ -70,8 +73,12 @@ public struct MediaBrowserWatchlistDestination: WatchlistLibraryResolving {
                   let binding = WatchlistDestinationBinding(
                     destinationID: id,
                     opaqueValue: key.providerItemID
-                  ) else { return nil }
-            return WatchlistDestinationEntry(
+                  ) else {
+                // A filtered Favorites response is authoritative. Silently
+                // dropping one malformed record would reconcile it as absent.
+                throw WatchlistDestinationError.transient
+            }
+            guard let entry = WatchlistDestinationEntry(
                 kind: item.kind,
                 externalIDs: Self.externalIDs(item),
                 binding: binding,
@@ -83,8 +90,12 @@ public struct MediaBrowserWatchlistDestination: WatchlistLibraryResolving {
                     backdropURL: item.backdropURL?.absoluteString
                 ),
                 presentationAccountID: provider.accountID
-            )
+            ) else {
+                throw WatchlistDestinationError.transient
+            }
+            entries.append(entry)
         }
+        return entries
     }
 
     public func resolve(

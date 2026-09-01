@@ -163,8 +163,14 @@ struct SimklListEntry: Decodable, Equatable {
 
     var movie: Title?
     var show: Title?
+    var addedToWatchlistAt: String?
 
     var title: Title? { movie ?? show }
+
+    enum CodingKeys: String, CodingKey {
+        case movie, show
+        case addedToWatchlistAt = "added_to_watchlist_at"
+    }
 }
 
 /// The id block Simkl returns. Deliberately separate from the `Encodable`

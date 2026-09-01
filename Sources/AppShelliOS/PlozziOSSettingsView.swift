@@ -625,7 +625,8 @@ private struct PlozziOSSettingsSplitView: View {
                 transparency: appModel.settings.transparency,
                 cardStyle: appModel.settings.cardStyle,
                 density: appModel.settings.density,
-                watchIndicator: appModel.settings.watchIndicator
+                watchIndicator: appModel.settings.watchIndicator,
+                navigation: appModel.settings.navigation
             )
         case .home:
             PlozziOSHomeSettingsView(
@@ -891,7 +892,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                         transparency: appModel.settings.transparency,
                         cardStyle: appModel.settings.cardStyle,
                         density: appModel.settings.density,
-                        watchIndicator: appModel.settings.watchIndicator
+                        watchIndicator: appModel.settings.watchIndicator,
+                        navigation: appModel.settings.navigation
                     )
                 } label: {
                     Label("Appearance", systemImage: "paintpalette")
@@ -1607,6 +1609,7 @@ private struct PlozziOSAppearanceSettingsView: View {
     @Bindable var cardStyle: CardStyleSettingsModel
     @Bindable var density: UIDensitySettingsModel
     @Bindable var watchIndicator: WatchStatusIndicatorSettingsModel
+    @Bindable var navigation: NavigationStyleSettingsModel
     @Environment(AppLanguageSettingsModel.self) private var appLanguage
 
     var body: some View {
@@ -1672,6 +1675,12 @@ private struct PlozziOSAppearanceSettingsView: View {
                     ForEach(WatchStatusIndicator.allCases) { indicator in
                         Text(indicator.displayName).tag(indicator)
                     }
+                }
+
+                SettingsSectionGroup("Navigation") {
+                    Toggle("Show Watchlist", isOn: $navigation.showsWatchlist)
+                } footer: {
+                    Text("Home, Search, profile switching and Settings always stay available.")
                 }
             }
         }

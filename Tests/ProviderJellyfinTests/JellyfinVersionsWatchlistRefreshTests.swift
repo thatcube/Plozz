@@ -98,13 +98,132 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
         XCTAssertEqual(
             query?.first { $0.name == "Limit" }?.value,
             "10000",
-            "Large Jellyfin Watchlists must not retain the old 60-item presentation cap"
+            "Limit is a page size, not a total watchlist cap"
+        )
+        XCTAssertEqual(query?.first { $0.name == "StartIndex" }?.value, "0")
+        XCTAssertEqual(
+            query?.first { $0.name == "EnableTotalRecordCount" }?.value,
+            "true"
+        )
+        XCTAssertNil(
+            query?.first { $0.name == "SortBy" },
+            "Jellyfin/Emby expose no favorite-added timestamp; DateCreated is library chronology"
         )
         let fields = query?.first { $0.name == "Fields" }?.value ?? ""
         XCTAssertTrue(
             fields.split(separator: ",").contains(where: { $0.lowercased() == "providerids" }),
             "Favorites requests must include ProviderIds so Home watchlist de-dup can match across servers"
         )
+    }
+
+    func testWatchlistPagesPastTenThousandAndPreservesServerOrder() async throws {
+        let stub = StubHTTPClient()
+        let firstPage = (0..<10_000).map {
+            #"{"Id":"f\#($0)","Name":"Film \#($0)","Type":"Movie"}"#
+        }.joined(separator: ",")
+        stub.stubSequence(pathSuffix: "/Users/u1/Items", jsons: [
+            #"{"Items":[\#(firstPage)],"TotalRecordCount":10001}"#,
+            #"{"Items":[{"Id":"f10000","Name":"Film 10000","Type":"Movie"}],"TotalRecordCount":10001}"#
+        ])
+
+        let items = try await JellyfinProvider(
+            session: makeSession(),
+            http: stub
+        ).watchlist()
+
+        XCTAssertEqual(items.count, 10_001)
+        XCTAssertEqual(items.first?.title, "Film 0")
+        XCTAssertEqual(items.last?.title, "Film 10000")
+        XCTAssertEqual(
+            stub.sentQueryItems.compactMap {
+                $0.first { $0.name == "StartIndex" }?.value
+            },
+            ["0", "10000"]
+        )
+    }
+
+    func testWatchlistRejectsOverlappingPages() async throws {
+        let stub = StubHTTPClient()
+        stub.stubSequence(pathSuffix: "/Users/u1/Items", jsons: [
+            """
+            {"Items":[
+              {"Id":"f1","Name":"First","Type":"Movie"},
+              {"Id":"f2","Name":"Second","Type":"Movie"}
+            ],"TotalRecordCount":3}
+            """,
+            """
+            {"Items":[{"Id":"f2","Name":"Repeated","Type":"Movie"}],
+             "TotalRecordCount":3}
+            """
+        ])
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        do {
+            _ = try await provider.client.favorites(userID: "u1", limit: 2)
+            XCTFail("Expected overlapping pages to fail")
+        } catch {
+            XCTAssertEqual(error as? AppError, .invalidResponse)
+        }
+    }
+
+    func testWatchlistRejectsIncompletePages() async throws {
+        let stub = StubHTTPClient()
+        stub.stubSequence(pathSuffix: "/Users/u1/Items", jsons: [
+            """
+            {"Items":[{"Id":"f1","Name":"First","Type":"Movie"}],
+             "TotalRecordCount":2}
+            """,
+            #"{"Items":[],"TotalRecordCount":2}"#
+        ])
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        do {
+            _ = try await provider.client.favorites(userID: "u1", limit: 1)
+            XCTFail("Expected an incomplete read to fail")
+        } catch {
+            XCTAssertEqual(error as? AppError, .invalidResponse)
+        }
+    }
+
+    func testWatchlistRejectsChangingTotalCount() async throws {
+        let stub = StubHTTPClient()
+        stub.stubSequence(pathSuffix: "/Users/u1/Items", jsons: [
+            """
+            {"Items":[{"Id":"f1","Name":"First","Type":"Movie"}],
+             "TotalRecordCount":2}
+            """,
+            """
+            {"Items":[{"Id":"f2","Name":"Second","Type":"Movie"}],
+             "TotalRecordCount":3}
+            """
+        ])
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        do {
+            _ = try await provider.client.favorites(userID: "u1", limit: 1)
+            XCTFail("Expected inconsistent totals to fail")
+        } catch {
+            XCTAssertEqual(error as? AppError, .invalidResponse)
+        }
+    }
+
+    func testDestinationFailsClosedWhenFavoriteCannotMap() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"episode","Name":"Unexpected","Type":"Episode"}],
+         "TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+        let destination = try XCTUnwrap(
+            MediaBrowserWatchlistDestination(provider: provider)
+        )
+
+        do {
+            _ = try await destination.fetchEntries()
+            XCTFail("Expected malformed authoritative input to fail")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
     }
 
     func testUniversalDestinationRequiresValidatedLocalCopyForJellyfinAndEmby() async throws {

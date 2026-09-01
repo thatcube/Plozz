@@ -683,6 +683,52 @@ final class MediaAliasLedgerTests: XCTestCase {
         )
     }
 
+    func testResolutionWavePersistsAndPublishesOnceAtOneThousandItems() async throws {
+        let store = ControllableAliasStore()
+        let ledger = try MediaAliasLedger(profileID: "p", store: store)
+        let requests = (0..<1_000).map { index in
+            MediaAliasResolutionRequest(
+                evidence: MediaAliasEvidence(
+                    kind: .movie,
+                    strong: [strong(.movie, .tmdb, String(index))],
+                    presentation: MediaAliasPresentation(
+                        title: "Title \(index)",
+                        year: 2000
+                    )
+                )!
+            )
+        }
+
+        let ids = try await ledger.resolveOrCreate(requests)
+
+        XCTAssertEqual(ids.count, 1_000)
+        XCTAssertEqual(Set(ids).count, 1_000)
+        XCTAssertEqual(store.saveCount, 1)
+        let snapshot = await ledger.snapshot()
+        XCTAssertEqual(snapshot.recordCount, 1_000)
+    }
+
+    func testResolutionWaveReconcilesDuplicatesCreatedInSameBatch() async throws {
+        let store = ControllableAliasStore()
+        let ledger = try MediaAliasLedger(profileID: "p", store: store)
+        let evidence = MediaAliasEvidence(
+            kind: .series,
+            strong: [strong(.series, .tmdb, "42")],
+            presentation: MediaAliasPresentation(title: "Same", year: 2024)
+        )!
+
+        let ids = try await ledger.resolveOrCreate([
+            MediaAliasResolutionRequest(evidence: evidence),
+            MediaAliasResolutionRequest(evidence: evidence)
+        ])
+
+        XCTAssertEqual(ids.count, 2)
+        XCTAssertEqual(ids[0], ids[1])
+        XCTAssertEqual(store.saveCount, 1)
+        let snapshot = await ledger.snapshot()
+        XCTAssertEqual(snapshot.activeRecordCount, 1)
+    }
+
     @MainActor
     func testRepeatedActivationDoesNotRepublishUnchangedSnapshot() async throws {
         let model = MediaAliasLedgerModel()

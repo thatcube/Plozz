@@ -15,7 +15,7 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
     }
 
     var responses: [(suffix: String, stub: Stub)] = []
-    private var queues: [String: [Data]] = [:]
+    private var queues: [String: [Stub]] = [:]
     var error: AppError?
     private(set) var sentPaths: [String] = []
     private(set) var sentMethods: [HTTPMethod] = []
@@ -36,7 +36,20 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
 
     /// Adds a sequence of responses returned in order for `suffix` (for polling).
     func stubSequence(pathSuffix: String, jsons: [String]) {
-        queues[pathSuffix, default: []].append(contentsOf: jsons.map { Data($0.utf8) })
+        queues[pathSuffix, default: []].append(
+            contentsOf: jsons.map { Stub(body: Data($0.utf8)) }
+        )
+    }
+
+    func stubSequence(
+        pathSuffix: String,
+        responses: [(json: String, status: Int)]
+    ) {
+        queues[pathSuffix, default: []].append(
+            contentsOf: responses.map {
+                Stub(status: $0.status, body: Data($0.json.utf8))
+            }
+        )
     }
 
     /// All query items sent for the most recent request whose path ends in `suffix`.
@@ -103,7 +116,7 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
         if let key = queues.keys.first(where: { endpoint.path.hasSuffix($0) }), var q = queues[key], !q.isEmpty {
             let next = q.removeFirst()
             queues[key] = q
-            return response(next)
+            return response(next.body, next.status, headers: next.headers)
         }
         guard let match = responses.first(where: { endpoint.path.hasSuffix($0.suffix) })?.stub else {
             throw AppError.notFound

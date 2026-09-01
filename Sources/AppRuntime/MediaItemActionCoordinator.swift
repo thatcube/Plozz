@@ -37,6 +37,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         @MainActor (Bool, MediaItem) -> Void
     private let resolveDurableWatchlist: ([MediaItem]) -> [MediaItem]
     private let durableWatchlistPresentationReady: () -> Bool
+    private let durableWatchlistLoadingTarget: () -> Int?
     private let rehydratePersistedArtworkItems:
         ([MediaItem]) -> [MediaItem]
     private let seedLegacyUniversalWatchlist: ([MediaItem]) async -> Void
@@ -158,6 +159,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             $0.filter(\.isFavorite)
         },
         durableWatchlistPresentationReady: @escaping () -> Bool = { true },
+        durableWatchlistLoadingTarget: @escaping () -> Int? = { nil },
         rehydratePersistedArtworkItems:
             @escaping ([MediaItem]) -> [MediaItem] = { $0 },
         seedLegacyUniversalWatchlist: @escaping ([MediaItem]) async -> Void = { _ in },
@@ -180,6 +182,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         self.resolveDurableWatchlist = resolveDurableWatchlist
         self.durableWatchlistPresentationReady =
             durableWatchlistPresentationReady
+        self.durableWatchlistLoadingTarget =
+            durableWatchlistLoadingTarget
         self.rehydratePersistedArtworkItems =
             rehydratePersistedArtworkItems
         self.seedLegacyUniversalWatchlist = seedLegacyUniversalWatchlist
@@ -718,6 +722,11 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
 
     public func isDurableWatchlistPresentationReady() -> Bool {
         !universalWatchlistEnabled() || durableWatchlistPresentationReady()
+    }
+
+    public func durableWatchlistLoadingTargetCount() -> Int? {
+        guard universalWatchlistEnabled() else { return nil }
+        return durableWatchlistLoadingTarget()
     }
 
     public func rehydratePersistedArtwork(

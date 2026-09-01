@@ -75,7 +75,19 @@ public actor MALWatchlistDestination:
         let response = try await client.planToWatch(
             accessToken: try await validAccessToken()
         )
-        return (response.data ?? []).compactMap { entry(from: $0) }
+        guard let values = response.data else {
+            throw WatchlistDestinationError.transient
+        }
+        var entries: [WatchlistDestinationEntry] = []
+        entries.reserveCapacity(values.count)
+        for value in values {
+            // A malformed record cannot safely become authoritative absence.
+            guard let entry = entry(from: value) else {
+                throw WatchlistDestinationError.transient
+            }
+            entries.append(entry)
+        }
+        return entries
     }
 
     public func resolve(

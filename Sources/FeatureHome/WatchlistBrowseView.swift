@@ -9,7 +9,7 @@ import FeatureHomeCore
 /// It shares Home's retained model, so opening this destination never creates a
 /// second provider fetch or a second interpretation of cross-provider membership.
 public struct WatchlistBrowseView: View {
-    @State private var viewModel: HomeViewModel
+    private let viewModel: HomeViewModel
     private let visibility: HomeLibraryVisibility
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
@@ -25,7 +25,7 @@ public struct WatchlistBrowseView: View {
         spoilerSettings: SpoilerSettings = .default,
         onSelect: @escaping (MediaItem) -> Void
     ) {
-        _viewModel = State(initialValue: viewModel)
+        self.viewModel = viewModel
         self.visibility = visibility
         self.spoilerSettings = spoilerSettings
         self.onSelect = onSelect
@@ -66,6 +66,13 @@ public struct WatchlistBrowseView: View {
             )
         ) { _ in
             viewModel.scheduleDurableWatchlistRefresh()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistLoadingProgressDidChange
+            )
+        ) { _ in
+            viewModel.refreshWatchlistLoadingProgress()
         }
         .onReceive(
             NotificationCenter.default.publisher(
@@ -112,21 +119,21 @@ public struct WatchlistBrowseView: View {
                         columns: metrics.posterColumns,
                         spacing: metrics.gridSpacing
                     ) {
-                        ForEach(items, id: \.stablePresentationID) { item in
-                            PosterCardView(
-                                item: item,
-                                style: .poster,
-                                spoilerSettings: spoilerSettings,
-                                isPendingRemoval: isPendingRemoval(item)
-                            ) {
-                                onSelect(item)
-                            }
-                        }
-                        if loadingPlaceholderCount > 0 {
-                            ForEach(
-                                0..<loadingPlaceholderCount,
-                                id: \.self
-                            ) { _ in
+                        ForEach(MediaRowView.presentationElements(
+                            items: items,
+                            loadingPlaceholderCount: loadingPlaceholderCount
+                        )) { element in
+                            switch element {
+                            case .item(let item):
+                                PosterCardView(
+                                    item: item,
+                                    style: .poster,
+                                    spoilerSettings: spoilerSettings,
+                                    isPendingRemoval: isPendingRemoval(item)
+                                ) {
+                                    onSelect(item)
+                                }
+                            case .loadingPlaceholder:
                                 SkeletonCardView(style: .poster)
                             }
                         }

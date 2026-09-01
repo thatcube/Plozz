@@ -85,4 +85,42 @@ final class MediaRowUniquingTests: XCTestCase {
             item.stablePresentationID
         )
     }
+
+    func testPresentationElementsKeepUniqueItemsThenAppendPlaceholders() {
+        let first = item("a", "First")
+        let second = item("b", "Second")
+        let elements = MediaRowView.presentationElements(
+            items: [
+                first,
+                second,
+                item("a", "Duplicate"),
+            ],
+            loadingPlaceholderCount: 3
+        )
+
+        XCTAssertEqual(
+            elements.map(\.id),
+            [
+                .item(first.stablePresentationID),
+                .item(second.stablePresentationID),
+                .loadingPlaceholder(0),
+                .loadingPlaceholder(1),
+                .loadingPlaceholder(2),
+            ]
+        )
+        XCTAssertEqual(elements.count, 5)
+    }
+
+    func testPresentationElementsClampNegativePlaceholderCount() {
+        let only = item("a", "Only")
+        let elements = MediaRowView.presentationElements(
+            items: [only],
+            loadingPlaceholderCount: -2
+        )
+
+        XCTAssertEqual(
+            elements.map(\.id),
+            [.item(only.stablePresentationID)]
+        )
+    }
 }

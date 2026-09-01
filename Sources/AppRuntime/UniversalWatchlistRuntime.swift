@@ -106,6 +106,7 @@ final class UniversalWatchlistMembershipCache {
     static let shared = UniversalWatchlistMembershipCache()
     private var revision: UInt64?
     private var cached: Set<MediaAliasID> = []
+    private(set) var generation: UInt64 = 0
 
     func ids(for revision: UInt64) -> Set<MediaAliasID>? {
         self.revision == revision ? cached : nil
@@ -116,18 +117,31 @@ final class UniversalWatchlistMembershipCache {
         cached = ids
     }
 
-    /// Forget the memo outright.
-    ///
-    /// The revision key is a hash of COUNTS, so it cannot see a transition that
-    /// leaves every count where it was — and a local removal is exactly that when
-    /// the title's presence came from a destination's own list rather than from a
-    /// local intent: the tombstone lands, `activeAliasIDs` never held the alias to
-    /// begin with, and nothing the key hashes moves. The set is then served from
-    /// this memo forever and the bookmark stays filled on a title that really did
-    /// come off the list. Anything that mutates the watchlist locally calls this.
+    /// Forget the memo outright and advance the O(1) invalidation generation.
     func invalidate() {
         revision = nil
         cached = []
+        generation &+= 1
+    }
+}
+
+@MainActor
+private final class UniversalWatchlistLoadingProgress {
+    static let shared = UniversalWatchlistLoadingProgress()
+    private var targetCountByProfileID: [String: Int] = [:]
+
+    func targetCount(for profileID: String) -> Int? {
+        targetCountByProfileID[profileID]
+    }
+
+    func update(profileID: String, targetCount: Int?) {
+        let targetCount = targetCount.map { max($0, 0) }
+        guard targetCountByProfileID[profileID] != targetCount else { return }
+        targetCountByProfileID[profileID] = targetCount
+        NotificationCenter.default.post(
+            name: .universalWatchlistLoadingProgressDidChange,
+            object: nil
+        )
     }
 }
 
@@ -278,6 +292,12 @@ public extension UniversalWatchlistHost {
         universalWatchlistNativeViewLoaded
             && universalWatchlistProfileID?
                 .hasPrefix("\(profiles.activeProfileID)#") == true
+    }
+
+    var universalWatchlistLoadingTargetCount: Int? {
+        UniversalWatchlistLoadingProgress.shared.targetCount(
+            for: profiles.activeProfileID
+        )
     }
 
     /// The accounts the NATIVE watchlist import may read from — see
@@ -436,6 +456,7 @@ public extension UniversalWatchlistHost {
         for bucket in universalWatchlistNativeView.bucketsByDestinationID.values {
             hasher.combine(bucket.entries.count)
         }
+        hasher.combine(UniversalWatchlistMembershipCache.shared.generation)
         return UInt64(bitPattern: Int64(hasher.finalize()))
     }
 
@@ -993,6 +1014,10 @@ public extension UniversalWatchlistHost {
     func refreshNativeWatchlistView() async {
         guard let reconciler = universalWatchlistReconciler else { return }
         let profileID = profiles.activeProfileID
+        UniversalWatchlistLoadingProgress.shared.update(
+            profileID: profileID,
+            targetCount: nil
+        )
         universalWatchlistRefreshGeneration &+= 1
         let refreshGeneration = universalWatchlistRefreshGeneration
         func refreshIsCurrent() -> Bool {
@@ -1020,8 +1045,9 @@ public extension UniversalWatchlistHost {
         let successfulDestinationIDs = Set(
             report.successes.map(\.destinationID)
         )
-        var resolvedByDestination:
-            [WatchlistDestinationID: [(MediaAliasID, WatchlistDestinationEntry)]] = [:]
+        var resolvableEntries:
+            [(WatchlistDestinationID, WatchlistDestinationEntry)] = []
+        var resolutionRequests: [MediaAliasResolutionRequest] = []
         // Widen every entry's ids before anything is resolved. A tracker's row
         // knows a show only as AniList/MAL and a server's row only as
         // AniDB/TMDb/TVDb, so without this they share nothing to match on and
@@ -1033,14 +1059,61 @@ public extension UniversalWatchlistHost {
         for read in report.successes {
             for entry in read.entries {
                 guard let evidence = entry.mediaAliasEvidence else { continue }
-                guard let aliasID = try? await mediaAliasLedger.resolveOrCreate(
-                    profileID: profileID,
+                resolvableEntries.append((read.destinationID, entry))
+                resolutionRequests.append(MediaAliasResolutionRequest(
                     evidence: evidence.bridgingAnimeIdentities(using: animeBridge)
-                ) else { continue }
-                resolvedByDestination[read.destinationID, default: []]
-                    .append((aliasID, entry))
+                ))
             }
         }
+        let resolvedAliasIDs: [MediaAliasID]
+        do {
+            resolvedAliasIDs = try await mediaAliasLedger.resolveOrCreateBatch(
+                profileID: profileID,
+                requests: resolutionRequests
+            )
+        } catch {
+            PlozzLog.app.error("Watchlist alias batch resolution failed")
+            return
+        }
+        guard resolvedAliasIDs.count == resolvableEntries.count else {
+            PlozzLog.app.error("Watchlist alias batch resolution was incomplete")
+            return
+        }
+        var resolvedByDestination:
+            [WatchlistDestinationID: [(MediaAliasID, WatchlistDestinationEntry)]] = [:]
+        for (resolved, aliasID) in zip(resolvableEntries, resolvedAliasIDs) {
+            resolvedByDestination[resolved.0, default: []]
+                .append((aliasID, resolved.1))
+        }
+        var loadingView = universalWatchlistNativeView
+        for read in report.successes {
+            let entries = resolvedByDestination[
+                read.destinationID,
+                default: []
+            ].enumerated().compactMap { offset, resolved in
+                NativeWatchlistEntry(
+                    aliasID: resolved.0,
+                    kind: resolved.1.kind,
+                    presentation: resolved.1.presentation,
+                    presentationAccountID: resolved.1.presentationAccountID,
+                    index: offset
+                )
+            }
+            loadingView.applySuccess(
+                destinationID: read.destinationID,
+                entries: entries
+            )
+        }
+        let loadingUnion = WatchlistUnion(
+            snapshot: universalWatchlist.activeSnapshot,
+            nativeView: loadingView,
+            aliasSnapshot: mediaAliasLedger.activeSnapshot,
+            enabledDestinationIDs: universalWatchlistDestinationIDs
+        )
+        UniversalWatchlistLoadingProgress.shared.update(
+            profileID: profileID,
+            targetCount: loadingUnion.orderedEntries.count
+        )
 
         let targetedKeys = await reconciler.targetedKeys(profileID: profileID)
         guard refreshIsCurrent() else { return }
@@ -1442,6 +1515,10 @@ public extension UniversalWatchlistHost {
     /// would be a strictly worse outcome.
     func persistUniversalWatchlistNativeView(_ view: NativeWatchlistView) {
         universalWatchlistNativeView = view
+        UniversalWatchlistLoadingProgress.shared.update(
+            profileID: profiles.activeProfileID,
+            targetCount: nil
+        )
         do {
             try universalWatchlistNativeViewStore?.save(view)
         } catch {

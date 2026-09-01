@@ -343,6 +343,64 @@ final class WatchlistUnionTests: XCTestCase {
         XCTAssertEqual(union.orderedEntries.map(\.aliasID), [owned, other])
         XCTAssertEqual(union.orderedEntries.map(\.isExplicit), [true, false])
     }
+
+    func testOwnershipEnrichmentDoesNotReorderAServersList() {
+        let first = MediaAliasID()
+        let second = MediaAliasID()
+        let ownedSource = MediaSourceRef(
+            accountID: "account",
+            itemID: "owned",
+            kind: .movie,
+            providerKind: .plex
+        )
+        var nativeView = NativeWatchlistView()
+        nativeView.applySuccess(
+            destinationID: plex,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: first,
+                    kind: .movie,
+                    index: 0
+                )!,
+                NativeWatchlistEntry(
+                    aliasID: second,
+                    kind: .movie,
+                    index: 1,
+                    ownedSource: ownedSource
+                )!
+            ]
+        )
+
+        let union = WatchlistUnion(
+            snapshot: .empty,
+            nativeView: nativeView,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [plex]
+        )
+
+        XCTAssertEqual(union.orderedEntries.map(\.aliasID), [first, second])
+        XCTAssertNil(union.orderedEntries.first?.ownedSource)
+        XCTAssertEqual(union.orderedEntries.last?.ownedSource, ownedSource)
+    }
+
+    func testRevisionChangesWhenMembershipChangesAtTheSameCount() {
+        let first = MediaAliasID()
+        let replacement = MediaAliasID()
+        let before = WatchlistUnion(
+            snapshot: .empty,
+            nativeView: view([(plex, [first])]),
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [plex]
+        )
+        let after = WatchlistUnion(
+            snapshot: .empty,
+            nativeView: view([(plex, [replacement])]),
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [plex]
+        )
+
+        XCTAssertNotEqual(before.revision, after.revision)
+    }
 }
 
 /// Picking the right COPY of a correctly identified title.

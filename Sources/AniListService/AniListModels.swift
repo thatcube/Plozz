@@ -91,26 +91,27 @@ struct AniListPlanningTitle: Decodable, Equatable {
 }
 
 struct AniListPlanningMedia: Decodable, Equatable {
-    var id: Int?
+    var id: Int
     var title: AniListPlanningTitle?
     var seasonYear: Int?
     var idMal: Int?
 }
 
 struct AniListPlanningEntry: Decodable, Equatable {
-    var media: AniListPlanningMedia?
+    var media: AniListPlanningMedia
 }
 
-struct AniListPlanningList: Decodable, Equatable {
-    var entries: [AniListPlanningEntry]?
+struct AniListPlanningPageInfo: Decodable, Equatable {
+    var hasNextPage: Bool
 }
 
-struct AniListPlanningCollection: Decodable, Equatable {
-    var lists: [AniListPlanningList]?
+struct AniListPlanningPage: Decodable, Equatable {
+    var pageInfo: AniListPlanningPageInfo
+    var mediaList: [AniListPlanningEntry]
 }
 
 struct AniListPlanningData: Decodable, Equatable {
-    var MediaListCollection: AniListPlanningCollection?
+    var Page: AniListPlanningPage?
 }
 
 struct AniListMediaListLookup: Decodable, Equatable {

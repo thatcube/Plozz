@@ -14,7 +14,7 @@ final class SimklWatchlistDestinationTests: XCTestCase {
     }
 
     private func makeDestination(
-        http: RecordingHTTPClient,
+        http: HTTPClient,
         tokens: SimklTokens? = SimklTokens(accessToken: "acc")
     ) -> SimklWatchlistDestination {
         SimklWatchlistDestination(
@@ -29,11 +29,13 @@ final class SimklWatchlistDestinationTests: XCTestCase {
     func testReadsMoviesAndShowsFromSeparateEndpoints() async throws {
         let http = RecordingHTTPClient()
         http.stub(pathSuffix: "/sync/all-items/movies/plantowatch", json: """
-        {"movies":[{"movie":{"title":"Dune","year":2021,
+        {"movies":[{"added_to_watchlist_at":"2026-02-01T00:00:00Z",
+          "movie":{"title":"Dune","year":2021,
           "ids":{"simkl":1,"imdb":"tt1160419","tmdb":438631}}}]}
         """)
         http.stub(pathSuffix: "/sync/all-items/shows/plantowatch", json: """
-        {"shows":[{"show":{"title":"Severance","year":2022,
+        {"shows":[{"added_to_watchlist_at":"2026-01-01T00:00:00Z",
+          "show":{"title":"Severance","year":2022,
           "ids":{"simkl":2,"tvdb":371980}}}]}
         """)
 
@@ -48,6 +50,103 @@ final class SimklWatchlistDestinationTests: XCTestCase {
         })
         XCTAssertEqual(entries[0].presentation?.title, "Dune")
         XCTAssertEqual(entries[1].presentation?.year, 2022)
+        XCTAssertTrue(
+            http.sent.allSatisfy {
+                !$0.queryItems.contains { $0.name == "extended" }
+            },
+            "The default response includes presentation and added-time metadata"
+        )
+    }
+
+    func testNewerShowSortsBeforeOlderMovie() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/all-items/movies/plantowatch", json: """
+        {"movies":[{"added_to_watchlist_at":"2026-01-01T00:00:00Z",
+          "movie":{"title":"Older Movie","ids":{"imdb":"tt1"}}}]}
+        """)
+        http.stub(pathSuffix: "/sync/all-items/shows/plantowatch", json: """
+        {"shows":[{"added_to_watchlist_at":"2026-02-01T00:00:00Z",
+          "show":{"title":"Newer Show","ids":{"tvdb":2}}}]}
+        """)
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(
+            entries.map { $0.presentation?.title },
+            ["Newer Show", "Older Movie"]
+        )
+    }
+
+    func testEqualAddTimesUseBindingAsDeterministicTieBreak() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/all-items/movies/plantowatch", json: """
+        {"movies":[{"added_to_watchlist_at":"2026-02-01T00:00:00Z",
+          "movie":{"title":"Movie","ids":{"imdb":"tt2"}}}]}
+        """)
+        http.stub(pathSuffix: "/sync/all-items/shows/plantowatch", json: """
+        {"shows":[{"added_to_watchlist_at":"2026-02-01T00:00:00Z",
+          "show":{"title":"Show","ids":{"tvdb":1}}}]}
+        """)
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(
+            entries.map { $0.presentation?.title },
+            ["Movie", "Show"]
+        )
+    }
+
+    func testEqualAddTimesWithinOneKindPreserveProviderOrder() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/all-items/movies/plantowatch", json: """
+        {"movies":[
+          {"added_to_watchlist_at":"2026-02-01T00:00:00Z",
+           "movie":{"title":"First","ids":{"imdb":"tt2"}}},
+          {"added_to_watchlist_at":"2026-02-01T00:00:00Z",
+           "movie":{"title":"Second","ids":{"imdb":"tt1"}}}
+        ]}
+        """)
+        http.stub(
+            pathSuffix: "/sync/all-items/shows/plantowatch",
+            json: """
+            {"shows":[]}
+            """
+        )
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(
+            entries.map { $0.presentation?.title },
+            ["First", "Second"]
+        )
+    }
+
+    func testMalformedAddTimestampFailsClosed() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/all-items/movies/plantowatch", json: """
+        {"movies":[{"added_to_watchlist_at":"not-a-date",
+          "movie":{"title":"Movie","ids":{"imdb":"tt1"}}}]}
+        """)
+        http.stub(pathSuffix: "/sync/all-items/shows/plantowatch", json: """
+        {"shows":[]}
+        """)
+
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected malformed authoritative ordering data to fail")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
+    }
+
+    func testMovieAndShowKindsFetchConcurrently() async throws {
+        let http = ConcurrentSimklWatchlistHTTPClient()
+        let destination = makeDestination(http: http)
+
+        _ = try await destination.fetchEntries()
+
+        let maximumConcurrentRequests = await http.maximumConcurrentRequests()
+        XCTAssertEqual(maximumConcurrentRequests, 2)
     }
 
     /// Simkl returns numeric ids as a number in some payloads and a string in
@@ -68,6 +167,50 @@ final class SimklWatchlistDestinationTests: XCTestCase {
         XCTAssertTrue(entries[0].externalIDs.contains {
             $0.namespace == .tmdb && $0.value == "329865"
         })
+    }
+
+    private actor ConcurrentSimklWatchlistHTTPClient: HTTPClient {
+        private var activeRequests = 0
+        private var maximumActiveRequests = 0
+        private var startedRequests = 0
+
+        func send(
+            _ endpoint: Endpoint,
+            baseURL: URL
+        ) async throws -> (Data, HTTPURLResponse) {
+            activeRequests += 1
+            startedRequests += 1
+            maximumActiveRequests = max(maximumActiveRequests, activeRequests)
+            for _ in 0..<10_000 where startedRequests < 2 {
+                await Task.yield()
+            }
+            activeRequests -= 1
+            let json: String
+            if endpoint.path.contains("/movies/") {
+                json = """
+                {"movies":[{"added_to_watchlist_at":"2026-01-01T00:00:00Z",
+                  "movie":{"title":"Movie","ids":{"imdb":"tt1"}}}]}
+                """
+            } else {
+                json = """
+                {"shows":[{"added_to_watchlist_at":"2026-01-02T00:00:00Z",
+                  "show":{"title":"Show","ids":{"tvdb":2}}}]}
+                """
+            }
+            return (
+                Data(json.utf8),
+                HTTPURLResponse(
+                    url: baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: [:]
+                )!
+            )
+        }
+
+        func maximumConcurrentRequests() -> Int {
+            maximumActiveRequests
+        }
     }
 
     /// Dropping an unidentifiable title would make a prior confirmation look

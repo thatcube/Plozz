@@ -529,6 +529,7 @@ public actor WatchlistReconciler {
         }
         let observedScope =
             reconciliationScope ?? destination.reconciliationScope
+        let targetedKeys = await mutationStore.targetedKeys(profileID: profileID)
         var requests: [WatchlistNativeObservationRequest] = []
         requests.reserveCapacity(candidates.count)
         for candidate in candidates {
@@ -537,7 +538,7 @@ public actor WatchlistReconciler {
                 aliasID: candidate.aliasID,
                 destinationID: destinationID
             )
-            let wasTargeted = await mutationStore.isTargeted(key)
+            let wasTargeted = targetedKeys.contains(key)
             var eligible = wasTargeted
             if !eligible,
                let target = candidate.target {

@@ -548,6 +548,7 @@ public final class IdentityIndexModel {
         publishedIndexAccountCount = accountCount
         identitySnapshot = snapshot
         identitySnapshotStore.update(snapshot)
+        UniversalWatchlistMembershipCache.shared.invalidate()
         FanoutDiagnostics.emit(
             "index.publish OK accounts=\(accountCount) identities=\(snapshot.identityCount)"
         )
@@ -569,5 +570,6 @@ public final class IdentityIndexModel {
         didRestorePersistedIndex = false
         identitySnapshot = .empty
         identitySnapshotStore.update(.empty)
+        UniversalWatchlistMembershipCache.shared.invalidate()
     }
 }

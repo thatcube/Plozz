@@ -57,26 +57,71 @@ public actor SimklWatchlistDestination:
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
         let token = try accessToken()
-        // Sequential rather than concurrent: this runs on a reconcile pass, not a
-        // render path, and two requests in flight against one small service buys
-        // nothing worth the extra pressure.
-        let movies = try await client.planToWatch(type: "movies", accessToken: token)
-        let shows = try await client.planToWatch(type: "shows", accessToken: token)
+        async let movieResponse = client.planToWatch(
+            type: "movies",
+            accessToken: token
+        )
+        async let showResponse = client.planToWatch(
+            type: "shows",
+            accessToken: token
+        )
+        let (movies, shows) = try await (movieResponse, showResponse)
         let movieValues = movies.movies ?? []
         let showValues = shows.shows ?? []
-        let movieEntries = movieValues.compactMap {
-            entry(kind: .movie, from: $0)
+        let movieEntries = try movieValues.enumerated().map {
+            try orderedEntry(
+                kind: .movie,
+                from: $0.element,
+                providerOrder: $0.offset
+            )
         }
-        let showEntries = showValues.compactMap {
-            entry(kind: .series, from: $0)
+        let showEntries = try showValues.enumerated().map {
+            try orderedEntry(
+                kind: .series,
+                from: $0.element,
+                providerOrder: $0.offset
+            )
         }
-        // A partial identity decode cannot safely be reconciled as absence: an
-        // omitted confirmed title would become a global removal.
-        guard movieEntries.count == movieValues.count,
-              showEntries.count == showValues.count else {
-            throw WatchlistDestinationError.transient
+        // Modern entries carry an authoritative add time. Simkl documents that
+        // legacy entries may omit it; those sort after dated entries, with a
+        // stable identity order rather than a false claim about their chronology.
+        return (movieEntries + showEntries).sorted {
+            switch ($0.addedAt, $1.addedAt) {
+            case let (left?, right?) where left != right:
+                return left > right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                if $0.kind == $1.kind {
+                    return $0.providerOrder < $1.providerOrder
+                }
+                return $0.kind.rawValue < $1.kind.rawValue
+            }
+        }.map(\.entry)
+    }
+
+    private func orderedEntry(
+        kind: MediaItemKind,
+        from listEntry: SimklListEntry,
+        providerOrder: Int
+    ) throws -> SimklOrderedWatchlistEntry {
+        let addedAt: Date?
+        if let timestamp = listEntry.addedToWatchlistAt {
+            guard let parsed = Self.parseTimestamp(timestamp) else {
+                throw WatchlistDestinationError.transient
+            }
+            addedAt = parsed
+        } else {
+            addedAt = nil
         }
-        return movieEntries + showEntries
+        return SimklOrderedWatchlistEntry(
+            entry: try entry(kind: kind, from: listEntry),
+            addedAt: addedAt,
+            kind: kind,
+            providerOrder: providerOrder
+        )
     }
 
     public func resolve(
@@ -157,22 +202,29 @@ public actor SimklWatchlistDestination:
     private func entry(
         kind: MediaItemKind,
         from listEntry: SimklListEntry
-    ) -> WatchlistDestinationEntry? {
-        guard let title = listEntry.title else { return nil }
+    ) throws -> WatchlistDestinationEntry {
+        guard let title = listEntry.title else {
+            throw WatchlistDestinationError.transient
+        }
         let externalIDs = Self.externalIDs(title.ids)
         guard let first = externalIDs.first,
               let binding = WatchlistDestinationBinding(
                 destinationID: id,
                 opaqueValue: "\(kind.rawValue)|\(first.namespace.rawValue)|\(first.value)"
-              ) else { return nil }
-        return WatchlistDestinationEntry(
+              ) else {
+            throw WatchlistDestinationError.transient
+        }
+        guard let entry = WatchlistDestinationEntry(
             kind: kind,
             externalIDs: externalIDs,
             binding: binding,
             presentation: title.title.map {
                 MediaAliasPresentation(title: $0, year: title.year)
             }
-        )
+        ) else {
+            throw WatchlistDestinationError.transient
+        }
+        return entry
     }
 
     private static func externalIDs(
@@ -219,6 +271,22 @@ public actor SimklWatchlistDestination:
             // Not identifiers Simkl knows about.
             return SimklIDs()
         }
+    }
+
+    private static func parseTimestamp(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let wholeSeconds = ISO8601DateFormatter()
+        wholeSeconds.formatOptions = [.withInternetDateTime]
+        return wholeSeconds.date(from: value)
+    }
+
+    private struct SimklOrderedWatchlistEntry {
+        let entry: WatchlistDestinationEntry
+        let addedAt: Date?
+        let kind: MediaItemKind
+        let providerOrder: Int
     }
 
     private static func parse(

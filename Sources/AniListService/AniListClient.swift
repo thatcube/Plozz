@@ -105,43 +105,69 @@ struct AniListClient: Sendable {
     // MARK: - Planning list
 
     /// The viewer's PLANNING entries, which is what a watchlist means here.
-    ///
-    /// One page of a reasonable size rather than full pagination: this feeds a
-    /// reconcile pass that only needs to know what is already there, and a list
-    /// long enough to overflow it is long enough that the tail is not what the
-    /// viewer just added.
     func planningEntries(
         userID: Int,
         accessToken: String
     ) async throws -> [AniListPlanningEntry] {
         let query = """
-        query ($userId: Int) {
-          MediaListCollection (userId: $userId, type: ANIME, status: PLANNING) {
-            lists { entries { media { id title { romaji english } seasonYear
-              idMal } } }
+        query ($userId: Int, $page: Int, $perPage: Int) {
+          Page(page: $page, perPage: $perPage) {
+            pageInfo { hasNextPage }
+            mediaList(
+              userId: $userId
+              type: ANIME
+              status: PLANNING
+              sort: [ADDED_TIME_DESC, MEDIA_ID_DESC]
+            ) {
+              media { id title { romaji english } seasonYear idMal }
+            }
           }
         }
         """
-        let body = AniListGraphQLBodyWithVars(
-            query: query,
-            variables: ["userId": .int(userID)]
-        )
-        let endpoint = try Endpoint(
-            method: .post,
-            path: "",
-            headers: headers(accessToken: accessToken)
-        ).jsonBody(body)
-        let response: AniListGraphQLResponse<AniListPlanningData> =
-            try await http.decode(
-                AniListGraphQLResponse<AniListPlanningData>.self,
-                from: endpoint,
-                baseURL: baseURL
+        let perPage = 50
+        let maximumPages = 1_000
+        var pageNumber = 1
+        var entries: [AniListPlanningEntry] = []
+        var seenMediaIDs: Set<Int> = []
+
+        while pageNumber <= maximumPages {
+            let body = AniListGraphQLBodyWithVars(
+                query: query,
+                variables: [
+                    "userId": .int(userID),
+                    "page": .int(pageNumber),
+                    "perPage": .int(perPage),
+                ]
             )
-        if let errors = response.errors, !errors.isEmpty {
-            throw AppError.unknown("AniList: \(errors.first?.message ?? "unknown error")")
+            let endpoint = try Endpoint(
+                method: .post,
+                path: "",
+                headers: headers(accessToken: accessToken)
+            ).jsonBody(body)
+            let response: AniListGraphQLResponse<AniListPlanningData> =
+                try await http.decode(
+                    AniListGraphQLResponse<AniListPlanningData>.self,
+                    from: endpoint,
+                    baseURL: baseURL
+                )
+            if let errors = response.errors, !errors.isEmpty {
+                throw AppError.unknown(
+                    "AniList: \(errors.first?.message ?? "unknown error")"
+                )
+            }
+            guard let page = response.data?.Page else {
+                throw AppError.decoding
+            }
+            for entry in page.mediaList {
+                guard seenMediaIDs.insert(entry.media.id).inserted else {
+                    throw WatchlistDestinationError.transient
+                }
+                entries.append(entry)
+            }
+            guard page.pageInfo.hasNextPage else { return entries }
+            pageNumber += 1
         }
-        return (response.data?.MediaListCollection?.lists ?? [])
-            .flatMap { $0.entries ?? [] }
+        throw WatchlistDestinationError.transient
     }
 
     /// Removes the viewer's list entry for `mediaId`.

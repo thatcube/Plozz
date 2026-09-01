@@ -47,6 +47,11 @@ public protocol MediaItemActionHandling: AnyObject {
     /// this turns true, last session's Home snapshot is the more complete truth.
     func isDurableWatchlistPresentationReady() -> Bool
 
+    /// Exact number of slots in a native refresh whose identity is known but
+    /// whose library ownership is still resolving. `nil` when no refresh is in
+    /// that phase.
+    func durableWatchlistLoadingTargetCount() -> Int?
+
     /// Rebuilds authenticated artwork URLs for owned watchlist items.
     ///
     /// Persisted Home/native-watchlist state must not contain credentials, so a
@@ -69,6 +74,7 @@ public extension MediaItemActionHandling {
         candidates.filter(\.isFavorite)
     }
     func isDurableWatchlistPresentationReady() -> Bool { true }
+    func durableWatchlistLoadingTargetCount() -> Int? { nil }
     func rehydratePersistedArtwork(_ items: [MediaItem]) -> [MediaItem] {
         items
     }
@@ -114,6 +120,12 @@ public extension Notification.Name {
     /// meantime.
     static let universalWatchlistCacheDidLoad =
         Notification.Name("PlozzUniversalWatchlistCacheDidLoad")
+
+    /// Posted after a native read has resolved complete membership and ordering,
+    /// before slower per-title ownership checks finish. Existing cards stay put;
+    /// Home and Watchlist add skeleton slots for the unresolved remainder.
+    static let universalWatchlistLoadingProgressDidChange =
+        Notification.Name("PlozzUniversalWatchlistLoadingProgressDidChange")
 
     /// Posted when a watchlist press is accepted, before the durable write.
     ///

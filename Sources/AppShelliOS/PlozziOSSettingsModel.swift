@@ -9,6 +9,7 @@ final class PlozziOSSettingsModel {
     let cardStyle: CardStyleSettingsModel
     let density: UIDensitySettingsModel
     let watchIndicator: WatchStatusIndicatorSettingsModel
+    let navigation: NavigationStyleSettingsModel
     let playback: PlaybackSettingsModel
     let subtitleBehavior: SubtitleBehaviorModel
     let subtitlePolicy: SubtitlePolicyModel
@@ -38,6 +39,10 @@ final class PlozziOSSettingsModel {
         )
         watchIndicator = WatchStatusIndicatorSettingsModel(
             store: WatchStatusIndicatorSettingsStore(namespace: namespace)
+        )
+        navigation = NavigationStyleSettingsModel(
+            store: NavigationStyleSettingsStore(namespace: namespace),
+            layoutStore: NavigationLibraryLayoutStore(namespace: namespace)
         )
         playback = PlaybackSettingsModel(
             store: PlaybackSettingsStore(namespace: namespace)

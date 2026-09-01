@@ -21,12 +21,25 @@ private final class PlozziOSHomeHeroPullModel {
     }
 }
 
+struct PlozziOSHomeLoadID: Equatable {
+    let visibility: HomeLibraryVisibility
+    let viewModelID: ObjectIdentifier
+
+    init(
+        visibility: HomeLibraryVisibility,
+        viewModel: HomeViewModel
+    ) {
+        self.visibility = visibility
+        viewModelID = ObjectIdentifier(viewModel)
+    }
+}
+
 struct PlozziOSHomeView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.plozziOSHeroContainerHeight) private var heroContainerHeight
     @Environment(HeroTrailerController.self) private var trailerController
-    @State private var viewModel: HomeViewModel
+    private let viewModel: HomeViewModel
     @State private var featuredItems: [MediaItem] = []
     @State private var heroItems: [MediaItem] = []
     /// The slides on screen — the fronted one, plus whatever a committed swipe is
@@ -68,6 +81,7 @@ struct PlozziOSHomeView: View {
 
     init(
         appModel: PlozziOSAppModel,
+        viewModel: HomeViewModel,
         onAddServer: @escaping () -> Void,
         onShowSettings: @escaping () -> Void
     ) {
@@ -87,32 +101,14 @@ struct PlozziOSHomeView: View {
             },
             ratingsProvider: RatingsServiceFactory.make()
         )
-        _viewModel = State(
-            initialValue: HomeViewModel(
-                accounts: appModel.accountsProviders.homeAccounts,
-                contentStore: HomeContentStore(
-                    namespace: appModel.profiles.activeNamespace
-                ),
-                identitySources: appModel.identityIndex.identitySourcesProvider,
-                currentVisibility: { [weak appModel] in
-                    appModel?.settings.homeVisibility.visibility ?? .default
-                },
-                pendingWatchMutations: { [weak appModel] in
-                    await appModel?.pendingWatchMutations() ?? []
-                },
-                recentlyAppliedRecency: { [weak appModel] in
-                    await appModel?.appliedWatchRecency() ?? [:]
-                },
-                mediaItemActionHandler: appModel.mediaItemActionHandler
-            )
-        )
+        self.viewModel = viewModel
         // Paint last session's hero in the first frame instead of a skeleton. It
         // holds no Continue Watching slides (see `HeroCurationResult.durableItems`),
         // and the fresh curation folds into it rather than replacing it, so the
         // slides on screen keep their slots when it lands. Same policy as tvOS.
         let settings = appModel.settings.hero.settings
         if settings.isActive,
-           let seed = _viewModel.wrappedValue.cachedHeroItems(for: settings) {
+           let seed = viewModel.cachedHeroItems(for: settings) {
             _heroItems = State(initialValue: seed)
             _heroCuratedConfiguration = State(
                 initialValue: HeroConfigurationKey(settings: settings)
@@ -176,7 +172,12 @@ struct PlozziOSHomeView: View {
                 PlozziOSSettingsAvatarButton(size: 36, action: onShowSettings)
             }
         }
-        .task(id: appModel.settings.homeVisibility.visibility) {
+        .task(
+            id: PlozziOSHomeLoadID(
+                visibility: appModel.settings.homeVisibility.visibility,
+                viewModel: viewModel
+            )
+        ) {
             await viewModel.loadIfNeeded(
                 for: appModel.settings.homeVisibility.visibility
             )
@@ -225,6 +226,13 @@ struct PlozziOSHomeView: View {
             // acknowledgement. Fold last-known ownership immediately rather than
             // waiting for the interaction debounce used above.
             viewModel.refreshDurableWatchlist()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistLoadingProgressDidChange
+            )
+        ) { _ in
+            viewModel.refreshWatchlistLoadingProgress()
         }
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             viewModel.scheduleReenrich()
@@ -381,6 +389,7 @@ struct PlozziOSHomeView: View {
                         PlozziOSHomeRowView(
                             row: row,
                             appModel: appModel,
+                            viewModel: viewModel,
                             watchlistIntentRevision: watchlistIntentRevision,
                             watchlistLoadingPlaceholderCount:
                                 viewModel.watchlistLoadingPlaceholderCount
@@ -391,6 +400,7 @@ struct PlozziOSHomeView: View {
                         PlozziOSHomeRowView(
                             row: row,
                             appModel: appModel,
+                            viewModel: viewModel,
                             watchlistIntentRevision: watchlistIntentRevision,
                             watchlistLoadingPlaceholderCount:
                                 viewModel.watchlistLoadingPlaceholderCount
@@ -424,7 +434,9 @@ struct PlozziOSHomeView: View {
                                     style: section.style == .landscape
                                         ? .landscape
                                         : .poster,
-                                    appModel: appModel
+                                    appModel: appModel,
+                                    onNavigationInteraction:
+                                        viewModel.noteHomeNavigationInteraction
                                 )
                             }
                         }
@@ -435,6 +447,7 @@ struct PlozziOSHomeView: View {
                         PlozziOSHomeRowView(
                             row: libraries,
                             appModel: appModel,
+                            viewModel: viewModel,
                             watchlistIntentRevision: watchlistIntentRevision,
                             watchlistLoadingPlaceholderCount: 0
                         )
@@ -1850,6 +1863,7 @@ private struct PlozziOSHomeRowView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let row: HomeRow
     let appModel: PlozziOSAppModel
+    let viewModel: HomeViewModel
     let watchlistIntentRevision: Int
     let watchlistLoadingPlaceholderCount: Int
 
@@ -1898,7 +1912,9 @@ private struct PlozziOSHomeRowView: View {
                     // Continue Watching identifies cards by show art + logo unless
                     // the user has turned that off in Customize Home.
                     showsSeriesArtwork: row.kind == .continueWatching
-                        && appModel.settings.homeVisibility.continueWatchingShowsSeriesArtwork
+                        && appModel.settings.homeVisibility.continueWatchingShowsSeriesArtwork,
+                    onNavigationInteraction:
+                        viewModel.noteHomeNavigationInteraction
                 )
             }
         }
@@ -1980,6 +1996,7 @@ private struct PlozziOSHomeMediaRail: View {
     /// Identify each card by its show — artwork plus logo — instead of by the
     /// item's own thumbnail.
     var showsSeriesArtwork: Bool = false
+    var onNavigationInteraction: () -> Void = {}
     @State private var prefetchedIDs: Set<String> = []
     @State private var prefetchedPreviewIDs: Set<String> = []
     @State private var lastArtworkPrefetchIndex: Int?
@@ -2003,30 +2020,35 @@ private struct PlozziOSHomeMediaRail: View {
                         cardStyle: cardStyle
                     )
                 ) {
-                    ForEach(items, id: \.stablePresentationID) { item in
-                        PlozziOSHomeMediaCard(
-                            item: item,
-                            isLandscape: style == .landscape,
-                            interaction: interaction,
-                            showsSeriesArtwork: showsSeriesArtwork,
-                            isPendingRemoval: pendingRemovalIDs.contains(
-                                item.stablePresentationID
-                            ),
-                            provider: provider(for: item)
-                        )
-                        .frame(
-                            width: metrics.cardSlotWidth(
-                                for: style,
-                                cardStyle: cardStyle,
-                                showsSeriesArtwork: showsSeriesArtwork
+                    ForEach(MediaRowView.presentationElements(
+                        items: items,
+                        loadingPlaceholderCount: loadingPlaceholderCount
+                    )) { element in
+                        switch element {
+                        case .item(let item):
+                            PlozziOSHomeMediaCard(
+                                item: item,
+                                isLandscape: style == .landscape,
+                                interaction: interaction,
+                                showsSeriesArtwork: showsSeriesArtwork,
+                                isPendingRemoval: pendingRemovalIDs.contains(
+                                    item.stablePresentationID
+                                ),
+                                provider: provider(for: item)
                             )
-                        )
-                        .onAppear {
-                            if prefetchesArtwork {
-                                prefetchArtwork(around: item)
+                            .frame(
+                                width: metrics.cardSlotWidth(
+                                    for: style,
+                                    cardStyle: cardStyle,
+                                    showsSeriesArtwork: showsSeriesArtwork
+                                )
+                            )
+                            .onAppear {
+                                if prefetchesArtwork {
+                                    prefetchArtwork(around: item)
+                                }
                             }
-                        }
-                        ForEach(0..<loadingPlaceholderCount, id: \.self) { _ in
+                        case .loadingPlaceholder:
                             PlozziOSPosterCard(
                                 item: nil,
                                 style: style,
@@ -2050,11 +2072,17 @@ private struct PlozziOSHomeMediaRail: View {
             )
             .contentMargins(.vertical, 10, for: .scrollContent)
             .scrollIndicators(.hidden)
+            .onScrollGeometryChange(for: CGFloat.self) {
+                $0.contentOffset.x
+            } action: { oldOffset, newOffset in
+                guard oldOffset != newOffset else { return }
+                onNavigationInteraction()
+            }
         }
         .task(id: artworkPrefetchIdentity) {
             guard prefetchesArtwork else { return }
             resetArtworkPrefetch()
-            if let first = items.first {
+            if let first = MediaRowView.uniqued(items).first {
                 prefetchArtwork(around: first)
             }
         }
@@ -2077,7 +2105,9 @@ private struct PlozziOSHomeMediaRail: View {
             prefetchesArtwork ? "prefetch" : "on-demand",
             appModel.settings.spoilers.settings.isEnabled ? "spoilers" : "visible",
             appModel.settings.spoilers.settings.mode.rawValue,
-            items.map(\.stablePresentationID).joined(separator: "|"),
+            MediaRowView.uniqued(items)
+                .map(\.stablePresentationID)
+                .joined(separator: "|"),
         ].joined(separator: "\n")
     }
 
@@ -2092,6 +2122,7 @@ private struct PlozziOSHomeMediaRail: View {
     /// Mirrors tvOS rail look-ahead. UIKit's lazy stack only creates nearby cards;
     /// this warms the next window before touch scrolling realizes those views.
     private func prefetchArtwork(around item: MediaItem) {
+        let items = MediaRowView.uniqued(self.items)
         guard let index = items.firstIndex(where: {
             $0.stablePresentationID == item.stablePresentationID
         }) else {

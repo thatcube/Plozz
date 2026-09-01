@@ -44,7 +44,7 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         )
     }
 
-    func testDurableAdditionAppendsWithoutMovingExistingCards() {
+    func testDurableAdditionUsesAuthoritativeOrder() {
         let older = MediaItem(
             id: "older",
             title: "Older",
@@ -73,10 +73,10 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         guard case .loaded(let content) = model.state else {
             return XCTFail("Expected loaded content")
         }
-        XCTAssertEqual(content.watchlist.map(\.title), ["Older", "New"])
+        XCTAssertEqual(content.watchlist.map(\.title), ["New", "Older"])
         XCTAssertEqual(
             content.watchlist.map(\.stablePresentationID),
-            [older.stablePresentationID, newlyAdded.stablePresentationID]
+            [newlyAdded.stablePresentationID, older.stablePresentationID]
         )
     }
 
@@ -174,7 +174,7 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         XCTAssertEqual(afterCache.map(\.id), freshlyFetched.map(\.id))
     }
 
-    func testAuthoritativeRefreshPreservesExistingPositionsAndAppendsNewItems() {
+    func testAuthoritativeRefreshAppliesServerOrderAfterInteractionSettles() {
         let first = MediaItem(
             id: "first",
             title: "First",
@@ -199,7 +199,7 @@ final class UniversalWatchlistHomeTests: XCTestCase {
             authoritative: [new, second, first]
         )
 
-        XCTAssertEqual(stable.map(\.id), ["first", "second", "new"])
+        XCTAssertEqual(stable.map(\.id), ["new", "second", "first"])
     }
 
     func testAuthoritativeRefreshDeduplicatesStablePresentationIDs() {
@@ -225,6 +225,99 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         XCTAssertEqual(stable.map(\.id), ["refreshed"])
     }
 
+    func testAuthoritativeRefreshWaitsForNavigationToSettle() async {
+        let first = MediaItem(
+            id: "first",
+            title: "First",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let second = MediaItem(
+            id: "second",
+            title: "Second",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let handler = UniversalWatchlistHomeHandler(items: [first, second])
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: UniversalWatchlistHomeStore(
+                content: .init(watchlist: [first, second])
+            ),
+            mediaItemActionHandler: handler
+        )
+
+        handler.items = [second, first]
+        model.noteHomeNavigationInteraction()
+        model.refreshDurableWatchlist()
+
+        guard case .loaded(let browsing) = model.state else {
+            return XCTFail("Expected loaded content")
+        }
+        XCTAssertEqual(browsing.watchlist.map(\.id), ["first", "second"])
+
+        try? await Task.sleep(for: .milliseconds(450))
+
+        guard case .loaded(let settled) = model.state else {
+            return XCTFail("Expected loaded content")
+        }
+        XCTAssertEqual(settled.watchlist.map(\.id), ["second", "first"])
+    }
+
+    func testNewDurableChangeInvalidatesDeferredAuthoritativeSnapshot() async {
+        let first = MediaItem(
+            id: "first",
+            title: "First",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let second = MediaItem(
+            id: "second",
+            title: "Second",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let handler = UniversalWatchlistHomeHandler(items: [second, first])
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: UniversalWatchlistHomeStore(
+                content: .init(watchlist: [first, second])
+            ),
+            mediaItemActionHandler: handler
+        )
+
+        model.noteHomeNavigationInteraction()
+        model.refreshDurableWatchlist()
+        handler.items = [first]
+        model.scheduleDurableWatchlistRefresh()
+        try? await Task.sleep(for: .milliseconds(450))
+
+        guard case .loaded(let settled) = model.state else {
+            return XCTFail("Expected loaded content")
+        }
+        XCTAssertEqual(settled.watchlist.map(\.id), ["first"])
+    }
+
+    func testResolvedMembershipShowsSkeletonsWhileOwnershipCatchesUp() {
+        let visible = MediaItem(
+            id: "visible",
+            title: "Visible",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let handler = UniversalWatchlistHomeHandler(items: [visible])
+        handler.loadingTarget = 3
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: UniversalWatchlistHomeStore(
+                content: .init(watchlist: [visible])
+            ),
+            mediaItemActionHandler: handler
+        )
+
+        XCTAssertEqual(model.watchlistLoadingPlaceholderCount, 2)
+    }
+
     func testReadyDurableWatchlistCanAuthoritativelyClearLastKnownRow() {
         let cached = MediaItem(
             id: "removed",
@@ -243,7 +336,7 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         XCTAssertTrue(resolved.isEmpty)
     }
 
-    func testProvisionalSavePreservesUnresolvedCardsAndUpdatesVisibleCards() {
+    func testProvisionalSavePreservesUnresolvedCardsAndUpdatesVisibleCards() async {
         let unresolved = MediaItem(
             id: "unresolved",
             title: "Unresolved",
@@ -274,10 +367,40 @@ final class UniversalWatchlistHomeTests: XCTestCase {
         model.applyWatchedState(
             MediaItemMutation(itemIDs: [owned.id], played: true)
         )
+        for _ in 0..<100 where store.load()?.watchlist.last?.isPlayed != true {
+            await Task.yield()
+        }
 
         let saved = store.load()?.watchlist
         XCTAssertEqual(saved?.map(\.id), [unresolved.id, owned.id])
         XCTAssertEqual(saved?.last?.isPlayed, true)
+    }
+
+    func testSnapshotPersistenceRunsOffTheMainThread() async {
+        let item = MediaItem(
+            id: "owned",
+            title: "Owned",
+            kind: .movie,
+            locallyValidatedPlayableSource: true
+        )
+        let store = ThreadRecordingHomeStore(
+            content: .init(watchlist: [item])
+        )
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: store,
+            mediaItemActionHandler:
+                UniversalWatchlistHomeHandler(items: [item])
+        )
+
+        model.applyWatchedState(
+            MediaItemMutation(itemIDs: [item.id], played: true)
+        )
+        for _ in 0..<100 where store.saveThreadWasMain == nil {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(store.saveThreadWasMain, false)
     }
 
     func testFirstPaintRehydratesOwnedArtworkBeforePublishing() {
@@ -354,6 +477,7 @@ final class UniversalWatchlistHomeTests: XCTestCase {
 private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
     var items: [MediaItem]
     var ready: Bool
+    var loadingTarget: Int?
     var rehydrate: ([MediaItem]) -> [MediaItem]
     private(set) var resolveCallCount = 0
     init(
@@ -379,6 +503,7 @@ private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
         return items
     }
     func isDurableWatchlistPresentationReady() -> Bool { ready }
+    func durableWatchlistLoadingTargetCount() -> Int? { loadingTarget }
     func rehydratePersistedArtwork(_ items: [MediaItem]) -> [MediaItem] {
         rehydrate(items)
     }
@@ -411,6 +536,40 @@ private final class UniversalWatchlistHomeStore:
         if clearsOnRequest { content = nil }
         lock.unlock()
     }
+    func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? { nil }
+    func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {}
+    func clearHero() {}
+}
+
+private final class ThreadRecordingHomeStore:
+    HomeContentStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var content: HomeViewModel.Content?
+    private var recordedSaveThreadWasMain: Bool?
+
+    init(content: HomeViewModel.Content?) {
+        self.content = content
+    }
+
+    var saveThreadWasMain: Bool? {
+        lock.withLock { recordedSaveThreadWasMain }
+    }
+
+    func load() -> HomeViewModel.Content? {
+        lock.withLock { content }
+    }
+
+    func save(_ content: HomeViewModel.Content) {
+        lock.withLock {
+            self.content = content
+            recordedSaveThreadWasMain = Thread.isMainThread
+        }
+    }
+
+    func clear() {
+        lock.withLock { content = nil }
+    }
+
     func loadHero(for key: HeroConfigurationKey) -> [MediaItem]? { nil }
     func saveHero(_ items: [MediaItem], for key: HeroConfigurationKey) {}
     func clearHero() {}

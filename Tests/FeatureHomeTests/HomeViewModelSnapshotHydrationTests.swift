@@ -167,6 +167,9 @@ final class HomeViewModelSnapshotHydrationTests: XCTestCase {
 
         // No cache ⇒ a normal (loud) load; it should persist the fresh content.
         await vm.loadIfNeeded(for: .default)
+        for _ in 0..<100 where store.load() == nil {
+            await Task.yield()
+        }
 
         XCTAssertEqual(store.load()?.continueWatching.map(\.id), ["freshA"], "Fresh content is cached for next launch")
     }

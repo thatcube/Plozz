@@ -1,3 +1,16 @@
+public enum WatchlistNavigationPolicy {
+    /// Optional Watchlist chrome may disappear while selected. Required
+    /// destinations are left untouched; only Watchlist falls back to Home.
+    public static func resolvedSelection<Destination: Equatable>(
+        _ selection: Destination,
+        watchlist: Destination,
+        home: Destination,
+        showsWatchlist: Bool
+    ) -> Destination {
+        selection == watchlist && !showsWatchlist ? home : selection
+    }
+}
+
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels

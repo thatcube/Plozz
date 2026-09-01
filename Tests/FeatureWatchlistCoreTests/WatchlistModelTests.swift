@@ -305,6 +305,38 @@ final class WatchlistModelTests: XCTestCase {
         )
     }
 
+    func testMergedTombstoneRetainsNativeReaddSupersession() {
+        let alias = MediaAliasID()
+        let removedAt = Date(timeIntervalSince1970: 100)
+        let supersededAt = Date(timeIntervalSince1970: 200)
+        let snapshot = WatchlistSnapshot(intents: [
+            WatchlistIntent(
+                aliasID: alias,
+                kind: .movie,
+                desiredState: .absent,
+                rank: 0,
+                origin: .local,
+                changedAt: removedAt,
+                metadata: WatchlistIntentMetadata(
+                    lastExplicitRemovalAt: removedAt,
+                    removalSupersededAt: supersededAt
+                )
+            )!,
+            WatchlistIntent(
+                aliasID: alias,
+                kind: .movie,
+                desiredState: .absent,
+                rank: 1,
+                origin: .cloud,
+                changedAt: removedAt.addingTimeInterval(-1)
+            )!
+        ])
+
+        let merged = snapshot.intent(for: alias)
+        XCTAssertEqual(merged?.metadata.removalSupersededAt, supersededAt)
+        XCTAssertFalse(merged?.metadata.suppressesNativePresence ?? true)
+    }
+
     func testSyncCaptureApplyIsByteStableForAddAndTombstone() throws {
         let alias = MediaAliasID()
         let source = WatchlistModel()

@@ -64,7 +64,7 @@ public actor AniListWatchlistDestination:
             userID: userID,
             accessToken: token
         )
-        return entries.compactMap { entry(from: $0) }
+        return try entries.map { try entry(from: $0) }
     }
 
     public func resolve(
@@ -222,8 +222,12 @@ public actor AniListWatchlistDestination:
 
     private func entry(
         from planning: AniListPlanningEntry
-    ) -> WatchlistDestinationEntry? {
-        guard let media = planning.media, let mediaID = media.id else { return nil }
+    ) throws -> WatchlistDestinationEntry {
+        let media = planning.media
+        let mediaID = media.id
+        guard mediaID > 0 else {
+            throw WatchlistDestinationError.transient
+        }
         var externalIDs: [WatchlistExternalID] = []
         if let id = WatchlistExternalID(namespace: .aniList, value: String(mediaID)) {
             externalIDs.append(id)
@@ -236,19 +240,24 @@ public actor AniListWatchlistDestination:
               let binding = WatchlistDestinationBinding(
                 destinationID: id,
                 opaqueValue: "series|\(first.namespace.rawValue)|\(first.value)"
-              ) else { return nil }
+              ) else {
+            throw WatchlistDestinationError.transient
+        }
         // English where the viewer's catalogue would use it, romaji otherwise —
         // this is only a presentation fallback for a title the library has not
         // matched, so the readable one wins.
         let title = media.title?.english ?? media.title?.romaji
-        return WatchlistDestinationEntry(
+        guard let entry = WatchlistDestinationEntry(
             kind: .series,
             externalIDs: externalIDs.sorted(),
             binding: binding,
             presentation: title.map {
                 MediaAliasPresentation(title: $0, year: media.seasonYear)
             }
-        )
+        ) else {
+            throw WatchlistDestinationError.transient
+        }
+        return entry
     }
 
     private static func parse(

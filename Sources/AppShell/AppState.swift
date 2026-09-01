@@ -262,6 +262,9 @@ public final class AppState {
             durableWatchlistPresentationReady: { [unowned self] in
                 self.isUniversalWatchlistPresentationReady
             },
+            durableWatchlistLoadingTarget: { [unowned self] in
+                self.universalWatchlistLoadingTargetCount
+            },
             rehydratePersistedArtworkItems: { [unowned self] items in
                 self.rehydratedPersistedArtwork(items)
             },

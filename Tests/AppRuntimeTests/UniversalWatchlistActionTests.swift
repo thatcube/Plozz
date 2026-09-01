@@ -441,6 +441,7 @@ final class UniversalWatchlistActionTests: XCTestCase {
         let cache = UniversalWatchlistMembershipCache.shared
         let series = MediaAliasID()
         let revision: UInt64 = 4_242
+        let generation = cache.generation
 
         cache.store([series], revision: revision)
         XCTAssertEqual(cache.ids(for: revision), [series])
@@ -448,5 +449,6 @@ final class UniversalWatchlistActionTests: XCTestCase {
         cache.invalidate()
 
         XCTAssertNil(cache.ids(for: revision))
+        XCTAssertEqual(cache.generation, generation &+ 1)
     }
 }

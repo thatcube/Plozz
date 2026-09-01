@@ -100,7 +100,7 @@ enum NavigationRailMetrics {
 ///
 /// Layout, top to bottom:
 /// 1. the active profile's avatar — opens the existing profile switcher;
-/// 2. Search, then Home;
+/// 2. Search, Home, then Watchlist;
 /// 3. the viewer's libraries, in their own arrangement, each with a glyph for what
 ///    it holds (film / TV / anime / photos / mixed), scrolling if there are many;
 /// 4. Settings, **pinned to the bottom** so it is reachable at a glance no matter
@@ -180,6 +180,11 @@ struct NavigationRailView: View {
 
             item(.search, symbol: "magnifyingglass", label: Text(Self.searchTitle))
             item(.home, symbol: "house.fill", label: Text(Self.homeTitle))
+            item(
+                .watchlist,
+                symbol: "bookmark.fill",
+                label: Text(Self.watchlistTitle)
+            )
             if showsMusic {
                 item(.music, symbol: "music.note", label: Text(Self.musicTitle))
             }
@@ -548,6 +553,11 @@ struct NavigationRailView: View {
         "navigationRail.search",
         defaultValue: "Search",
         comment: "Navigation rail destination."
+    )
+    private static let watchlistTitle = LocalizedStringResource(
+        "navigationRail.watchlist",
+        defaultValue: "Watchlist",
+        comment: "Navigation rail destination for the user's universal Watchlist."
     )
     private static let musicTitle = LocalizedStringResource(
         "navigationRail.music",

@@ -8,6 +8,7 @@ import Foundation
 public enum NavigationRailDestination: Hashable, Sendable {
     case home
     case search
+    case watchlist
     case music
     case settings
     /// A single library, addressed by its ``AggregatedLibrary/key``.
@@ -20,6 +21,7 @@ public enum NavigationRailDestination: Hashable, Sendable {
         switch self {
         case .home: return "home"
         case .search: return "search"
+        case .watchlist: return "watchlist"
         case .music: return "music"
         case .settings: return "settings"
         case .allLibraries: return "allLibraries"
@@ -31,6 +33,7 @@ public enum NavigationRailDestination: Hashable, Sendable {
         switch storageValue {
         case "home": self = .home
         case "search": self = .search
+        case "watchlist": self = .watchlist
         case "music": self = .music
         case "settings": self = .settings
         case "allLibraries": self = .allLibraries
@@ -114,7 +117,7 @@ public enum NavigationRailPlan {
         hasMusic: Bool
     ) -> NavigationRailDestination {
         switch selection {
-        case .home, .search, .settings:
+        case .home, .search, .watchlist, .settings:
             return selection
         case .music:
             return hasMusic ? .music : .home

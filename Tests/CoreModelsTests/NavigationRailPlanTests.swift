@@ -146,6 +146,10 @@ final class NavigationRailPlanTests: XCTestCase {
             .music
         )
         XCTAssertEqual(
+            NavigationRailPlan.resolvedSelection(.watchlist, entries: [], hasMusic: false),
+            .watchlist
+        )
+        XCTAssertEqual(
             NavigationRailPlan.resolvedSelection(.allLibraries, entries: entries, hasMusic: false),
             .allLibraries
         )
@@ -159,7 +163,8 @@ final class NavigationRailPlanTests: XCTestCase {
 
     func testDestinationStorageValueRoundTrips() {
         let cases: [NavigationRailDestination] = [
-            .home, .search, .music, .settings, .allLibraries, .library("acct:lib:with:colons")
+            .home, .search, .watchlist, .music, .settings, .allLibraries,
+            .library("acct:lib:with:colons")
         ]
         for destination in cases {
             XCTAssertEqual(

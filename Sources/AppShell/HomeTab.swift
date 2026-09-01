@@ -33,6 +33,7 @@ import TopShelfKit
 /// drift apart.
 enum HomeTabRoot {
     case home
+    case watchlist
     /// One library's grid.
     case library(MediaLibrary)
     /// The combined grid over every browsable library the profile can see.
@@ -180,14 +181,16 @@ struct HomeTab: View {
         }
     }
 
-    /// The stack's root screen, chosen by ``root``. Home, one library's grid, or the
-    /// combined grid over every library — all three sit under the same set of
+    /// The stack's root screen, chosen by ``root``. Home, Watchlist, one library's
+    /// grid, or the combined grid over every library all sit under the same set of
     /// pushed destinations below.
     @ViewBuilder
     private var rootContent: some View {
         switch root {
         case .home:
             homeRoot
+        case .watchlist:
+            watchlistRoot
         case let .library(library):
             libraryBrowse(for: library)
         case let .allLibraries(libraries):
@@ -195,27 +198,31 @@ struct HomeTab: View {
         }
     }
 
+    private var sharedHomeViewModel: HomeViewModel {
+        runtime.homeViewModel.value(forKey: runtime.scopeKey) {
+            HomeViewModel(
+                accounts: accounts,
+                layoutStore: homeLayoutStore,
+                contentStore: homeContentStore,
+                identitySources: identitySources,
+                currentVisibility: { homeVisibility.visibility },
+                pendingWatchMutations: pendingWatchMutations,
+                recentlyAppliedRecency: appliedWatchRecency,
+                mediaItemActionHandler: mediaItemActionHandler,
+                contentPublisher: { continueWatching, latest in
+                    await TopShelfPublisher.publish(
+                        continueWatching: continueWatching,
+                        latest: latest,
+                        locale: locale
+                    )
+                }
+            )
+        }
+    }
+
     private var homeRoot: some View {
             HomeView(
-                viewModel: runtime.homeViewModel.value(forKey: runtime.scopeKey) {
-                    HomeViewModel(
-                        accounts: accounts,
-                        layoutStore: homeLayoutStore,
-                        contentStore: homeContentStore,
-                        identitySources: identitySources,
-                        currentVisibility: { homeVisibility.visibility },
-                        pendingWatchMutations: pendingWatchMutations,
-                        recentlyAppliedRecency: appliedWatchRecency,
-                        mediaItemActionHandler: mediaItemActionHandler,
-                        contentPublisher: { continueWatching, latest in
-                            await TopShelfPublisher.publish(
-                                continueWatching: continueWatching,
-                                latest: latest,
-                                locale: locale
-                            )
-                        }
-                    )
-                },
+                viewModel: sharedHomeViewModel,
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 heroSettings: heroSettings,
@@ -301,6 +308,15 @@ struct HomeTab: View {
                 configuredServerCount: configuredServerCount,
                 enabledServerCount: accounts.count
             )
+    }
+
+    private var watchlistRoot: some View {
+        WatchlistBrowseView(
+            viewModel: sharedHomeViewModel,
+            visibility: homeVisibility.visibility,
+            spoilerSettings: spoilerSettings,
+            onSelect: { navigate($0) }
+        )
     }
 
     /// One library's paged grid. Shared by the pushed `MediaLibrary` destination

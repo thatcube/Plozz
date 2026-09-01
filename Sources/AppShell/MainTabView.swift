@@ -80,7 +80,7 @@ struct MainTabView: View {
             switch tab {
             case .home:
                 switch activeLibraryNavigationDestination {
-                case .home, .library, .allLibraries: return true
+                case .home, .watchlist, .library, .allLibraries: return true
                 case .search, .music, .settings: return false
                 }
             case .search: return activeLibraryNavigationDestination == .search
@@ -107,6 +107,14 @@ struct MainTabView: View {
         RootNavigationTabLabel(
             title: Text("Search"),
             systemImage: "magnifyingglass",
+            usesCompactSidebarText: navigationStyle == .sidebar
+        )
+    }
+
+    private var watchlistTabLabel: some View {
+        RootNavigationTabLabel(
+            title: Text("Watchlist"),
+            systemImage: "bookmark.fill",
             usesCompactSidebarText: navigationStyle == .sidebar
         )
     }
@@ -505,7 +513,7 @@ struct MainTabView: View {
     /// to Home because the compact top bar intentionally has no library tabs.
     private func mainTab(for destination: NavigationRailDestination) -> MainTab {
         switch destination {
-        case .home, .library, .allLibraries: return .home
+        case .home, .watchlist, .library, .allLibraries: return .home
         case .search: return .search
         case .music: return .music
         case .settings: return .settings
@@ -944,6 +952,14 @@ struct MainTabView: View {
                 homeTabLabel
             }
 
+            Tab(value: NativeSidebarDestination.content(.watchlist)) {
+                watchlistTabContent(
+                    isActive: activeLibraryNavigationDestination == .watchlist
+                )
+            } label: {
+                watchlistTabLabel
+            }
+
             Tab(value: NativeSidebarDestination.content(.search)) {
                 searchTabContent
             } label: {
@@ -998,6 +1014,8 @@ struct MainTabView: View {
         switch activeLibraryNavigationDestination {
         case .home:
             homeTabContent()
+        case .watchlist:
+            watchlistTabContent(isActive: true)
         case .search:
             searchTabContent
         case .music:
@@ -1013,6 +1031,14 @@ struct MainTabView: View {
                 homeTabContent()
             }
         }
+    }
+
+    private func watchlistTabContent(isActive: Bool) -> some View {
+        homeTabContent(
+            root: .watchlist,
+            id: "\(homeScopeKey)|watchlist",
+            isActive: isActive
+        )
     }
 
     /// One library root shared by custom rail and native sidebar.

@@ -22,6 +22,7 @@ struct PlozziOSPosterCard: View {
     /// Caller-owned context cue drawn on the artwork (e.g. "Continues" on a
     /// Related entry that continues the story you're looking at).
     var statusCue: LocalizedStringResource?
+    var isPendingRemoval: Bool = false
 
     var body: some View {
         PosterCardView(
@@ -34,6 +35,7 @@ struct PlozziOSPosterCard: View {
             showsResumeChip: showsResumeChip,
             downloadState: downloadState,
             showsActionsMenu: showsActionsMenu,
+            isPendingRemoval: isPendingRemoval,
             action: {}
         )
         .redacted(reason: item == nil ? .placeholder : [])

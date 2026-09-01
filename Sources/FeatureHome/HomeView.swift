@@ -178,6 +178,8 @@ public struct HomeView: View {
     /// the top — the Apple TV recede. Every lift is expressed as a cheap `.offset`
     /// while the rows below remain vertically lazy.
     @State private var heroRecedeModel = HomeHeroRecedeModel()
+    /// Invalidates only the cheap Watchlist card projection when a press is accepted.
+    @State private var watchlistIntentRevision = 0
 
     /// How long the content/row recede lifts take. Slow and cinematic — the
     /// buttons and paging dots ease up rather than snapping. Because the lifts are
@@ -202,6 +204,7 @@ public struct HomeView: View {
     /// carry the same gutter as every media row.
     @Environment(\.plozzNavigationContentInset) private var navigationContentInset
     @Environment(\.plozzPinnedSidebarActive) private var pinnedSidebarActive
+    @Environment(\.mediaItemActionHandler) private var mediaItemActionHandler
 
     public init(
         viewModel: HomeViewModel,
@@ -639,6 +642,13 @@ public struct HomeView: View {
         }
         .onReceive(
             NotificationCenter.default.publisher(
+                for: .watchlistIntentDidChange
+            )
+        ) { _ in
+            watchlistIntentRevision &+= 1
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
                 for: .universalWatchlistCacheDidLoad
             )
         ) { _ in
@@ -1004,11 +1014,37 @@ public struct HomeView: View {
         switch row.kind {
         case .continueWatching:
             MediaRowView(title: Text(row.title), items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, showsSeriesArtwork: visibility.continueWatchingShowsSeriesArtwork, playsOnSelect: true, onSelect: onPlayItem)
-        case .watchlist, .recentlyAdded:
+        case .watchlist:
+            MediaRowView(
+                title: Text(row.title),
+                items: row.items,
+                style: posterStyle(row.style),
+                spoilerSettings: spoilerSettings,
+                pendingRemovalIDs: pendingWatchlistRemovalIDs(
+                    for: row.items,
+                    revision: watchlistIntentRevision
+                ),
+                onSelect: onSelectItem
+            )
+        case .recentlyAdded:
             MediaRowView(title: Text(row.title), items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onSelectItem)
         case .libraries:
             librariesRow(row.libraries)
         }
+    }
+
+    /// A card still present in the durable row but no longer considered watchlisted
+    /// is the exact stale-presentation window the removal treatment needs to cover.
+    private func pendingWatchlistRemovalIDs(
+        for items: [MediaItem],
+        revision _: Int
+    ) -> Set<String> {
+        guard let mediaItemActionHandler else { return [] }
+        return Set(
+            items.lazy
+                .filter { !mediaItemActionHandler.isWatchlisted($0) }
+                .map(\.stablePresentationID)
+        )
     }
 
     /// Maps the SwiftUI-free `HomeRowStyle` back to the concrete card style.

@@ -120,6 +120,8 @@ public struct MediaRowView: View {
     /// marks sequels/spin-offs as "Continues"). The row owns card construction,
     /// so callers need this seam rather than rebuilding the whole rail.
     private let statusCue: ((MediaItem) -> LocalizedStringResource?)?
+    /// Cards retained by a stale Watchlist row after their removal was accepted.
+    private let pendingRemovalIDs: Set<String>
     /// Stable lookup tables so focus/prefetch hot paths avoid repeated linear scans.
     private let itemIDSet: Set<String>
     private let itemIndexByID: [String: Int]
@@ -181,6 +183,7 @@ public struct MediaRowView: View {
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
+        pendingRemovalIDs: Set<String> = [],
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -200,6 +203,7 @@ public struct MediaRowView: View {
             onFocusEntered: onFocusEntered,
             onFocusChange: onFocusChange,
             statusCue: statusCue,
+            pendingRemovalIDs: pendingRemovalIDs,
             playsOnSelect: playsOnSelect,
             onSelect: onSelect
         )
@@ -221,6 +225,7 @@ public struct MediaRowView: View {
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
+        pendingRemovalIDs: Set<String> = [],
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -249,6 +254,7 @@ public struct MediaRowView: View {
         self.onFocusEntered = onFocusEntered
         self.onFocusChange = onFocusChange
         self.statusCue = statusCue
+        self.pendingRemovalIDs = pendingRemovalIDs
         self.playsOnSelect = playsOnSelect
         self.onSelect = onSelect
         // Every derived table is built from the DEDUPED array, never from the
@@ -549,7 +555,10 @@ public struct MediaRowView: View {
                     spoilerSettings: spoilerSettings,
                     showsSeriesArtwork: showsSeriesArtwork,
                     statusCue: statusCue?(item),
-                    playsOnSelect: playsOnSelect
+                    playsOnSelect: playsOnSelect,
+                    isPendingRemoval: pendingRemovalIDs.contains(
+                        item.stablePresentationID
+                    )
                 ) { onSelect(item) },
                 for: item
             )
@@ -561,7 +570,10 @@ public struct MediaRowView: View {
                     spoilerSettings: spoilerSettings,
                     showsSeriesArtwork: showsSeriesArtwork,
                     statusCue: statusCue?(item),
-                    playsOnSelect: playsOnSelect
+                    playsOnSelect: playsOnSelect,
+                    isPendingRemoval: pendingRemovalIDs.contains(
+                        item.stablePresentationID
+                    )
                 ) { onSelect(item) },
                 for: item
             )

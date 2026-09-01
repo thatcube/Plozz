@@ -48,6 +48,8 @@ public struct PosterCardView: View {
     /// Draws the visible "…" actions menu on the artwork. Touch surfaces opt in;
     /// tvOS leaves it off because press-and-hold is already discoverable there.
     private let showsActionsMenu: Bool
+    /// Keeps a Watchlist card visibly in flight while its durable row catches up.
+    private let isPendingRemoval: Bool
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -84,6 +86,7 @@ public struct PosterCardView: View {
         showsResumeChip: Bool = false,
         downloadState: MediaDownloadBadgeState? = nil,
         showsActionsMenu: Bool = false,
+        isPendingRemoval: Bool = false,
         action: @escaping () -> Void
     ) {
         self.item = item
@@ -97,6 +100,7 @@ public struct PosterCardView: View {
         self.showsResumeChipOverride = showsResumeChip
         self.downloadState = downloadState
         self.showsActionsMenu = showsActionsMenu
+        self.isPendingRemoval = isPendingRemoval
         self.action = action
     }
 
@@ -209,6 +213,7 @@ public struct PosterCardView: View {
                     )
                 }
                 .overlay { resumeChip }
+                .overlay { pendingRemovalOverlay }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
@@ -256,6 +261,7 @@ public struct PosterCardView: View {
                     )
                 }
                 .overlay { resumeChip }
+                .overlay { pendingRemovalOverlay }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
@@ -349,6 +355,7 @@ public struct PosterCardView: View {
                 )
             }
             .overlay { resumeChip }
+            .overlay { pendingRemovalOverlay }
             .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
             .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
             .plozzFocusHalo(
@@ -356,6 +363,31 @@ public struct PosterCardView: View {
                 focusScale: borderlessFocusScale,
                 isFocused: isFocused
             )
+    }
+
+    @ViewBuilder
+    private var pendingRemovalOverlay: some View {
+        if isPendingRemoval {
+            ZStack {
+                Color.black.opacity(0.76)
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                    Text(
+                        LocalizedStringResource(
+                            "watchlist.status.removing",
+                            defaultValue: "Removing…",
+                            comment: "Status shown over dimmed artwork while a title is being removed from the Watchlist."
+                        )
+                    )
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                }
+            }
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
     }
 
     /// Artwork↔caption gap for a borderless card. The slot is **always** reserved

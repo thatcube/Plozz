@@ -192,7 +192,7 @@ final class UniversalWatchlistActionTests: XCTestCase {
 
         XCTAssertEqual(
             feedback,
-            ["Added to Watchlist", "Removed from Watchlist"]
+            ["Added to Watchlist", "Removing from Watchlist…"]
         )
         XCTAssertEqual(
             events,
@@ -248,7 +248,7 @@ final class UniversalWatchlistActionTests: XCTestCase {
             feedback,
             [
                 "Added to Watchlist",
-                "Removed from Watchlist",
+                "Removing from Watchlist…",
                 "Couldn't update Watchlist",
             ]
         )

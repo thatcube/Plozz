@@ -572,9 +572,9 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         return (
             "bookmark.slash",
             LocalizedStringResource(
-                "watchlist.feedback.removed",
-                defaultValue: "Removed from Watchlist",
-                comment: "Transient confirmation after a title is removed locally from the user's Watchlist."
+                "watchlist.feedback.removing",
+                defaultValue: "Removing from Watchlist…",
+                comment: "Transient acknowledgement shown when removal from the Watchlist begins."
             )
         )
     }

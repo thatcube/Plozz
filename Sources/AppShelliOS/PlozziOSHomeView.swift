@@ -60,6 +60,7 @@ struct PlozziOSHomeView: View {
     @State private var heroRequestConfirmItem: MediaItem?
     @State private var heroRequestConfirmSeasons: [Int]?
     @State private var heroRequestError: LocalizedStringResource?
+    @State private var watchlistIntentRevision = 0
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
     private let onShowSettings: () -> Void
@@ -207,6 +208,13 @@ struct PlozziOSHomeView: View {
             )
         ) { _ in
             viewModel.scheduleDurableWatchlistRefresh()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .watchlistIntentDidChange
+            )
+        ) { _ in
+            watchlistIntentRevision &+= 1
         }
         .onReceive(
             NotificationCenter.default.publisher(
@@ -370,14 +378,16 @@ struct PlozziOSHomeView: View {
                     ForEach(rows) { row in
                         PlozziOSHomeRowView(
                             row: row,
-                            appModel: appModel
+                            appModel: appModel,
+                            watchlistIntentRevision: watchlistIntentRevision
                         )
                     }
                 } else {
                     ForEach(rows.filter { $0.kind != .libraries }) { row in
                         PlozziOSHomeRowView(
                             row: row,
-                            appModel: appModel
+                            appModel: appModel,
+                            watchlistIntentRevision: watchlistIntentRevision
                         )
                     }
                     if content.librarySections.isEmpty {
@@ -418,7 +428,8 @@ struct PlozziOSHomeView: View {
                     }) {
                         PlozziOSHomeRowView(
                             row: libraries,
-                            appModel: appModel
+                            appModel: appModel,
+                            watchlistIntentRevision: watchlistIntentRevision
                         )
                     }
                 }
@@ -1832,6 +1843,7 @@ private struct PlozziOSHomeRowView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let row: HomeRow
     let appModel: PlozziOSAppModel
+    let watchlistIntentRevision: Int
 
     var body: some View {
         Group {
@@ -1871,6 +1883,7 @@ private struct PlozziOSHomeRowView: View {
                     // context menu still reaches the detail page.
                     interaction: row.kind == .continueWatching ? .play : .openDetail,
                     prefetchesArtwork: row.kind == .continueWatching,
+                    pendingRemovalIDs: pendingWatchlistRemovalIDs,
                     // Continue Watching identifies cards by show art + logo unless
                     // the user has turned that off in Customize Home.
                     showsSeriesArtwork: row.kind == .continueWatching
@@ -1878,6 +1891,16 @@ private struct PlozziOSHomeRowView: View {
                 )
             }
         }
+    }
+
+    private var pendingWatchlistRemovalIDs: Set<String> {
+        _ = watchlistIntentRevision
+        guard row.kind == .watchlist else { return [] }
+        return Set(
+            row.items.lazy
+                .filter { !appModel.mediaItemActionHandler.isWatchlisted($0) }
+                .map(\.stablePresentationID)
+        )
     }
 
     private var libraryRow: some View {
@@ -1938,6 +1961,7 @@ private struct PlozziOSHomeMediaRail: View {
     /// more than an ordinary card. Keeping this scoped avoids warming every Home
     /// rail at launch when per-library rows are enabled.
     var prefetchesArtwork: Bool = false
+    var pendingRemovalIDs: Set<String> = []
     /// Identify each card by its show — artwork plus logo — instead of by the
     /// item's own thumbnail.
     var showsSeriesArtwork: Bool = false
@@ -1970,6 +1994,9 @@ private struct PlozziOSHomeMediaRail: View {
                             isLandscape: style == .landscape,
                             interaction: interaction,
                             showsSeriesArtwork: showsSeriesArtwork,
+                            isPendingRemoval: pendingRemovalIDs.contains(
+                                item.stablePresentationID
+                            ),
                             provider: provider(for: item)
                         )
                         .frame(
@@ -2155,6 +2182,7 @@ private struct PlozziOSHomeMediaCard: View {
     let isLandscape: Bool
     var interaction: PlozziOSRailInteraction = .openDetail
     var showsSeriesArtwork: Bool = false
+    var isPendingRemoval: Bool = false
     let provider: (any MediaProvider)?
     @State private var downloadRecord: DownloadedMediaRecord?
     @Environment(\.plozziOSRailPlay) private var railPlay
@@ -2218,7 +2246,8 @@ private struct PlozziOSHomeMediaCard: View {
             // glyph on artwork. Press-and-hold still opens the menu here. The
             // episode cards on a show's page keep their explicit menu, where the
             // per-episode actions have nowhere else to live.
-            showsActionsMenu: false
+            showsActionsMenu: false,
+            isPendingRemoval: isPendingRemoval
         )
         .task(id: "\(item.id)|\(item.selectedVersionID ?? "")") {
             downloadRecord = await appModel.downloads.record(forSelectedVersionOf: item)

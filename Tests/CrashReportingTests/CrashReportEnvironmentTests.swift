@@ -1,67 +1,19 @@
 import XCTest
 @testable import CrashReporting
 
-/// Covers the rule that keeps the maintainer's own testing out of the real-crash
-/// count, and the reporter lifecycle that rule depends on.
+/// Covers automatic build-channel tagging and the reporter lifecycle.
 final class CrashReportEnvironmentTests: XCTestCase {
-    // MARK: - Environment naming
-
-    func testMaintainerDeviceGetsItsOwnEnvironment() {
-        XCTAssertEqual(
-            CrashReportContext.environmentName(base: "testflight", isMaintainerDevice: true),
-            "testflight-dev"
-        )
-        XCTAssertEqual(
-            CrashReportContext.environmentName(base: "production", isMaintainerDevice: true),
-            "production-dev"
-        )
-    }
-
-    /// The whole point: an ordinary tester's build must stay on the plain channel,
-    /// or the separation is meaningless.
-    func testOrdinaryDeviceKeepsThePlainChannel() {
-        XCTAssertEqual(
-            CrashReportContext.environmentName(base: "testflight", isMaintainerDevice: false),
-            "testflight"
-        )
-        XCTAssertEqual(
-            CrashReportContext.environmentName(base: "production", isMaintainerDevice: false),
-            "production"
-        )
-    }
-
-    /// A Debug build is already only ever the maintainer's, so suffixing it would
-    /// give one thing two names and split its history.
-    func testDebugIsNeverSuffixed() {
-        XCTAssertEqual(
-            CrashReportContext.environmentName(base: "debug", isMaintainerDevice: true),
-            "debug"
-        )
-        XCTAssertEqual(
-            CrashReportContext.environmentName(base: "debug", isMaintainerDevice: false),
-            "debug"
-        )
-    }
-
     // MARK: - Context
 
-    func testContextCarriesTheDeviceRoleTag() {
-        let maintainer = CrashReportContext.make(
+    func testContextUsesTheSuppliedBuildChannel() {
+        let context = CrashReportContext.make(
             bundleIdentifier: "com.thatcube.Plozz",
             version: "2026.8.26",
             build: "3322",
             providers: ["Plex"],
-            isMaintainerDevice: true
+            environment: "testflight"
         )
-        XCTAssertEqual(maintainer.deviceRole, "maintainer")
-
-        let user = CrashReportContext.make(
-            bundleIdentifier: "com.thatcube.Plozz",
-            version: "2026.8.26",
-            build: "3322",
-            providers: ["Plex"]
-        )
-        XCTAssertEqual(user.deviceRole, "user")
+        XCTAssertEqual(context.environment, "testflight")
     }
 
     /// The release name is what separates a per-branch sideload from the real app
@@ -71,7 +23,8 @@ final class CrashReportEnvironmentTests: XCTestCase {
             bundleIdentifier: "com.thatcube.Plozz.my-branch",
             version: "2026.8.26",
             build: "3322",
-            providers: []
+            providers: [],
+            environment: "debug"
         )
         XCTAssertEqual(context.releaseName, "com.thatcube.Plozz.my-branch@2026.8.26+3322")
         XCTAssertEqual(context.build, "3322")
@@ -110,28 +63,8 @@ final class CrashReportEnvironmentTests: XCTestCase {
         )
     }
 
-    /// Sentry reads `options.environment` once, at `start`. Re-tagging the scope
-    /// cannot move a running reporter between `testflight` and `testflight-dev`,
-    /// so flipping the marker has to restart it — otherwise the toggle appears to
-    /// work and silently does nothing until the next launch.
     @MainActor
-    func testChangingEnvironmentRestartsTheReporter() {
-        let spy = SpyReporter()
-        let controller = CrashReportingController(reporter: spy, isConfigured: true)
-
-        controller.apply(enabled: true, context: context("testflight"))
-        XCTAssertEqual(spy.starts, ["testflight"])
-        XCTAssertEqual(spy.stops, 0)
-
-        controller.apply(enabled: true, context: context("testflight-dev"))
-        XCTAssertEqual(spy.stops, 1, "must stop before restarting on the new environment")
-        XCTAssertEqual(spy.starts, ["testflight", "testflight-dev"])
-    }
-
-    /// An unchanged environment must NOT restart — a restart drops the session and
-    /// is pure cost on every routine context refresh (accounts reloading, etc).
-    @MainActor
-    func testUnchangedEnvironmentOnlyUpdates() {
+    func testActiveReporterOnlyUpdates() {
         let spy = SpyReporter()
         let controller = CrashReportingController(reporter: spy, isConfigured: true)
 

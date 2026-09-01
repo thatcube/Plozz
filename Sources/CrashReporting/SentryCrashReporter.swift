@@ -79,7 +79,6 @@ public final class SentryCrashReporter: CrashReporter {
             scope.setTag(value: context.build, key: "app.build")
             scope.setTag(value: context.systemVersion, key: "os.version")
             scope.setTag(value: context.deviceModel, key: "device.model")
-            scope.setTag(value: context.deviceRole, key: "device_role")
             let providers = context.providers.isEmpty
                 ? "none"
                 : context.providers.joined(separator: "+")

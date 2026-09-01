@@ -751,7 +751,7 @@ final class PlozziOSAppModel {
             version: version,
             build: build,
             providers: providers,
-            isMaintainerDevice: crashReporting.settings.isMaintainerDevice
+            environment: AppReleaseChannel.current.crashReportEnvironment
         )
     }
 

@@ -66,6 +66,12 @@ final class CrashReportingConsentDefaultTests: XCTestCase {
         XCTAssertFalse(AppReleaseChannel.production.isBeta)
     }
 
+    func testCrashReportEnvironmentMatchesDistributionChannel() {
+        XCTAssertEqual(AppReleaseChannel.debug.crashReportEnvironment, "debug")
+        XCTAssertEqual(AppReleaseChannel.testflight.crashReportEnvironment, "testflight")
+        XCTAssertEqual(AppReleaseChannel.production.crashReportEnvironment, "production")
+    }
+
     func testBakedChannelIsParsedCaseInsensitively() {
         XCTAssertEqual(AppReleaseChannel.baked("testflight"), .testflight)
         XCTAssertEqual(AppReleaseChannel.baked("TestFlight"), .testflight)
@@ -93,42 +99,15 @@ final class CrashReportingConsentDefaultTests: XCTestCase {
         XCTAssertEqual(AppReleaseChannel.baked("production")?.isBeta, false)
     }
 
-    // MARK: - Developer-device marker
-
-    /// Adding a field must never invalidate a stored choice. The synthesized
-    /// decoder throws `keyNotFound` on a payload written before the field
-    /// existed, and `loadStored` maps a decode failure to "never chose" — which
-    /// would re-apply the beta default and silently undo an explicit opt-OUT.
-    func testSettingsWrittenBeforeTheMarkerExistedStillDecode() throws {
+    func testLegacySettingsWithoutTheRetiredMarkerStillDecode() throws {
         let legacy = Data(#"{"isEnabled":false}"#.utf8)
         let decoded = try JSONDecoder().decode(CrashReportingSettings.self, from: legacy)
         XCTAssertFalse(decoded.isEnabled, "an explicit opt-out must survive the migration")
-        XCTAssertFalse(decoded.isMaintainerDevice)
     }
 
-    func testLegacyOptInAlsoSurvives() throws {
-        let legacy = Data(#"{"isEnabled":true}"#.utf8)
+    func testLegacyTestingMarkerIsIgnoredWithoutLosingConsent() throws {
+        let legacy = Data(#"{"isEnabled":true,"isMaintainerDevice":true}"#.utf8)
         let decoded = try JSONDecoder().decode(CrashReportingSettings.self, from: legacy)
         XCTAssertTrue(decoded.isEnabled)
-        XCTAssertFalse(decoded.isMaintainerDevice)
-    }
-
-    func testMarkerRoundTrips() throws {
-        let settings = CrashReportingSettings(isEnabled: true, isMaintainerDevice: true)
-        let data = try JSONEncoder().encode(settings)
-        XCTAssertEqual(try JSONDecoder().decode(CrashReportingSettings.self, from: data), settings)
-    }
-
-    func testMarkerDefaultsOffSoNobodyIsSilentlyExcluded() {
-        XCTAssertFalse(CrashReportingSettings.default.isMaintainerDevice)
-        XCTAssertFalse(CrashReportingSettings(isEnabled: true).isMaintainerDevice)
-    }
-
-    func testMarkerPersistsIndependentlyOfConsent() {
-        let store = MemoryStore(stored: nil)
-        let model = CrashReportingSettingsModel(store: store, defaultConsentWhenUnset: true)
-        model.settings.isMaintainerDevice = true
-        XCTAssertEqual(store.loadStored()?.isMaintainerDevice, true)
-        XCTAssertEqual(store.loadStored()?.isEnabled, true)
     }
 }

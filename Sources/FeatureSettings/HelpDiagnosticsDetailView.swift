@@ -69,21 +69,15 @@ struct HelpDiagnosticsDetailView: View {
         crashReportingConfigured && crashReporting.settings.isEnabled
     }
 
-    /// Debug and TestFlight only. A Debug build already reports under its own
-    /// name, but the TestFlight build installed on a maintainer's own Apple TV is
-    /// indistinguishable from a tester's — TestFlight tells the app nothing about
-    /// who installed it — so that one has to be declared by hand.
-    private var showsDeveloperDeviceToggle: Bool {
-        AppReleaseChannel.current != .production
-    }
-
-    /// The footer gains a sentence only where the toggle above it exists, so the
-    /// shipping build's copy stays about the reader rather than about us.
     private var crashReportingFooter: LocalizedStringResource {
-        if showsDeveloperDeviceToggle {
-            return "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. On by default during the beta; you can turn it off any time. Turn on the testing switch if this Apple TV is one you use to build or test Plozz, so its crashes are filed apart from the ones real viewers hit. Applies to this Apple TV."
+        switch AppReleaseChannel.current {
+        case .debug:
+            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. Local build."
+        case .testflight:
+            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. TestFlight build."
+        case .production:
+            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. App Store build."
         }
-        return "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. On by default during the beta; you can turn it off any time. Applies to this Apple TV."
     }
 
     // MARK: - Report a Problem
@@ -146,21 +140,6 @@ struct HelpDiagnosticsDetailView: View {
             ) {
                 Toggle("Share Crash Reports", isOn: $crashReporting.settings.isEnabled)
                     .toggleStyle(SettingsSwitchToggleStyle())
-
-                // Hidden from the App Store build on purpose. It exists so the
-                // people building Plozz can keep their own testing out of the
-                // real-crash count; offering it to everyone would invite a viewer
-                // to file their crashes as noise, which is the exact opposite of
-                // what this whole panel is for.
-                if showsDeveloperDeviceToggle {
-                    Toggle(
-                        "This Apple TV Is Used for Testing Plozz",
-                        isOn: $crashReporting.settings.isMaintainerDevice
-                    )
-                    .toggleStyle(SettingsSwitchToggleStyle())
-                    .disabled(!crashReporting.settings.isEnabled)
-                    .opacity(crashReporting.settings.isEnabled ? 1 : 0.5)
-                }
             }
         } else {
             // No DSN baked in ⇒ the toggle can't do anything, so it's disabled
@@ -182,15 +161,25 @@ struct HelpDiagnosticsDetailView: View {
     // MARK: - Diagnostics controls
 
     private var diagnosticsPanel: some View {
-        SettingsPanel(
-            title: "Diagnostics",
-            footer: "Playback Diagnostics overlays live playback stats (codec, bitrate, buffer, memory) on top of the video. Home Performance Overlay shows a live Home rendering HUD. Both are power-user aids — leave them off for normal watching. Saved on this profile."
-        ) {
-            Toggle("Playback Diagnostics Overlay", isOn: $diagnostics.settings.isEnabled)
-                .toggleStyle(SettingsSwitchToggleStyle())
+        SettingsPanel(title: "Diagnostics") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Playback Diagnostics Overlay", isOn: $diagnostics.settings.isEnabled)
+                    .toggleStyle(SettingsSwitchToggleStyle())
+                Text("Shows codec, bitrate, buffer, and memory during playback.")
+                    .font(.footnote)
+                    .plozzForeground(.secondary)
+            }
 
-            Toggle("Home Performance Overlay", isOn: $diagnostics.settings.homePerformanceOverlayEnabled)
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(
+                    "Home Performance Overlay",
+                    isOn: $diagnostics.settings.homePerformanceOverlayEnabled
+                )
                 .toggleStyle(SettingsSwitchToggleStyle())
+                Text("Shows FPS, hitches, and thermal state on Home.")
+                    .font(.footnote)
+                    .plozzForeground(.secondary)
+            }
         }
     }
 

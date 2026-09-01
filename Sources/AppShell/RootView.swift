@@ -192,7 +192,7 @@ public struct RootView: View {
             version: AppInfo.version,
             build: AppInfo.build,
             providers: providers,
-            isMaintainerDevice: appState.crashReportingModel.settings.isMaintainerDevice
+            environment: AppReleaseChannel.current.crashReportEnvironment
         )
     }
 

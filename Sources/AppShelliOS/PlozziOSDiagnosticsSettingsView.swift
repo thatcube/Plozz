@@ -28,6 +28,17 @@ struct PlozziOSDiagnosticsSettingsView: View {
         )
     }
 
+    private var crashReportingFooter: LocalizedStringResource {
+        switch AppReleaseChannel.current {
+        case .debug:
+            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. Local build."
+        case .testflight:
+            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. TestFlight build."
+        case .production:
+            "Anonymous crash and freeze reports. Never include servers, logins, credentials, or viewing activity. App Store build."
+        }
+    }
+
     var body: some View {
         List {
             SettingsSectionGroup("Get Help") {
@@ -56,31 +67,9 @@ struct PlozziOSDiagnosticsSettingsView: View {
                     isOn: $crashReporting.settings.isEnabled
                 )
                 .disabled(!appModel.crashReportingController.isConfigured)
-
-                // Debug/TestFlight only — see the tvOS panel for why a shipping
-                // build must not offer a viewer a way to file their crashes as
-                // developer noise.
-                if AppReleaseChannel.current != .production {
-                    Toggle(
-                        "This iPhone Is Used for Testing Plozz",
-                        isOn: $crashReporting.settings.isMaintainerDevice
-                    )
-                    .disabled(
-                        !appModel.crashReportingController.isConfigured
-                            || !crashReporting.settings.isEnabled
-                    )
-                }
             } footer: {
                 if appModel.crashReportingController.isConfigured {
-                    if AppReleaseChannel.current != .production {
-                        Text(
-                            "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included. Turn on the testing switch if this is a device you use to build or test Plozz, so its crashes are filed apart from the ones real viewers hit."
-                        )
-                    } else {
-                        Text(
-                            "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included."
-                        )
-                    }
+                    Text(crashReportingFooter)
                 } else {
                     Text("Crash reporting is unavailable in this build.")
                 }
@@ -113,21 +102,27 @@ struct PlozziOSDiagnosticsSettingsView: View {
             }
 
             SettingsSectionGroup {
-                Toggle("Playback diagnostics", isOn: $model.settings.isEnabled)
-                Toggle(
-                    "Home performance overlay",
-                    isOn: $model.settings.homePerformanceOverlayEnabled
-                )
-            } footer: {
-                Text("Troubleshooting overlays stay on this device and are off by default.")
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Playback Diagnostics Overlay", isOn: $model.settings.isEnabled)
+                    Text("Shows codec, bitrate, buffer, and memory during playback.")
+                        .font(.footnote)
+                        .plozzForeground(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle(
+                        "Home Performance Overlay",
+                        isOn: $model.settings.homePerformanceOverlayEnabled
+                    )
+                    Text("Shows FPS, hitches, and thermal state on Home.")
+                        .font(.footnote)
+                        .plozzForeground(.secondary)
+                }
             }
         }
         .settingsPageSurface()
         .navigationTitle("Help & Diagnostics")
-        .onChange(of: crashReporting.settings) {
-            // The whole value, not just `isEnabled`: the testing marker changes
-            // the reporter's environment, which only takes effect on a restart
-            // the controller performs from here.
+        .onChange(of: crashReporting.settings.isEnabled) {
             appModel.applyCrashReportingPreference()
             sendStatus = nil
         }

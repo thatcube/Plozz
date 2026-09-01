@@ -295,6 +295,15 @@ private struct PlozziOSCanonicalItemDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if trailerController.isPlaying,
+                   trailerController.activeSurfaceRole == .detail,
+                   trailerController.currentItemID == viewModel.state.value?.item.id {
+                    PlozziOSTrailerMuteToolbarButton(
+                        isMuted: trailerController.isMuted,
+                        onToggle: trailerController.toggleMuted
+                    )
+                }
+
                 if let detail = viewModel.state.value,
                    detail.item.kind == .series,
                    !isDiscoveryItem,
@@ -307,15 +316,6 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         Image(systemName: "arrow.down.circle")
                     }
                     .accessibilityLabel("Download Show")
-                }
-
-                if trailerController.isPlaying,
-                   trailerController.activeSurfaceRole == .detail,
-                   trailerController.currentItemID == viewModel.state.value?.item.id {
-                    PlozziOSTrailerMuteToolbarButton(
-                        isMuted: trailerController.isMuted,
-                        onToggle: trailerController.toggleMuted
-                    )
                 }
             }
         }

@@ -1568,6 +1568,7 @@ private enum PlozziOSSeasonDownloadError: LocalizedError {
 
 private struct PlozziOSSeriesDownloadPicker: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(PlozziOSAppModel.self) private var appModel
     @State private var isBusy = false
     @State private var errorMessage: String?
     @State private var prompt: PlozziOSSeasonDownloadPrompt?
@@ -1592,6 +1593,10 @@ private struct PlozziOSSeriesDownloadPicker: View {
                             Spacer()
                             if isBusy {
                                 ProgressView()
+                            } else if let showDownloadState {
+                                PlozziOSListDownloadBadge(
+                                    state: showDownloadState
+                                )
                             }
                         }
                     }
@@ -1615,14 +1620,10 @@ private struct PlozziOSSeriesDownloadPicker: View {
                                     onDownloadEpisode: beginEpisodeDownload
                                 )
                             } label: {
-                                HStack(spacing: 12) {
-                                    PlozziOSDownloadThumbnail(
-                                        item: season,
-                                        style: .season
-                                    )
-                                    Text(verbatim: season.title)
-                                        .lineLimit(2)
-                                }
+                                PlozziOSSeasonDownloadRow(
+                                    season: season,
+                                    viewModel: viewModel
+                                )
                             }
                         }
                     }
@@ -1767,6 +1768,65 @@ private struct PlozziOSSeriesDownloadPicker: View {
             isBusy = false
         }
     }
+
+    private var showDownloadState: MediaDownloadBadgeState? {
+        let episodes: [MediaItem]?
+        if seasons.allSatisfy({
+            viewModel.seasonLoadState(for: $0.id).authoritativeEpisodes != nil
+        }) {
+            episodes = seasons.flatMap {
+                viewModel.seasonLoadState(for: $0.id).authoritativeEpisodes ?? []
+            } + looseEpisodes
+        } else {
+            episodes = nil
+        }
+        let records = matchingDownloadRecords(
+            downloads: appModel.downloads,
+            episodes: episodes,
+            seriesID: series.id,
+            sourceAccountID: series.sourceAccountID,
+            seasonNumber: nil
+        )
+        return downloadCollectionBadgeState(
+            records: records,
+            expectedCount: episodes?.count
+        )
+    }
+}
+
+private struct PlozziOSSeasonDownloadRow: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
+
+    let season: MediaItem
+    let viewModel: ItemDetailViewModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            PlozziOSDownloadThumbnail(
+                item: season,
+                style: .season,
+                downloadState: downloadState
+            )
+            Text(verbatim: season.title)
+                .lineLimit(2)
+        }
+    }
+
+    private var downloadState: MediaDownloadBadgeState? {
+        let episodes = viewModel.seasonLoadState(for: season.id)
+            .authoritativeEpisodes
+        let records = matchingDownloadRecords(
+            downloads: appModel.downloads,
+            episodes: episodes,
+            seriesID: season.seriesID,
+            sourceAccountID: season.sourceAccountID,
+            seasonNumber: season.seasonNumber
+        )
+        return downloadCollectionBadgeState(
+            records: records,
+            expectedCount: episodes?.count
+        )
+    }
 }
 
 private struct PlozziOSSeasonDownloadPicker: View {
@@ -1836,15 +1896,19 @@ private struct PlozziOSSeasonDownloadPicker: View {
 }
 
 private struct PlozziOSEpisodeDownloadRow: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
+
     let episode: MediaItem
     let isBusy: Bool
     let onDownload: (MediaItem) -> Void
 
     var body: some View {
+        let record = currentDownloadRecord
         HStack(spacing: 12) {
             PlozziOSDownloadThumbnail(
                 item: episode,
-                style: .episode
+                style: .episode,
+                downloadState: record?.badgeState
             )
             VStack(alignment: .leading, spacing: 3) {
                 if let number = episode.episodeNumber {
@@ -1854,17 +1918,62 @@ private struct PlozziOSEpisodeDownloadRow: View {
                 }
                 Text(verbatim: episode.title)
                     .lineLimit(2)
+                if let record {
+                    downloadStatusText(for: record)
+                        .font(.caption)
+                        .plozzForeground(.secondary)
+                }
             }
             Spacer()
-            Button {
-                onDownload(episode)
-            } label: {
-                Image(systemName: "arrow.down.circle")
-                    .font(.title3)
+            if let record {
+                if record.status == .paused || record.status == .failed {
+                    Button {
+                        Task { await appModel.downloads.resume(record) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isBusy)
+                    .accessibilityLabel("Resume Download")
+                }
+            } else {
+                Button {
+                    onDownload(episode)
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isBusy)
+                .accessibilityLabel(Text("Download ") + Text(verbatim: episode.title))
             }
-            .buttonStyle(.borderless)
-            .disabled(isBusy)
-            .accessibilityLabel(Text("Download ") + Text(verbatim: episode.title))
+        }
+    }
+
+    private var currentDownloadRecord: DownloadedMediaRecord? {
+        guard !appModel.downloads.records.isEmpty else { return nil }
+        return appModel.downloads.cachedRecord(forSelectedVersionOf: episode)
+    }
+
+    @ViewBuilder
+    private func downloadStatusText(
+        for record: DownloadedMediaRecord
+    ) -> some View {
+        switch record.status {
+        case .queued:
+            Text("Queued")
+        case .downloading:
+            Text("Downloading ") + Text(
+                record.fractionCompleted ?? 0,
+                format: .percent.precision(.fractionLength(0))
+            )
+        case .paused:
+            Text("Paused")
+        case .failed:
+            Text("Download Failed")
+        case .completed:
+            Text("Downloaded")
         }
     }
 }
@@ -1879,6 +1988,17 @@ private struct PlozziOSDownloadThumbnail: View {
 
     let item: MediaItem
     let style: Style
+    let downloadState: MediaDownloadBadgeState?
+
+    init(
+        item: MediaItem,
+        style: Style,
+        downloadState: MediaDownloadBadgeState? = nil
+    ) {
+        self.item = item
+        self.style = style
+        self.downloadState = downloadState
+    }
 
     @ViewBuilder
     var body: some View {
@@ -1900,6 +2020,12 @@ private struct PlozziOSDownloadThumbnail: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
             )
             .plozzMediaEdge(cornerRadius: 6)
+            .overlay(alignment: .bottomTrailing) {
+                if let downloadState {
+                    PlozziOSListDownloadBadge(state: downloadState)
+                        .padding(3)
+                }
+            }
 
         case .episode:
             FallbackAsyncImage(
@@ -1922,8 +2048,78 @@ private struct PlozziOSDownloadThumbnail: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
             )
             .plozzMediaEdge(cornerRadius: 6)
+            .overlay(alignment: .bottomTrailing) {
+                if let downloadState {
+                    PlozziOSListDownloadBadge(state: downloadState)
+                        .padding(3)
+                }
+            }
         }
     }
+}
+
+private struct PlozziOSListDownloadBadge: View {
+    let state: MediaDownloadBadgeState
+
+    var body: some View {
+        MediaDownloadBadge(state: state, size: 18)
+            .padding(2)
+            .background(.black.opacity(0.55), in: Circle())
+    }
+}
+
+@MainActor
+private func matchingDownloadRecords(
+    downloads: PlozziOSDownloadsModel,
+    episodes: [MediaItem]?,
+    seriesID: String?,
+    sourceAccountID: String?,
+    seasonNumber: Int?
+) -> [DownloadedMediaRecord] {
+    guard !downloads.records.isEmpty else { return [] }
+    if let episodes {
+        return episodes.compactMap {
+            downloads.cachedRecord(forSelectedVersionOf: $0)
+        }
+    }
+    guard let seriesID else { return [] }
+    return downloads.records.filter { record in
+        record.snapshot.seriesID == seriesID
+            && (sourceAccountID == nil
+                || record.snapshot.sourceAccountID == sourceAccountID)
+            && (seasonNumber == nil
+                || record.snapshot.seasonNumber == seasonNumber)
+    }
+}
+
+private func downloadCollectionBadgeState(
+    records: [DownloadedMediaRecord],
+    expectedCount: Int?
+) -> MediaDownloadBadgeState? {
+    guard !records.isEmpty else { return nil }
+    let fraction = records.reduce(0.0) { partial, record in
+        partial + (record.fractionCompleted
+            ?? (record.status == .completed ? 1 : 0))
+    } / Double(max(records.count, expectedCount ?? records.count))
+
+    if records.contains(where: { $0.status == .failed }) {
+        return .failed
+    }
+    if records.contains(where: {
+        $0.status == .queued || $0.status == .downloading
+    }) {
+        return .inProgress(fraction: fraction)
+    }
+    if records.contains(where: { $0.status == .paused }) {
+        return .paused(fraction: fraction)
+    }
+    if let expectedCount,
+       expectedCount > 0,
+       records.count == expectedCount,
+       records.allSatisfy({ $0.status == .completed }) {
+        return .completed
+    }
+    return nil
 }
 
 /// Backing data for a bulk season/show download confirmation.

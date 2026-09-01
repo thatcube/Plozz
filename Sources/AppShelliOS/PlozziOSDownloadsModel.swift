@@ -9,13 +9,27 @@ import Observation
 @Observable
 final class PlozziOSDownloadsModel {
     private(set) var records: [DownloadedMediaRecord] = [] {
-        didSet { recordsByKey = Dictionary(records.map { ($0.identityKey, $0) }, uniquingKeysWith: { a, _ in a }) }
+        didSet {
+            recordsByKey = Dictionary(
+                records.map { ($0.identityKey, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            recordsByIdentityKey = Dictionary(
+                grouping: records,
+                by: { MediaIdentityKey.string(for: $0.identity) }
+            )
+            .mapValues { records in
+                records.sorted { $0.identityKey < $1.identityKey }
+            }
+        }
     }
     /// `records` indexed by identity key. `cachedRecord(forSelectedVersionOf:)` is
     /// called from SwiftUI `body` (menus are built as cards render), so the linear
     /// scan it replaces ran per card per frame during a scroll.
     @ObservationIgnored
     private var recordsByKey: [String: DownloadedMediaRecord] = [:]
+    @ObservationIgnored
+    private var recordsByIdentityKey: [String: [DownloadedMediaRecord]] = [:]
     private(set) var initializationError: String?
     var allowsCellular: Bool {
         didSet { updatePolicy() }
@@ -133,14 +147,60 @@ final class PlozziOSDownloadsModel {
         // server), so match the registry's own resolution rather than assuming a
         // single key — otherwise a download made from one server is invisible to
         // a card resolved through another.
-        let versionID = item.selectedVersionID
+        guard let versionID = item.selectedVersionID, !versionID.isEmpty else {
+            return cachedRecord(for: item)
+        }
         for identity in MediaItemIdentity.identities(for: item) {
-            let key = versionID.flatMap { $0.isEmpty ? nil : $0 }
-                .map { MediaIdentityKey.string(for: identity, versionID: $0) }
-                ?? MediaIdentityKey.string(for: identity)
+            let key = MediaIdentityKey.string(
+                for: identity,
+                versionID: versionID
+            )
             if let record = recordsByKey[key] { return record }
         }
-        return nil
+        if let identity = DownloadMediaIdentity.primary(for: item),
+           let record = recordsByKey[
+               MediaIdentityKey.string(for: identity, versionID: versionID)
+           ] {
+            return record
+        }
+        return records.first {
+            $0.versionID == versionID && $0.snapshot.sourceItemID == item.id
+        }
+    }
+
+    /// Synchronous version-agnostic lookup for visual status surfaces. When an
+    /// episode row has no explicit version selected, any downloaded copy satisfies
+    /// its badge just as the registry's authoritative `record(for:)` lookup does.
+    func cachedRecord(for item: MediaItem) -> DownloadedMediaRecord? {
+        let identities = MediaItemIdentity.identities(for: item)
+        for identity in identities {
+            let key = MediaIdentityKey.string(for: identity)
+            if let record = recordsByKey[key]
+                ?? recordsByIdentityKey[key]?.first {
+                return record
+            }
+        }
+        if let identity = DownloadMediaIdentity.primary(for: item) {
+            let key = MediaIdentityKey.string(for: identity)
+            if let record = recordsByKey[key]
+                ?? recordsByIdentityKey[key]?.first {
+                return record
+            }
+        }
+        let expectedAccountSource = item.sourceAccountID.map {
+            "\(DownloadMediaIdentity.accountSourcePrefix)\($0)"
+        }
+        let sourceScopedMatches = records.filter {
+            guard case .external(let source, let value) = $0.identity,
+                  value == item.id else {
+                return false
+            }
+            if let expectedAccountSource {
+                return source == expectedAccountSource
+            }
+            return source.hasPrefix(DownloadMediaIdentity.accountSourcePrefix)
+        }
+        return sourceScopedMatches.count == 1 ? sourceScopedMatches[0] : nil
     }
 
     @discardableResult

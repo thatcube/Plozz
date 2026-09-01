@@ -1017,11 +1017,11 @@ private struct PlozziOSDownloadTabProgressIcon: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(.green.opacity(0.25), lineWidth: 2.5)
+                .stroke(.primary.opacity(0.25), lineWidth: 2.5)
             Circle()
                 .trim(from: 0, to: max(progress, 0.02))
                 .stroke(
-                    .green,
+                    .primary,
                     style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))

@@ -2093,7 +2093,7 @@ private struct PlozziOSDownloadControl: View {
                 .foregroundStyle(.green)
                 .accessibilityLabel("Downloaded")
         case .inProgress(let fraction):
-            progressRing(fraction: fraction, color: .green)
+            progressRing(fraction: fraction, color: .primary)
                 .accessibilityLabel("Downloading")
                 .accessibilityValue(
                     Text(

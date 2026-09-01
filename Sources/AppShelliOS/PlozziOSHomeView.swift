@@ -1895,7 +1895,10 @@ private struct PlozziOSHomeRowView: View {
 
     private var pendingWatchlistRemovalIDs: Set<String> {
         _ = watchlistIntentRevision
-        guard row.kind == .watchlist else { return [] }
+        guard row.kind == .watchlist,
+              appModel.mediaItemActionHandler
+                  .isDurableWatchlistPresentationReady()
+        else { return [] }
         return Set(
             row.items.lazy
                 .filter { !appModel.mediaItemActionHandler.isWatchlisted($0) }

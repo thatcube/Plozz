@@ -1039,7 +1039,9 @@ public struct HomeView: View {
         for items: [MediaItem],
         revision _: Int
     ) -> Set<String> {
-        guard let mediaItemActionHandler else { return [] }
+        guard let mediaItemActionHandler,
+              mediaItemActionHandler.isDurableWatchlistPresentationReady()
+        else { return [] }
         return Set(
             items.lazy
                 .filter { !mediaItemActionHandler.isWatchlisted($0) }

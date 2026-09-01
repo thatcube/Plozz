@@ -20,8 +20,15 @@ import Foundation
 ///   the title off every list it is on. That is the honest match for "the viewer
 ///   removed this from their watchlist" — the alternative, leaving it filed under
 ///   a different list, would silently keep something they took away.
-public actor SimklWatchlistDestination: WatchlistDestination {
+public actor SimklWatchlistDestination:
+    WatchlistDestination, WatchlistReconciliationScopedApplying {
     public nonisolated let id: WatchlistDestinationID
+    public nonisolated var reconciliationScope: String {
+        let identity = tokenStore.load().map {
+            WatchlistReconciliationIdentity.credential($0.accessToken)
+        } ?? "disconnected"
+        return id.rawValue + "#" + identity
+    }
     /// `trakt` and `plex` are absent on purpose: they identify a title only
     /// within those services. The anime catalogues ARE included — Simkl indexes
     /// AniList/MAL/AniDB ids as well as the film-and-TV ones, which is what makes
@@ -55,8 +62,21 @@ public actor SimklWatchlistDestination: WatchlistDestination {
         // nothing worth the extra pressure.
         let movies = try await client.planToWatch(type: "movies", accessToken: token)
         let shows = try await client.planToWatch(type: "shows", accessToken: token)
-        return (movies.movies ?? []).compactMap { entry(kind: .movie, from: $0) }
-            + (shows.shows ?? []).compactMap { entry(kind: .series, from: $0) }
+        let movieValues = movies.movies ?? []
+        let showValues = shows.shows ?? []
+        let movieEntries = movieValues.compactMap {
+            entry(kind: .movie, from: $0)
+        }
+        let showEntries = showValues.compactMap {
+            entry(kind: .series, from: $0)
+        }
+        // A partial identity decode cannot safely be reconciled as absence: an
+        // omitted confirmed title would become a global removal.
+        guard movieEntries.count == movieValues.count,
+              showEntries.count == showValues.count else {
+            throw WatchlistDestinationError.transient
+        }
+        return movieEntries + showEntries
     }
 
     public func resolve(
@@ -75,9 +95,24 @@ public actor SimklWatchlistDestination: WatchlistDestination {
         _ desiredState: WatchlistDesiredState,
         to binding: WatchlistDestinationBinding
     ) async throws {
+        try await apply(
+            desiredState,
+            to: binding,
+            expectedReconciliationScope: reconciliationScope
+        )
+    }
+
+    public func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
         guard binding.destinationID == id,
               let parsed = Self.parse(binding.opaqueValue) else {
             throw WatchlistDestinationError.permanent
+        }
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
         }
         let ids = Self.ids(parsed.externalID)
         guard !ids.isEmpty else { throw WatchlistDestinationError.permanent }
@@ -89,7 +124,10 @@ public actor SimklWatchlistDestination: WatchlistDestination {
             ? SimklListMutationBody(movies: [entry], shows: nil)
             : SimklListMutationBody(movies: nil, shows: [entry])
         let token = try accessToken()
-        do {
+            guard reconciliationScope == expectedReconciliationScope else {
+                throw WatchlistDestinationError.authenticationRequired
+            }
+            do {
             if desiredState == .present {
                 try await client.addToList(body: body, accessToken: token)
             } else {
@@ -144,7 +182,16 @@ public actor SimklWatchlistDestination: WatchlistDestination {
         return [
             ids.imdb.flatMap { WatchlistExternalID(namespace: .imdb, value: $0) },
             ids.tmdb.flatMap { WatchlistExternalID(namespace: .tmdb, value: $0.value) },
-            ids.tvdb.flatMap { WatchlistExternalID(namespace: .tvdb, value: $0.value) }
+            ids.tvdb.flatMap { WatchlistExternalID(namespace: .tvdb, value: $0.value) },
+            ids.mal.flatMap {
+                WatchlistExternalID(namespace: .myAnimeList, value: $0.value)
+            },
+            ids.anilist.flatMap {
+                WatchlistExternalID(namespace: .aniList, value: $0.value)
+            },
+            ids.anidb.flatMap {
+                WatchlistExternalID(namespace: .aniDB, value: $0.value)
+            },
         ].compactMap { $0 }.sorted()
     }
 

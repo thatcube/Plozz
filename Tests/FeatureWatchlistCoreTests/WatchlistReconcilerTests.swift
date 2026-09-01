@@ -23,6 +23,48 @@ final class WatchlistReconcilerTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1)
     }
 
+    func testNativeReadIsRejectedWhenAccountScopeChangesMidFetch() async throws {
+        let destination = ScopeChangingWatchlistDestination()
+        let store = try DurableWatchlistMutationStore(
+            store: InMemoryWatchlistMutationStateStore()
+        )
+        let reconciler = WatchlistReconciler(
+            registry: WatchlistDestinationRegistry([destination]),
+            mutationStore: store
+        )
+
+        let report = await reconciler.fetchNativeEntries()
+
+        XCTAssertTrue(report.successes.isEmpty)
+        XCTAssertEqual(report.failures.count, 1)
+        XCTAssertEqual(report.failures.first?.classification, .authentication)
+    }
+
+    func testQueuedMutationIsDiscardedAfterAccountScopeChanges() async throws {
+        let destination = MutableScopeWatchlistDestination()
+        let store = try DurableWatchlistMutationStore(
+            store: InMemoryWatchlistMutationStateStore()
+        )
+        let reconciler = WatchlistReconciler(
+            registry: WatchlistDestinationRegistry([destination]),
+            mutationStore: store
+        )
+        let target = makeTarget()
+        try await reconciler.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination.id
+        )
+
+        destination.switchAccount()
+        _ = await reconciler.drain(profileID: "p")
+
+        XCTAssertEqual(destination.appliedStates(), [])
+        let mutations = await store.allMutations()
+        XCTAssertTrue(mutations.isEmpty)
+    }
+
     func testAddRemoveAddCoalescesToLatestDesiredState() async throws {
         let fixture = try makeFixture()
         let target = makeTarget()
@@ -123,6 +165,415 @@ final class WatchlistReconcilerTests: XCTestCase {
             localDesiredState: .absent
         )
         XCTAssertEqual(added, .nativeAddition)
+    }
+
+    func testPersistentPresenceAfterSuccessfulRemovalBecomesNativeAddition() async throws {
+        let fixture = try makeFixture()
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: fixture.destination.id
+        )
+        let succeededAt = Date(timeIntervalSince1970: 100)
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .absent,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.markSucceeded(key, now: succeededAt)
+
+        let stalePresence = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint,
+            nativeReadStartedAt: Date(timeIntervalSince1970: 110),
+            now: Date(timeIntervalSince1970: 110)
+        )
+        let firstStablePresence = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint,
+            nativeReadStartedAt: Date(timeIntervalSince1970: 140),
+            now: Date(timeIntervalSince1970: 140)
+        )
+        let reAdd = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint,
+            nativeReadStartedAt: Date(timeIntervalSince1970: 141),
+            now: Date(timeIntervalSince1970: 141)
+        )
+
+        XCTAssertEqual(stalePresence, .ignorePresenceDuringExplicitRemoval)
+        XCTAssertEqual(firstStablePresence, .ignorePresenceDuringExplicitRemoval)
+        XCTAssertEqual(reAdd, .nativeAddition)
+        let repeatedBeforeAcknowledgement = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint,
+            nativeReadStartedAt: Date(timeIntervalSince1970: 142),
+            now: Date(timeIntervalSince1970: 142)
+        )
+        XCTAssertEqual(repeatedBeforeAcknowledgement, .nativeAddition)
+        try await fixture.store.acknowledgeNativeAddition(
+            key,
+            confirmationIdentity: target.identityFingerprint,
+            now: Date(timeIntervalSince1970: 143)
+        )
+        let settled = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint,
+            nativeReadStartedAt: Date(timeIntervalSince1970: 144),
+            now: Date(timeIntervalSince1970: 144)
+        )
+        XCTAssertEqual(settled, .noChange)
+    }
+
+    func testConfirmedNativeRemovalDoesNotReassertTheAdd() async throws {
+        let fixture = try makeFixture()
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.markSucceeded(key)
+
+        let removal = try await fixture.store.observeNative(
+            key: key,
+            isPresent: false,
+            localDesiredState: .present,
+            confirmationIdentity: target.identityFingerprint
+        )
+
+        XCTAssertEqual(removal, .confirmedNativeRemoval)
+        let overlappingRefresh = try await fixture.store.observeNative(
+            key: key,
+            isPresent: false,
+            localDesiredState: .present,
+            confirmationIdentity: target.identityFingerprint
+        )
+        XCTAssertEqual(overlappingRefresh, .confirmedNativeRemoval)
+        let queued = await fixture.store.ready(profileID: "p")
+        XCTAssertTrue(queued.isEmpty)
+        let confirmedAbsent = try await fixture.store.observeNative(
+            key: key,
+            isPresent: false,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint
+        )
+        XCTAssertEqual(confirmedAbsent, .confirmedAbsence)
+        let laterAddition = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint
+        )
+        XCTAssertEqual(laterAddition, .nativeAddition)
+    }
+
+    func testReadStartedBeforeSuccessfulAddCannotBecomeNativeRemoval() async throws {
+        let fixture = try makeFixture()
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: fixture.destination.id
+        )
+        let readStartedAt = Date(timeIntervalSince1970: 100)
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.markSucceeded(
+            key,
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        let observation = try await fixture.store.observeNativeBatch([
+            WatchlistNativeObservationRequest(
+                key: key,
+                isPresent: false,
+                localDesiredState: .present,
+                confirmationIdentity: target.identityFingerprint,
+                nativeReadStartedAt: readStartedAt,
+                isEligibleTarget: true
+            )
+        ]).first?.observation
+
+        XCTAssertEqual(observation, .reassertPresent)
+    }
+
+    func testQueuedReAddPreventsConfirmedPresenceBecomingRemoval() async throws {
+        let fixture = try makeFixture()
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.markSucceeded(key)
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+
+        let observation = try await fixture.store.observeNative(
+            key: key,
+            isPresent: false,
+            localDesiredState: .present,
+            confirmationIdentity: target.identityFingerprint
+        )
+
+        XCTAssertEqual(observation, .reassertPresent)
+    }
+
+    func testNativeReAddCancelsPendingNativeRemovalObservation() async throws {
+        let fixture = try makeFixture()
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.markSucceeded(key)
+        let removal = try await fixture.store.observeNative(
+            key: key,
+            isPresent: false,
+            localDesiredState: .present,
+            confirmationIdentity: target.identityFingerprint
+        )
+        XCTAssertEqual(removal, .confirmedNativeRemoval)
+
+        let reAdd = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint
+        )
+
+        XCTAssertEqual(reAdd, .nativeAddition)
+        try await fixture.store.acknowledgeNativeAddition(
+            key,
+            confirmationIdentity: target.identityFingerprint
+        )
+        let settledPresence = try await fixture.store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint
+        )
+        XCTAssertEqual(settledPresence, .noChange)
+    }
+
+    func testCompletionOfReplacedMutationDoesNotAlterReplacement() async throws {
+        let fixture = try makeFixture()
+        let target = makeTarget()
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+        let ready = await fixture.store.ready(profileID: "p")
+        let processed = try XCTUnwrap(ready.first)
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .absent,
+            target: target,
+            destinationID: fixture.destination.id
+        )
+
+        try await fixture.store.markSucceeded(processed)
+        try await fixture.store.markFailed(
+            processed,
+            classification: .transient,
+            retryAt: Date().addingTimeInterval(30)
+        )
+
+        let mutations = await fixture.store.allMutations()
+        let replacement = try XCTUnwrap(mutations.first)
+        XCTAssertEqual(replacement.desiredState, .absent)
+        XCTAssertEqual(replacement.attemptCount, 0)
+        XCTAssertEqual(replacement.phase, .queued)
+    }
+
+    func testNativeReAddAtomicallyReplacesQueuedPeerRemovals() async throws {
+        let backing = CountingMutationStateStore()
+        let store = try DurableWatchlistMutationStore(store: backing)
+        let target = makeTarget()
+        let source = WatchlistDestinationID(rawValue: "source")!
+        let peer = WatchlistDestinationID(rawValue: "peer")!
+        try await store.enqueueBatch([source, peer].map {
+            WatchlistMutationEnqueueRequest(
+                profileID: "p",
+                desiredState: .absent,
+                target: target,
+                destinationID: $0
+            )
+        })
+
+        try await store.replacePendingRemovalsWithPresentFanOut(
+            profileID: "p",
+            aliasID: target.aliasID,
+            requests: [
+                WatchlistMutationEnqueueRequest(
+                    profileID: "p",
+                    desiredState: .present,
+                    target: target,
+                    destinationID: peer
+                )
+            ]
+        )
+
+        let mutations = await store.allMutations()
+        XCTAssertEqual(backing.saveCount, 2)
+        XCTAssertEqual(mutations.count, 1)
+        XCTAssertEqual(mutations.first?.key.destinationID, peer)
+        XCTAssertEqual(mutations.first?.desiredState, .present)
+    }
+
+    func testFailedStaleMutationDiscardRestoresInMemoryQueue() async throws {
+        let backing = CountingMutationStateStore()
+        let store = try DurableWatchlistMutationStore(store: backing)
+        let target = makeTarget()
+        let destination = WatchlistDestinationID(rawValue: "destination")!
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination
+        )
+        let queued = await store.allMutations()
+        let mutation = try XCTUnwrap(queued.first)
+        backing.failNextSave()
+
+        do {
+            try await store.discard(mutation)
+            XCTFail("Expected persistence failure")
+        } catch {}
+        let mutations = await store.allMutations()
+        XCTAssertEqual(mutations, [mutation])
+    }
+
+    func testFailedNativeObservationRestoresReconciliationState() async throws {
+        let backing = CountingMutationStateStore()
+        let store = try DurableWatchlistMutationStore(store: backing)
+        let target = makeTarget()
+        let destination = WatchlistDestinationID(rawValue: "destination")!
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: destination
+        )
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .absent,
+            target: target,
+            destinationID: destination
+        )
+        try await store.markSucceeded(
+            key,
+            now: Date(timeIntervalSince1970: 100)
+        )
+        backing.failNextSave()
+
+        do {
+            _ = try await store.observeNative(
+                key: key,
+                isPresent: true,
+                localDesiredState: .absent,
+                confirmationIdentity: target.identityFingerprint,
+                nativeReadStartedAt: Date(timeIntervalSince1970: 140),
+                now: Date(timeIntervalSince1970: 140)
+            )
+            XCTFail("Expected persistence failure")
+        } catch {}
+
+        let retriedCandidate = try await store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint,
+            nativeReadStartedAt: Date(timeIntervalSince1970: 140),
+            now: Date(timeIntervalSince1970: 140)
+        )
+        let retry = try await store.observeNative(
+            key: key,
+            isPresent: true,
+            localDesiredState: .absent,
+            confirmationIdentity: target.identityFingerprint,
+            nativeReadStartedAt: Date(timeIntervalSince1970: 141),
+            now: Date(timeIntervalSince1970: 141)
+        )
+        XCTAssertEqual(
+            retriedCandidate,
+            .ignorePresenceDuringExplicitRemoval
+        )
+        XCTAssertEqual(retry, .nativeAddition)
+    }
+
+    func testAbsenceUnderDifferentIdentityStillReasserts() async throws {
+        let fixture = try makeFixture()
+        let original = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: original.aliasID,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: original,
+            destinationID: fixture.destination.id
+        )
+        try await fixture.store.markSucceeded(key)
+        let changedIdentity = WatchlistMutationTarget(
+            aliasID: original.aliasID,
+            kind: .movie,
+            externalIDs: [
+                WatchlistExternalID(namespace: .imdb, value: "tt2")!
+            ]
+        )!
+
+        let observation = try await fixture.store.observeNative(
+            key: key,
+            isPresent: false,
+            localDesiredState: .present,
+            confirmationIdentity: changedIdentity.identityFingerprint
+        )
+
+        XCTAssertEqual(observation, .reassertPresent)
     }
 
     func testUnsupportedIdentityWaitsAndLateEvidenceFansOut() async throws {
@@ -281,10 +732,19 @@ final class WatchlistReconcilerTests: XCTestCase {
                 isEligibleTarget: true
             )
         }
-        _ = try await store.observeNativeBatch(present)
+        let additions = try await store.observeNativeBatch(present)
+        XCTAssertTrue(additions.allSatisfy {
+            $0.observation == .nativeAddition
+        })
+        for request in present {
+            try await store.acknowledgeNativeAddition(
+                request.key,
+                confirmationIdentity: nil
+            )
+        }
         let presentCount = await store.reconciliationStateCount(profileID: "p")
-        XCTAssertEqual(backing.saveCount, 3)
-        XCTAssertEqual(presentCount, 0)
+        XCTAssertEqual(backing.saveCount, 102)
+        XCTAssertEqual(presentCount, 100)
     }
 
     func testTransientRetrySchedulerWakesWithoutUnrelatedAction() async throws {
@@ -463,6 +923,7 @@ final class WatchlistReconcilerTests: XCTestCase {
         private let lock = NSLock()
         private var state = WatchlistMutationStoreState()
         private(set) var saveCount = 0
+        private var shouldFailNextSave = false
         func load() throws -> WatchlistMutationStoreState {
             lock.lock()
             defer { lock.unlock() }
@@ -470,8 +931,18 @@ final class WatchlistReconcilerTests: XCTestCase {
         }
         func save(_ state: WatchlistMutationStoreState) throws {
             lock.lock()
+            if shouldFailNextSave {
+                shouldFailNextSave = false
+                lock.unlock()
+                throw CocoaError(.fileWriteUnknown)
+            }
             self.state = state
             saveCount += 1
+            lock.unlock()
+        }
+        func failNextSave() {
+            lock.lock()
+            shouldFailNextSave = true
             lock.unlock()
         }
     }
@@ -1075,6 +1546,97 @@ private actor SlowReadableWatchlistDestination: WatchlistDestination {
     ) async throws {}
 
     func fetchCount() -> Int { reads }
+}
+
+private final class ScopeChangingWatchlistDestination:
+    WatchlistDestination, @unchecked Sendable {
+    let id = WatchlistDestinationID(rawValue: "scope-changing")!
+    let capabilities = WatchlistDestinationCapabilities(
+        readable: true,
+        writable: false,
+        removable: false,
+        bindingRequirement: .globalExternalIdentity,
+        globalIdentityNamespaces: [.imdb]
+    )
+    private let lock = NSLock()
+    private var scope = "account-a"
+
+    var reconciliationScope: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return scope
+    }
+
+    func fetchEntries() async throws -> [WatchlistDestinationEntry] {
+        lock.lock()
+        scope = "account-b"
+        lock.unlock()
+        return []
+    }
+
+    func resolve(
+        _ target: WatchlistMutationTarget
+    ) async throws -> WatchlistDestinationBinding? {
+        nil
+    }
+
+    func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding
+    ) async throws {}
+}
+
+private final class MutableScopeWatchlistDestination:
+    WatchlistDestination, @unchecked Sendable {
+    let id = WatchlistDestinationID(rawValue: "mutable-scope")!
+    let capabilities = WatchlistDestinationCapabilities(
+        readable: false,
+        writable: true,
+        removable: true,
+        bindingRequirement: .globalExternalIdentity,
+        globalIdentityNamespaces: [.imdb]
+    )
+    private let lock = NSLock()
+    private var scope = "account-a"
+    private var applied: [WatchlistDesiredState] = []
+
+    var reconciliationScope: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return scope
+    }
+
+    func switchAccount() {
+        lock.lock()
+        scope = "account-b"
+        lock.unlock()
+    }
+
+    func fetchEntries() async throws -> [WatchlistDestinationEntry] { [] }
+
+    func resolve(
+        _ target: WatchlistMutationTarget
+    ) async throws -> WatchlistDestinationBinding? {
+        WatchlistDestinationBinding(
+            destinationID: id,
+            opaqueValue: target.identityFingerprint
+        )
+    }
+
+    func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding
+    ) async throws {
+        lock.lock()
+        applied.append(desiredState)
+        lock.unlock()
+    }
+
+    func appliedStates() -> [WatchlistDesiredState] {
+        lock.lock()
+        defer { lock.unlock() }
+        return applied
+    }
 }
 
 private actor RetryingWatchlistDestination: WatchlistDestination {

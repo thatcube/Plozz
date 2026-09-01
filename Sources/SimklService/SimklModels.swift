@@ -175,6 +175,9 @@ struct SimklResponseIDs: Decodable, Equatable {
     var imdb: String?
     var tmdb: StringOrInt?
     var tvdb: StringOrInt?
+    var mal: StringOrInt?
+    var anilist: StringOrInt?
+    var anidb: StringOrInt?
 }
 
 /// Simkl returns numeric ids as either a JSON number or a string depending on

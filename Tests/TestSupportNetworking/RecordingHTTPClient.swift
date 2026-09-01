@@ -16,6 +16,7 @@ import FoundationNetworking
 final class RecordingHTTPClient: HTTPClient, @unchecked Sendable {
     struct Sent {
         let path: String
+        let queryItems: [URLQueryItem]
         let headers: [String: String]
         let body: Data?
         var json: [String: Any]? {
@@ -74,7 +75,12 @@ final class RecordingHTTPClient: HTTPClient, @unchecked Sendable {
         baseURL: URL
     ) async throws -> (Data, HTTPURLResponse) {
         lock.lock()
-        sent.append(Sent(path: endpoint.path, headers: endpoint.headers, body: endpoint.body))
+        sent.append(Sent(
+            path: endpoint.path,
+            queryItems: endpoint.queryItems,
+            headers: endpoint.headers,
+            body: endpoint.body
+        ))
         if let error { lock.unlock(); throw error }
         let matchKey = responses.keys
             .filter { endpoint.path.hasSuffix($0) }

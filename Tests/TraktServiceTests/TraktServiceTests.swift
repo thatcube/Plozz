@@ -283,6 +283,73 @@ final class TraktWatchlistDestinationTests: XCTestCase {
         )
     }
 
+    func testListReadsEveryTraktPaginationPage() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(
+            pathSuffix: "/sync/watchlist/movies",
+            json: """
+            [{"movie":{"title":"First","ids":{"trakt":1}}}]
+            """,
+            headers: ["X-Pagination-Page-Count": "2"]
+        )
+        http.stub(
+            pathSuffix: "/sync/watchlist/movies",
+            json: """
+            [{"movie":{"title":"Second","ids":{"trakt":2}}}]
+            """,
+            headers: ["X-Pagination-Page-Count": "2"]
+        )
+        http.stub(
+            pathSuffix: "/sync/watchlist/shows",
+            json: "[]",
+            headers: ["X-Pagination-Page-Count": "1"]
+        )
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(entries.map { $0.presentation?.title }, ["First", "Second"])
+        let movieRequests = http.sent.filter {
+            $0.path.hasSuffix("/sync/watchlist/movies")
+        }
+        XCTAssertEqual(
+            movieRequests.compactMap {
+                $0.queryItems.first { $0.name == "page" }?.value
+            },
+            ["1", "2"]
+        )
+    }
+
+    func testListRejectsChangingTraktPaginationMetadata() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(
+            pathSuffix: "/sync/watchlist/movies",
+            json: """
+            [{"movie":{"title":"First","ids":{"trakt":1}}}]
+            """,
+            headers: [
+                "X-Pagination-Page-Count": "2",
+                "X-Pagination-Item-Count": "2",
+            ]
+        )
+        http.stub(
+            pathSuffix: "/sync/watchlist/movies",
+            json: """
+            [{"movie":{"title":"Second","ids":{"trakt":2}}}]
+            """,
+            headers: [
+                "X-Pagination-Page-Count": "1",
+                "X-Pagination-Item-Count": "2",
+            ]
+        )
+
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected inconsistent pagination to fail closed")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
+    }
+
     func testAddAndRemoveUseTypedMovieAndShowPayloads() async throws {
         let http = RecordingHTTPClient()
         http.stubEmpty(pathSuffix: "/sync/watchlist")
@@ -332,6 +399,32 @@ final class TraktWatchlistDestinationTests: XCTestCase {
             http.sentPaths,
             ["/sync/watchlist", "/sync/watchlist/remove"]
         )
+    }
+
+    func testScopedWriteRejectsAnotherAccountsMutation() async throws {
+        let http = RecordingHTTPClient()
+        let destination = makeDestination(http: http)
+        let target = WatchlistMutationTarget(
+            aliasID: MediaAliasID(),
+            kind: .movie,
+            externalIDs: [
+                WatchlistExternalID(namespace: .imdb, value: "tt1")!
+            ]
+        )!
+        let resolved = try await destination.resolve(target)
+        let binding = try XCTUnwrap(resolved)
+
+        do {
+            try await destination.apply(
+                .present,
+                to: binding,
+                expectedReconciliationScope: "trakt#another-account"
+            )
+            XCTFail("Expected the stale account mutation to be rejected")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .authenticationRequired)
+        }
+        XCTAssertTrue(http.sent.isEmpty)
     }
 
     func testRateLimitCarriesRetryAfterAndConflictIsIdempotentSuccess() async throws {

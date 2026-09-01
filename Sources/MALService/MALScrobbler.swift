@@ -20,18 +20,67 @@ public struct DisabledMALScrobbler: MALScrobbling {
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {}
 }
 
+final class MALProfileGeneration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: UInt64 = 0
+
+    func advance(performing update: () -> Void = {}) -> UInt64 {
+        lock.lock()
+        storage &+= 1
+        update()
+        let value = storage
+        lock.unlock()
+        return value
+    }
+
+    func performIfCurrent(
+        _ generation: UInt64,
+        operation: () -> Void
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard generation == storage else { return false }
+        operation()
+        return true
+    }
+
+    var current: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+}
+
 /// Live MAL scrobbler. Updates the user's anime list when an episode finishes.
 public actor MALScrobbler: MALScrobbling {
     private let client: MALClient
     private let auth: MALAuthService
     private let tokenStore: MALTokenStoring
     private let idMapper: AnimeIDMapper
+    private let profileGeneration: MALProfileGeneration
 
     public init(config: MALConfig, http: HTTPClient, tokenStore: MALTokenStoring, idMapper: AnimeIDMapper = .shared) {
+        self.init(
+            config: config,
+            http: http,
+            tokenStore: tokenStore,
+            idMapper: idMapper,
+            profileGeneration: MALProfileGeneration()
+        )
+    }
+
+    init(
+        config: MALConfig,
+        http: HTTPClient,
+        tokenStore: MALTokenStoring,
+        idMapper: AnimeIDMapper = .shared,
+        profileGeneration: MALProfileGeneration
+    ) {
         self.client = MALClient(config: config, http: http)
         self.auth = MALAuthService(config: config, http: http)
         self.tokenStore = tokenStore
         self.idMapper = idMapper
+        self.profileGeneration = profileGeneration
     }
 
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {
@@ -97,11 +146,16 @@ public actor MALScrobbler: MALScrobbling {
 
     /// Returns a usable access token, refreshing an expired one.
     private func validAccessToken() async -> String? {  // l10n:content — returns an OAuth access token; string literals inside are developer diagnostics only
+        let generation = profileGeneration.current
         guard let tokens = tokenStore.load() else { return nil }
         guard tokens.isExpired else { return tokens.accessToken }
         do {
             let refreshed = try await auth.refresh(tokens.refreshToken)
-            try? tokenStore.save(refreshed)
+                .inheritingAccountIdentity(from: tokens)
+            guard profileGeneration.performIfCurrent(
+                generation,
+                operation: { try? tokenStore.save(refreshed) }
+            ) else { return nil }
             return refreshed.accessToken
         } catch {
             PlozzLog.playback.debug("MAL token refresh failed (non-fatal)")

@@ -61,6 +61,38 @@ final class UniversalWatchlistMembershipTests: XCTestCase {
         XCTAssertTrue(host.universalWatchlistNativeView.bucketsByDestinationID.isEmpty)
     }
 
+    func testScopeChangedDuringReadPurgesPreviousAccountCache() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        let destination = ScopeChangingRuntimeWatchlistDestination()
+        var view = NativeWatchlistView()
+        view.applySuccess(
+            destinationID: destination.id,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: MediaAliasID(),
+                    kind: .movie,
+                    index: 0
+                )!
+            ],
+            identityScope: "account-a"
+        )
+        let store = try DurableWatchlistMutationStore(
+            store: InMemoryWatchlistMutationStateStore()
+        )
+        host.universalWatchlistNativeView = view
+        host.universalWatchlistDestinationIDs = [destination.id]
+        host.universalWatchlistReconciler = WatchlistReconciler(
+            registry: WatchlistDestinationRegistry([destination]),
+            mutationStore: store
+        )
+
+        await host.refreshNativeWatchlistView()
+
+        XCTAssertNil(
+            host.universalWatchlistNativeView.bucket(for: destination.id)
+        )
+    }
+
     func testFirstAddOfPromotedSeriesReadsBackAsWatchlisted() async throws {
         let host = try await UniversalWatchlistHostDouble()
         let item = promotedSeries
@@ -112,6 +144,196 @@ final class UniversalWatchlistMembershipTests: XCTestCase {
 
         XCTAssertTrue(removed)
         XCTAssertFalse(host.universalWatchlistMembership(item))
+    }
+
+    func testConfirmedExternalRemovalBecomesGlobalRemoval() async throws {
+        let host = try await UniversalWatchlistHostDouble()
+        let profileID = host.profiles.activeProfileID
+        let imdb = WatchlistExternalID(namespace: .imdb, value: "tt32")!
+        let evidence = MediaAliasEvidence(
+            kind: .movie,
+            strong: [
+                MediaAliasStrongEvidence(
+                    kind: .movie,
+                    namespace: .imdb,
+                    value: imdb.value
+                )!
+            ],
+            presentation: MediaAliasPresentation(title: "Issue 32")
+        )!
+        let aliasID = try await host.mediaAliasLedger.resolveOrCreate(
+            profileID: profileID,
+            evidence: evidence
+        )
+        try host.universalWatchlist.add(
+            profileID: profileID,
+            aliasID: aliasID,
+            kind: .movie,
+            presentation: evidence.presentation
+        )
+        let target = WatchlistMutationTarget(
+            aliasID: aliasID,
+            kind: .movie,
+            externalIDs: [imdb]
+        )!
+        let source = RuntimeWatchlistDestination(
+            rawID: "source",
+            entries: []
+        )
+        let peer = RuntimeWatchlistDestination(
+            rawID: "peer",
+            entries: [
+                WatchlistDestinationEntry(
+                    kind: .movie,
+                    externalIDs: [imdb],
+                    binding: WatchlistDestinationBinding(
+                        destinationID: WatchlistDestinationID(rawValue: "peer")!,
+                        opaqueValue: imdb.value
+                    )!,
+                    presentation: evidence.presentation
+                )!
+            ]
+        )
+        let mutationStore = try DurableWatchlistMutationStore(
+            store: InMemoryWatchlistMutationStateStore()
+        )
+        let destinations: [any WatchlistDestination] = [source, peer]
+        let reconciler = WatchlistReconciler(
+            registry: WatchlistDestinationRegistry(destinations),
+            mutationStore: mutationStore
+        )
+        for destination in destinations {
+            let key = WatchlistMutationKey(
+                profileID: profileID,
+                aliasID: aliasID,
+                destinationID: destination.id
+            )
+            try await reconciler.enqueue(
+                profileID: profileID,
+                desiredState: .present,
+                target: target,
+                destinationID: destination.id
+            )
+            try await mutationStore.markSucceeded(key)
+        }
+        host.universalWatchlistMutationStore = mutationStore
+        host.universalWatchlistReconciler = reconciler
+        host.universalWatchlistDestinationIDs = Set(destinations.map(\.id))
+        host.universalWatchlistProfileID = "\(profileID)#test"
+
+        await host.refreshNativeWatchlistView()
+
+        XCTAssertEqual(
+            host.universalWatchlist.activeSnapshot.intentsByAliasID[aliasID]?
+                .desiredState,
+            .absent
+        )
+        let sourceWrites = await source.appliedStates()
+        let peerWrites = await peer.appliedStates()
+        XCTAssertEqual(sourceWrites, [])
+        XCTAssertEqual(peerWrites, [.absent])
+        XCTAssertEqual(host.cloudPublishCount, 1)
+        XCTAssertFalse(
+            host.universalWatchlistUnion.activeAliasIDs.contains(aliasID)
+        )
+
+        await source.setEntries([
+            WatchlistDestinationEntry(
+                kind: .movie,
+                externalIDs: [imdb],
+                binding: WatchlistDestinationBinding(
+                    destinationID: source.id,
+                    opaqueValue: imdb.value
+                )!,
+                presentation: evidence.presentation
+            )!
+        ])
+        await host.refreshNativeWatchlistView()
+
+        let reAddedIntent = host.universalWatchlist.activeSnapshot
+            .intentsByAliasID[aliasID]
+        XCTAssertEqual(reAddedIntent?.desiredState, .absent)
+        XCTAssertFalse(reAddedIntent?.metadata.suppressesNativePresence ?? true)
+        XCTAssertTrue(host.universalWatchlistUnion.activeAliasIDs.contains(aliasID))
+        let sourceWritesAfterReAdd = await source.appliedStates()
+        let peerWritesAfterReAdd = await peer.appliedStates()
+        XCTAssertEqual(sourceWritesAfterReAdd, [])
+        XCTAssertEqual(peerWritesAfterReAdd, [.absent, .present])
+        XCTAssertEqual(host.cloudPublishCount, 2)
+
+        await source.setEntries([])
+        await host.refreshNativeWatchlistView()
+
+        let removedAgainIntent = host.universalWatchlist.activeSnapshot
+            .intentsByAliasID[aliasID]
+        XCTAssertTrue(
+            removedAgainIntent?.metadata.suppressesNativePresence ?? false
+        )
+        let peerWritesAfterSecondRemoval = await peer.appliedStates()
+        XCTAssertEqual(
+            peerWritesAfterSecondRemoval,
+            [.absent, .present, .absent]
+        )
+        XCTAssertEqual(host.cloudPublishCount, 3)
+    }
+
+    func testConfirmationFromAnotherDestinationIdentityCannotRemove() async throws {
+        let target = WatchlistMutationTarget(
+            aliasID: MediaAliasID(),
+            kind: .movie,
+            externalIDs: [
+                WatchlistExternalID(namespace: .imdb, value: "tt-scope")!
+            ]
+        )!
+        let store = try DurableWatchlistMutationStore(
+            store: InMemoryWatchlistMutationStateStore()
+        )
+        let priorDestination = RuntimeWatchlistDestination(
+            rawID: "shared",
+            reconciliationScope: "user-a",
+            entries: []
+        )
+        let priorReconciler = WatchlistReconciler(
+            registry: WatchlistDestinationRegistry([priorDestination]),
+            mutationStore: store
+        )
+        try await priorReconciler.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: priorDestination.id
+        )
+        try await store.markSucceeded(
+            WatchlistMutationKey(
+                profileID: "p",
+                aliasID: target.aliasID,
+                destinationID: priorDestination.id
+            )
+        )
+        let currentDestination = RuntimeWatchlistDestination(
+            rawID: "shared",
+            reconciliationScope: "user-b",
+            entries: []
+        )
+        let currentReconciler = WatchlistReconciler(
+            registry: WatchlistDestinationRegistry([currentDestination]),
+            mutationStore: store
+        )
+
+        let observations = try await currentReconciler.observeNativeBatch(
+            profileID: "p",
+            destinationID: currentDestination.id,
+            candidates: [
+                WatchlistNativeReconciliationCandidate(
+                    aliasID: target.aliasID,
+                    isPresent: false,
+                    localDesiredState: .present,
+                    target: target
+                )
+            ]
+        )
+
+        XCTAssertEqual(observations[target.aliasID], .reassertPresent)
     }
 
     func testRehydratesEveryPersistedOwnedArtworkField() async throws {
@@ -514,4 +736,95 @@ final class UniversalWatchlistHostDouble: UniversalWatchlistHost {
 
     func scheduleCloudPublish() { cloudPublishCount += 1 }
     func ensureTrackersScopedToActiveProfile() async {}
+}
+
+private actor RuntimeWatchlistDestination: WatchlistDestination {
+    nonisolated let id: WatchlistDestinationID
+    nonisolated let reconciliationScope: String
+    nonisolated let capabilities = WatchlistDestinationCapabilities(
+        readable: true,
+        writable: true,
+        removable: true,
+        bindingRequirement: .globalExternalIdentity,
+        globalIdentityNamespaces: [.imdb]
+    )
+    private var entries: [WatchlistDestinationEntry]
+    private var applied: [WatchlistDesiredState] = []
+
+    init(
+        rawID: String,
+        reconciliationScope: String? = nil,
+        entries: [WatchlistDestinationEntry]
+    ) {
+        id = WatchlistDestinationID(rawValue: rawID)!
+        self.reconciliationScope = reconciliationScope ?? rawID
+        self.entries = entries
+    }
+
+    func fetchEntries() async throws -> [WatchlistDestinationEntry] {
+        entries
+    }
+
+    func setEntries(_ entries: [WatchlistDestinationEntry]) {
+        self.entries = entries
+    }
+
+    func resolve(
+        _ target: WatchlistMutationTarget
+    ) async throws -> WatchlistDestinationBinding? {
+        guard let value = target.externalIDs.first?.value else { return nil }
+        return WatchlistDestinationBinding(
+            destinationID: id,
+            opaqueValue: value
+        )
+    }
+
+    func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding
+    ) async throws {
+        applied.append(desiredState)
+    }
+
+    func appliedStates() -> [WatchlistDesiredState] {
+        applied
+    }
+}
+
+private final class ScopeChangingRuntimeWatchlistDestination:
+    WatchlistDestination, @unchecked Sendable {
+    let id = WatchlistDestinationID(rawValue: "scope-changing")!
+    let capabilities = WatchlistDestinationCapabilities(
+        readable: true,
+        writable: false,
+        removable: false,
+        bindingRequirement: .globalExternalIdentity,
+        globalIdentityNamespaces: [.imdb]
+    )
+    private let lock = NSLock()
+    private var scope = "account-a"
+
+    var reconciliationScope: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return scope
+    }
+
+    func fetchEntries() async throws -> [WatchlistDestinationEntry] {
+        lock.lock()
+        scope = "account-b"
+        lock.unlock()
+        return []
+    }
+
+    func resolve(
+        _ target: WatchlistMutationTarget
+    ) async throws -> WatchlistDestinationBinding? {
+        nil
+    }
+
+    func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding
+    ) async throws {}
 }

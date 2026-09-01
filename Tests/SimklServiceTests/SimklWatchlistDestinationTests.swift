@@ -70,10 +70,9 @@ final class SimklWatchlistDestinationTests: XCTestCase {
         })
     }
 
-    /// A title Simkl knows only by its own id cannot be matched to anything in
-    /// the viewer's library, so it is dropped rather than surfaced as a row that
-    /// can never resolve.
-    func testEntryWithNoSharedIdentityIsSkipped() async throws {
+    /// Dropping an unidentifiable title would make a prior confirmation look
+    /// externally removed, so the whole read must fail closed instead.
+    func testEntryWithNoSharedIdentityRejectsTheIncompleteRead() async throws {
         let http = RecordingHTTPClient()
         http.stub(pathSuffix: "/sync/all-items/movies/plantowatch", json: """
         {"movies":[{"movie":{"title":"Obscure","ids":{"simkl":99}}}]}
@@ -82,9 +81,12 @@ final class SimklWatchlistDestinationTests: XCTestCase {
         {"shows":[]}
         """)
 
-        let entries = try await makeDestination(http: http).fetchEntries()
-
-        XCTAssertTrue(entries.isEmpty)
+        do {
+            _ = try await makeDestination(http: http).fetchEntries()
+            XCTFail("Expected an incomplete native read to fail")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .transient)
+        }
     }
 
     // MARK: - Writing

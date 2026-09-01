@@ -226,6 +226,35 @@ final class WatchlistModelTests: XCTestCase {
         ).contains(aliasID: alias))
     }
 
+    func testStaleNativeReAddCannotSupersedeANewerLocalRemoval() throws {
+        let model = WatchlistModel()
+        let alias = MediaAliasID()
+        let observedAt = Date(timeIntervalSince1970: 100)
+        try model.activate(profileID: "p")
+        try model.remove(
+            profileID: "p",
+            aliasID: alias,
+            kind: .movie,
+            at: observedAt
+        )
+        try model.remove(
+            profileID: "p",
+            aliasID: alias,
+            kind: .movie,
+            at: observedAt.addingTimeInterval(1)
+        )
+
+        XCTAssertFalse(try model.markRemovalSuperseded(
+            profileID: "p",
+            aliasID: alias,
+            expectedChangedAt: observedAt
+        ))
+        XCTAssertTrue(
+            model.activeSnapshot.intent(for: alias)?
+                .metadata.suppressesNativePresence ?? false
+        )
+    }
+
     func testRedirectRekeysAndMergesWithoutChangingOldestRank() throws {
         let winner = MediaAliasID(
             uuidString: "00000000-0000-0000-0000-000000000001"

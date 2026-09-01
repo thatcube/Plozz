@@ -1,8 +1,17 @@
 import CoreModels
 import Foundation
 
-public struct PlexWatchlistDestination: WatchlistLibraryResolving {
+public struct PlexWatchlistDestination:
+    WatchlistLibraryResolving, WatchlistReconciliationScopedApplying {
     public let id: WatchlistDestinationID
+    public var reconciliationScope: String {
+        guard requiresHomeUserToken else { return baseReconciliationScope }
+        let credential = discoverToken().map {
+            WatchlistReconciliationIdentity.credential($0)
+        } ?? "pending"
+        return baseReconciliationScope + "#" + credential
+    }
+    public var cacheIdentityScope: String { baseReconciliationScope }
     public let capabilities = WatchlistDestinationCapabilities(
         readable: true,
         writable: true,
@@ -23,6 +32,7 @@ public struct PlexWatchlistDestination: WatchlistLibraryResolving {
     }
 
     private let provider: PlexProvider
+    private let baseReconciliationScope: String
     /// Resolves the account-level plex.tv token of whoever the profile plays as,
     /// **at the moment of use**.
     ///
@@ -35,16 +45,19 @@ public struct PlexWatchlistDestination: WatchlistLibraryResolving {
     /// Whether this profile plays as a Home user on this account, i.e. whether a
     /// missing token is a real problem rather than "no override needed".
     private let requiresHomeUserToken: Bool
+    private let operationGate = ConcurrencyLimiter(limit: 1)
 
     public init?(
         provider: PlexProvider,
         requiresHomeUserToken: Bool = false,
+        reconciliationScope: String? = nil,
         discoverToken: @escaping @Sendable () -> String? = { nil }
     ) {
         guard let id = WatchlistDestinationID(
             rawValue: "plex.\(provider.accountID)"
         ) else { return nil }
         self.id = id
+        baseReconciliationScope = reconciliationScope ?? id.rawValue
         self.provider = provider
         self.requiresHomeUserToken = requiresHomeUserToken
         self.discoverToken = discoverToken
@@ -66,6 +79,13 @@ public struct PlexWatchlistDestination: WatchlistLibraryResolving {
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
+        try await operationGate.run { [self] in
+            try await fetchEntriesUnserialized()
+        }
+    }
+
+    private func fetchEntriesUnserialized() async throws
+        -> [WatchlistDestinationEntry] {
         guard let discoverClient else {
             // THROW, don't return []. An empty success means "this list is
             // genuinely empty", and reconciliation would take entries sourced
@@ -178,13 +198,45 @@ public struct PlexWatchlistDestination: WatchlistLibraryResolving {
         _ desiredState: WatchlistDesiredState,
         to binding: WatchlistDestinationBinding
     ) async throws {
+        try await apply(
+            desiredState,
+            to: binding,
+            expectedReconciliationScope: reconciliationScope
+        )
+    }
+
+    public func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
+        try await operationGate.run { [self] in
+            try await applyUnserialized(
+                desiredState,
+                to: binding,
+                expectedReconciliationScope: expectedReconciliationScope
+            )
+        }
+    }
+
+    private func applyUnserialized(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
         guard binding.destinationID == id else {
             throw WatchlistDestinationError.permanent
+        }
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
         }
         guard let discoverClient else {
             // Transient by nature: the token is on its way. Retrying is right —
             // writing with the owner's token would put this on the WRONG list.
             throw WatchlistDestinationError.transient
+        }
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
         }
         try await discoverClient.setWatchlisted(
             desiredState == .present,

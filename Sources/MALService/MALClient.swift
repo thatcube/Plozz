@@ -133,21 +133,44 @@ struct MALClient: Sendable {
     /// `PATCH /v2/anime/{anime_id}/my_list_status` — updates the user's list entry.
     /// `GET /v2/users/@me/animelist?status=plan_to_watch` — the plan-to-watch list.
     func planToWatch(accessToken: String) async throws -> MALAnimeListResponse {
-        let endpoint = Endpoint(
+        let limit = 1_000
+        let maximumPages = 1_000
+        var offset = 0
+        var entries: [MALAnimeListEntry] = []
+        for _ in 0..<maximumPages {
+            let endpoint = Endpoint(
             method: .get,
             path: "/users/@me/animelist",
             queryItems: [
                 URLQueryItem(name: "status", value: "plan_to_watch"),
-                URLQueryItem(name: "limit", value: "1000"),
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "offset", value: String(offset)),
                 URLQueryItem(name: "fields", value: "id,title,start_season"),
             ],
             headers: ["Authorization": "Bearer \(accessToken)"]
         )
-        return try await http.decode(
-            MALAnimeListResponse.self,
-            from: endpoint,
-            baseURL: apiBaseURL
-        )
+            let page = try await http.decode(
+                MALAnimeListResponse.self,
+                from: endpoint,
+                baseURL: apiBaseURL
+            )
+            let pageEntries = page.data ?? []
+            entries.append(contentsOf: pageEntries)
+            guard let next = page.paging?.next else {
+                return MALAnimeListResponse(data: entries, paging: nil)
+            }
+            guard !pageEntries.isEmpty else {
+                throw WatchlistDestinationError.transient
+            }
+            let nextOffset = URLComponents(string: next)?.queryItems?
+                .first { $0.name == "offset" }?.value.flatMap(Int.init)
+                ?? (offset + pageEntries.count)
+            guard nextOffset > offset else {
+                throw WatchlistDestinationError.transient
+            }
+            offset = nextOffset
+        }
+        throw WatchlistDestinationError.transient
     }
 
     /// `DELETE /v2/anime/{anime_id}/my_list_status` — removes the list entry.
@@ -195,28 +218,9 @@ struct MALClient: Sendable {
     // MARK: - Helpers
 
     private func sendForm(endpoint: Endpoint, parameters: [String: String], baseURL: URL) async throws -> Data {
-        var request = URLRequest(url: baseURL.appendingPathComponent(endpoint.path))
-        request.httpMethod = endpoint.method.rawValue
-        request.httpBody = formBody(parameters)
-        for (key, value) in endpoint.headers {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AppError.unknown("MAL: non-HTTP response")
-        }
-        guard (200...299).contains(httpResponse.statusCode) else {
-            switch httpResponse.statusCode {
-            case 400:
-                throw AppError.invalidResponse
-            case 401, 403:
-                throw AppError.unauthorized
-            case 404:
-                throw AppError.notFound
-            default:
-                throw AppError.unknown("MAL: HTTP \(httpResponse.statusCode)")
-            }
-        }
+        var endpoint = endpoint
+        endpoint.body = formBody(parameters)
+        let (data, _) = try await http.send(endpoint, baseURL: baseURL)
         return data
     }
 

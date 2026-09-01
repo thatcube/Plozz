@@ -11,8 +11,14 @@ import Foundation
 ///
 /// Unlike AniList, MAL tokens DO expire and carry a refresh token, so this
 /// refreshes on demand — the same shape as Trakt's destination.
-public actor MALWatchlistDestination: WatchlistDestination {
+public actor MALWatchlistDestination:
+    WatchlistDestination, WatchlistReconciliationScopedApplying {
     public nonisolated let id: WatchlistDestinationID
+    public nonisolated var reconciliationScope: String {
+        id.rawValue + "#" + (
+            tokenStore.load()?.stableAccountIdentity ?? "disconnected"
+        )
+    }
     /// MAL's API indexes only its own ids, but ``AnimeIDMapper`` translates the
     /// other anime catalogues into one — the same keyless, cached lookup the
     /// scrobbler already uses. That is what makes this work for real libraries:
@@ -29,19 +35,43 @@ public actor MALWatchlistDestination: WatchlistDestination {
     private let client: MALClient
     private let auth: MALAuthService
     private let tokenStore: MALTokenStoring
+    private let profileGeneration: MALProfileGeneration
+    private let operationGate = ConcurrencyLimiter(limit: 1)
 
     public init(
         config: MALConfig,
         http: HTTPClient,
         tokenStore: MALTokenStoring
     ) {
+        self.init(
+            config: config,
+            http: http,
+            tokenStore: tokenStore,
+            profileGeneration: MALProfileGeneration()
+        )
+    }
+
+    init(
+        config: MALConfig,
+        http: HTTPClient,
+        tokenStore: MALTokenStoring,
+        profileGeneration: MALProfileGeneration
+    ) {
         id = WatchlistDestinationID(rawValue: "myanimelist")!
         client = MALClient(config: config, http: http)
         auth = MALAuthService(config: config, http: http)
         self.tokenStore = tokenStore
+        self.profileGeneration = profileGeneration
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
+        try await operationGate.run { [self] in
+            try await fetchEntriesUnserialized()
+        }
+    }
+
+    private func fetchEntriesUnserialized() async throws
+        -> [WatchlistDestinationEntry] {
         let response = try await client.planToWatch(
             accessToken: try await validAccessToken()
         )
@@ -67,9 +97,38 @@ public actor MALWatchlistDestination: WatchlistDestination {
         _ desiredState: WatchlistDesiredState,
         to binding: WatchlistDestinationBinding
     ) async throws {
+        try await apply(
+            desiredState,
+            to: binding,
+            expectedReconciliationScope: reconciliationScope
+        )
+    }
+
+    public func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
+        try await operationGate.run { [self] in
+            try await applyUnserialized(
+                desiredState,
+                to: binding,
+                expectedReconciliationScope: expectedReconciliationScope
+            )
+        }
+    }
+
+    private func applyUnserialized(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
         guard binding.destinationID == id,
               let parsed = Self.parse(binding.opaqueValue) else {
             throw WatchlistDestinationError.permanent
+        }
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
         }
         guard let animeID = await Self.malID(for: parsed.externalID) else {
             // No MAL id exists for this title, or the mapping service has never
@@ -78,6 +137,9 @@ public actor MALWatchlistDestination: WatchlistDestination {
             throw WatchlistDestinationError.permanent
         }
         let token = try await validAccessToken()
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
+        }
         do {
             if desiredState == .present {
                 try await client.updateAnimeListStatus(
@@ -130,14 +192,21 @@ public actor MALWatchlistDestination: WatchlistDestination {
     }
 
     private func validAccessToken() async throws -> String {
+        let generation = profileGeneration.current
         guard let tokens = tokenStore.load() else {
             throw WatchlistDestinationError.authenticationRequired
         }
         guard tokens.isExpired else { return tokens.accessToken }
         do {
             let refreshed = try await auth.refresh(tokens.refreshToken)
-            try? tokenStore.save(refreshed)
+                .inheritingAccountIdentity(from: tokens)
+            guard profileGeneration.performIfCurrent(
+                generation,
+                operation: { try? tokenStore.save(refreshed) }
+            ) else { throw CancellationError() }
             return refreshed.accessToken
+        } catch is CancellationError {
+            throw WatchlistDestinationError.transient
         } catch AppError.unauthorized {
             throw WatchlistDestinationError.authenticationRequired
         } catch AppError.rateLimited(let retryAfter) {

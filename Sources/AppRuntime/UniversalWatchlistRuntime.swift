@@ -936,10 +936,9 @@ public extension UniversalWatchlistHost {
     /// destinations that are enabled *right now* — so switching a server off
     /// retracts its contribution for free.
     ///
-    /// The reconciliation below is unchanged and still matters: it is how an
-    /// explicit ADD gets re-asserted on a server that lost it, and how an
-    /// explicit REMOVE is confirmed and then, if the server later adds the title
-    /// back, superseded.
+    /// Reconciliation distinguishes an add that never landed from a title that a
+    /// destination accepted and later removed. The former is retried; the latter
+    /// becomes a durable removal and is fanned out to every other destination.
     func refreshNativeWatchlistView() async {
         guard let reconciler = universalWatchlistReconciler else { return }
         let profileID = profiles.activeProfileID
@@ -951,6 +950,11 @@ public extension UniversalWatchlistHost {
                 && universalWatchlistRefreshGeneration == refreshGeneration
         }
         let started = Date()
+        // Native results describe this exact intent generation. Capturing after
+        // the network suspension would let an absence fetched before a local
+        // re-add erase that newer action.
+        let observedIntentsByAlias =
+            universalWatchlist.activeSnapshot.intentsByAliasID
         let report = await reconciler.fetchNativeEntries()
         // Belt to the caller's braces. Fetching is network work, and what comes
         // back reflects whatever credentials the destinations held when it
@@ -995,7 +999,7 @@ public extension UniversalWatchlistHost {
         let presentByDestination = resolvedByDestination.mapValues {
             Set($0.map(\.0))
         }
-        for intent in universalWatchlist.activeSnapshot.intentsByAliasID.values {
+        for intent in observedIntentsByAlias.values {
             guard let record = mediaAliasLedger.activeSnapshot.record(
                 for: intent.aliasID
             ), let target = WatchlistMutationTarget(
@@ -1041,11 +1045,32 @@ public extension UniversalWatchlistHost {
         }
         var view = universalWatchlistNativeView
         var supersededCount = 0
+        var confirmedRemovalSourcesByAlias:
+            [MediaAliasID: Set<WatchlistDestinationID>] = [:]
+        var reassertions:
+            [(WatchlistDestinationID, [WatchlistMutationTarget])] = []
         for read in report.successes {
+            guard let currentScope =
+                    await reconciler.currentReconciliationScope(
+                for: read.destinationID
+            ) else { continue }
+            guard let currentCacheScope =
+                    await reconciler.currentCacheIdentityScope(
+                for: read.destinationID
+            ) else { continue }
+            guard currentScope == read.reconciliationScope else {
+                view.discardCachedEntries(
+                    for: read.destinationID,
+                    unlessIdentityScopeMatches: currentCacheScope
+                )
+                continue
+            }
             let observations = (try? await reconciler.observeNativeBatch(
                 profileID: profileID,
                 destinationID: read.destinationID,
-                candidates: candidatesByDestination[read.destinationID] ?? []
+                candidates: candidatesByDestination[read.destinationID] ?? [],
+                reconciliationScope: read.reconciliationScope,
+                nativeReadStartedAt: read.startedAt
             )) ?? [:]
             // Ask the server which of these it actually holds. It is the same
             // server that just handed us the list, so the answer arrives with
@@ -1098,28 +1123,100 @@ public extension UniversalWatchlistHost {
                 entries.append(value)
             }
             guard refreshIsCurrent() else { return }
+            guard let currentScope =
+                    await reconciler.currentReconciliationScope(
+                for: read.destinationID
+            ) else { continue }
+            guard let currentCacheScope =
+                    await reconciler.currentCacheIdentityScope(
+                for: read.destinationID
+            ) else { continue }
+            guard currentScope == read.reconciliationScope else {
+                view.discardCachedEntries(
+                    for: read.destinationID,
+                    unlessIdentityScopeMatches: currentCacheScope
+                )
+                continue
+            }
             // A successful read REPLACES what this destination held, empty
             // included: the viewer clearing a server's watchlist is an answer,
             // not a blip. Home learned the same lesson the expensive way.
             view.applySuccess(
                 destinationID: read.destinationID,
-                entries: entries
+                entries: entries,
+                identityScope: currentCacheScope
             )
             FanoutDiagnostics.emit(
                 "watchlist.owned dest=\(read.destinationID.rawValue) entries=\(entries.count) resolved=\(entries.filter { $0.ownedSource != nil }.count) hadResolver=\(resolver != nil)"
             )
             for (aliasID, observation) in observations
             where observation == .nativeAddition {
-                // The removal was applied here and the server has since added
-                // the title back. Stop the tombstone suppressing it, rather than
-                // re-asserting it as intent — presence now comes from the native
-                // view, so switching this server off still takes it away.
-                if (try? universalWatchlist.markRemovalSuperseded(
-                    profileID: profileID,
-                    aliasID: aliasID
-                )) == true {
+                guard let observedIntent = observedIntentsByAlias[aliasID],
+                      observedIntent.desiredState == .absent,
+                      let currentIntent = universalWatchlist.activeSnapshot
+                        .intentsByAliasID[aliasID],
+                      currentIntent.changedAt == observedIntent.changedAt,
+                      let target = targetsByAlias[aliasID] else { continue }
+                let supersededIntent: WatchlistIntent?
+                if currentIntent.metadata.suppressesNativePresence {
+                    guard (try? universalWatchlist.markRemovalSuperseded(
+                        profileID: profileID,
+                        aliasID: aliasID,
+                        expectedChangedAt: observedIntent.changedAt
+                    )) == true else { continue }
+                    supersededIntent = universalWatchlist.activeSnapshot
+                        .intentsByAliasID[aliasID]
                     supersededCount += 1
+                } else {
+                    // A prior attempt persisted the superseded tombstone but
+                    // failed before fan-out/acknowledgement. The observation
+                    // remains armed so this pass can retry the durable work.
+                    supersededIntent = currentIntent
                 }
+                do {
+                    try await reconciler
+                        .replacePendingRemovalsWithPresentFanOut(
+                        profileID: profileID,
+                        target: target,
+                        excluding: [read.destinationID]
+                    )
+                    do {
+                        try await reconciler.acknowledgeNativeAddition(
+                            profileID: profileID,
+                            target: target,
+                            destinationID: read.destinationID,
+                            observedReconciliationScope:
+                                read.reconciliationScope
+                        )
+                    } catch {
+                        PlozzLog.app.error(
+                            "Watchlist native re-add acknowledgement failed"
+                        )
+                    }
+                    scheduleCloudPublish()
+                } catch {
+                    let latest = universalWatchlist.activeSnapshot
+                        .intentsByAliasID[aliasID]
+                    if latest?.changedAt == supersededIntent?.changedAt,
+                       latest?.metadata.suppressesNativePresence == false {
+                        try? universalWatchlist.remove(
+                            profileID: profileID,
+                            aliasID: aliasID,
+                            kind: observedIntent.kind,
+                            presentation: observedIntent.presentation
+                        )
+                    }
+                    PlozzLog.app.error(
+                        "Watchlist native re-add failed to enqueue"
+                    )
+                }
+            }
+            for (aliasID, observation) in observations
+            where observation == .confirmedNativeRemoval {
+                confirmedRemovalSourcesByAlias[
+                    aliasID,
+                    default: []
+                ].insert(read.destinationID)
             }
             let reassertTargets = observations.compactMap {
                 aliasID, observation in
@@ -1127,11 +1224,62 @@ public extension UniversalWatchlistHost {
                     ? targetsByAlias[aliasID]
                     : nil
             }
+            reassertions.append((read.destinationID, reassertTargets))
+            guard refreshIsCurrent() else { return }
+        }
+        var confirmedRemovalCount = 0
+        for (aliasID, sourceDestinationIDs) in confirmedRemovalSourcesByAlias {
+            guard let observedIntent = observedIntentsByAlias[aliasID],
+                  let currentIntent =
+                    universalWatchlist.activeSnapshot.intentsByAliasID[aliasID],
+                  currentIntent.desiredState == .present
+                    || !currentIntent.metadata.suppressesNativePresence,
+                  currentIntent.origin == .local,
+                  currentIntent.changedAt == observedIntent.changedAt,
+                  let target = targetsByAlias[aliasID] else { continue }
+            do {
+                try universalWatchlist.remove(
+                    profileID: profileID,
+                    aliasID: aliasID,
+                    kind: currentIntent.kind,
+                    presentation: currentIntent.presentation
+                )
+                confirmedRemovalCount += 1
+                // Persisted intent must reach peers even if a newer refresh
+                // supersedes this one during the fan-out actor hops below.
+                scheduleCloudPublish()
+            } catch {
+                PlozzLog.app.error(
+                    "Watchlist confirmed native removal failed to persist"
+                )
+                continue
+            }
+            do {
+                // One reconciler call produces one durable batch. A local re-add
+                // that arrives while this actor hop is pending is therefore
+                // ordered after the whole removal fan-out, never between peers.
+                try await reconciler.enqueueFanOut(
+                    profileID: profileID,
+                    desiredState: .absent,
+                    target: target,
+                    excluding: sourceDestinationIDs
+                )
+            } catch {
+                PlozzLog.app.error(
+                    "Watchlist confirmed native removal failed to enqueue"
+                )
+            }
+            guard refreshIsCurrent() else { return }
+        }
+        for (destinationID, targets) in reassertions {
+            let filtered = targets.filter {
+                confirmedRemovalSourcesByAlias[$0.aliasID] == nil
+            }
             try? await reconciler.enqueue(
                 profileID: profileID,
                 desiredState: .present,
-                targets: reassertTargets,
-                destinationID: read.destinationID
+                targets: filtered,
+                destinationID: destinationID
             )
             guard refreshIsCurrent() else { return }
         }
@@ -1140,13 +1288,32 @@ public extension UniversalWatchlistHost {
         // or its identity changed, so retaining that bucket could show the prior
         // account's list indefinitely.
         for failure in report.failures {
+            guard let currentScope =
+                    await reconciler.currentReconciliationScope(
+                for: failure.destinationID
+            ) else { continue }
+            guard let currentCacheScope =
+                    await reconciler.currentCacheIdentityScope(
+                for: failure.destinationID
+            ) else { continue }
+            guard currentScope == failure.reconciliationScope else {
+                view.discardCachedEntries(
+                    for: failure.destinationID,
+                    unlessIdentityScopeMatches: currentCacheScope
+                )
+                continue
+            }
             if failure.classification == .authentication {
                 view.applySuccess(
                     destinationID: failure.destinationID,
-                    entries: []
+                    entries: [],
+                    identityScope: currentCacheScope
                 )
             } else {
-                view.applyFailure(destinationID: failure.destinationID)
+                view.applyFailure(
+                    destinationID: failure.destinationID,
+                    identityScope: currentCacheScope
+                )
             }
         }
         // And one that is no longer enabled contributes nothing at all. This is
@@ -1169,7 +1336,12 @@ public extension UniversalWatchlistHost {
         // aren't intents. Without this a title sits in the row unable to find
         // its own library copy, and the page it opens can't tell it is on the
         // watchlist at all.
-        await reconcileUniversalWatchlistIdentity(profileID: profileID)
+        await reconcileUniversalWatchlistIdentity(
+            profileID: profileID,
+            skippingMutationAliasIDs: Set(
+                confirmedRemovalSourcesByAlias.keys
+            )
+        )
 
         let union = universalWatchlistUnion
         // Off the startup path entirely: detached so nothing awaits it, and it
@@ -1178,7 +1350,7 @@ public extension UniversalWatchlistHost {
         Task.detached(priority: .utility) { [box = universalWatchlistAnimeBridge] in
             await box.refreshIfNeeded()
         }
-        let refreshLine = "watchlist.refresh destinations=\(view.bucketsByDestinationID.count) accounts=\(nativeWatchlistAccounts.count) enabled=\(universalWatchlistDestinationIDs.count) reads=\(report.successes.count) entries=\(report.successes.reduce(0) { $0 + $1.entries.count }) failures=\(report.failures.map { "\($0.destinationID.rawValue):\($0.classification)" }) superseded=\(supersededCount) bridge=\(animeBridge.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
+        let refreshLine = "watchlist.refresh destinations=\(view.bucketsByDestinationID.count) accounts=\(nativeWatchlistAccounts.count) enabled=\(universalWatchlistDestinationIDs.count) reads=\(report.successes.count) entries=\(report.successes.reduce(0) { $0 + $1.entries.count }) failures=\(report.failures.map { "\($0.destinationID.rawValue):\($0.classification)" }) superseded=\(supersededCount) externalRemovals=\(confirmedRemovalCount) bridge=\(animeBridge.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
         PlozzLog.app.info("Watchlist \(refreshLine)")
         FanoutDiagnostics.emit(refreshLine)
         // Counts only — no titles, ids or server names. `nativeOnly` is the half
@@ -1237,7 +1409,12 @@ public extension UniversalWatchlistHost {
     /// dropped on the way in. Otherwise a server switched off while the app was
     /// closed would come back on the next launch, which is the exact bug the
     /// read-time view exists to fix.
-    func loadUniversalWatchlistNativeView(profileID: String, scope: String) {
+    func loadUniversalWatchlistNativeView(
+        profileID: String,
+        scope: String,
+        destinationIdentityScopes: [String: String] = [:],
+        legacyValidatedDestinationIDs: Set<String> = []
+    ) {
         let previous = universalWatchlistNativeView
         let wasLoaded = universalWatchlistNativeViewLoaded
         let store: (any NativeWatchlistViewStoring)?
@@ -1255,7 +1432,11 @@ public extension UniversalWatchlistHost {
         universalWatchlistNativeViewStore = store
         // Scoped BEFORE anything reads it: entries read as a different Plex
         // identity are somebody else's and must not be shown here even once.
-        var view = ((try? store?.load()) ?? .empty).scoped(to: scope)
+        var view = ((try? store?.load()) ?? .empty).scoped(
+            to: scope,
+            destinationIdentityScopes: destinationIdentityScopes,
+            legacyValidatedDestinationIDs: legacyValidatedDestinationIDs
+        )
         view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
         universalWatchlistNativeView = view
         universalWatchlistNativeViewLoaded = true
@@ -1326,7 +1507,10 @@ public extension UniversalWatchlistHost {
         }
     }
 
-    func reconcileUniversalWatchlistIdentity(profileID: String) async {
+    func reconcileUniversalWatchlistIdentity(
+        profileID: String,
+        skippingMutationAliasIDs: Set<MediaAliasID> = []
+    ) async {
         guard let reconciler = universalWatchlistReconciler,
               profiles.activeProfileID == profileID else { return }
         let intents = Array(
@@ -1404,7 +1588,10 @@ public extension UniversalWatchlistHost {
         )
 
         var changes: [WatchlistIdentityEvidenceChange] = []
-        for intent in intents {
+        for intent in intents
+        where !skippingMutationAliasIDs.contains(intent.aliasID)
+            && (intent.desiredState != .absent
+                || intent.metadata.suppressesNativePresence) {
             guard let record = mediaAliasLedger.activeSnapshot.record(
                 for: intent.aliasID
             ), let target = WatchlistMutationTarget(
@@ -1569,11 +1756,17 @@ public extension UniversalWatchlistHost {
                 // destination refuses to act until it arrives, instead of falling
                 // back to the account owner's list.
                 let accountID = resolved.account.id
-                let playsAsHomeUser = profile.homeUserBinding(forPlexAccount: accountID) != nil
+                let homeUserID = profile.homeUserBinding(
+                    forPlexAccount: accountID
+                )?.homeUserID
+                let playsAsHomeUser = homeUserID != nil
+                let destinationScope =
+                    "\(accountID)#\(homeUserID ?? "owner")"
                 destinations.append(
                     PlexWatchlistDestination(
                         provider: provider,
                         requiresHomeUserToken: playsAsHomeUser,
+                        reconciliationScope: destinationScope,
                         discoverToken: { [box = plexDiscoverTokens] in
                             box.token(for: accountID)
                         }
@@ -1586,6 +1779,7 @@ public extension UniversalWatchlistHost {
                 destinations.append(destination)
             }
         }
+        let legacyValidatedDestinationIDs = Set(destinations.map(\.id.rawValue))
         destinations.append(contentsOf: trackerWatchlistDestinations)
         // Which destinations may contribute to what the viewer sees. Taken from
         // the destinations actually built, so it can never drift from the set
@@ -1602,7 +1796,13 @@ public extension UniversalWatchlistHost {
         universalWatchlistMutationStore = mutationStore
         loadUniversalWatchlistNativeView(
             profileID: profileID,
-            scope: cacheScopeKey
+            scope: cacheScopeKey,
+            destinationIdentityScopes: Dictionary(
+                uniqueKeysWithValues: destinations.map {
+                    ($0.id.rawValue, $0.cacheIdentityScope)
+                }
+            ),
+            legacyValidatedDestinationIDs: legacyValidatedDestinationIDs
         )
         universalWatchlistReconciler = WatchlistReconciler(
             registry: WatchlistDestinationRegistry(destinations),

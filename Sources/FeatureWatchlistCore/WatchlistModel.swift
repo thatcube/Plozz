@@ -264,6 +264,7 @@ public final class WatchlistModel {
     public func markRemovalSuperseded(
         profileID: String,
         aliasID: MediaAliasID,
+        expectedChangedAt: Date? = nil,
         at date: Date = Date()
     ) throws -> Bool {
         try ensureHydrated(profileID)
@@ -271,7 +272,9 @@ public final class WatchlistModel {
         guard let index = state.intents.firstIndex(where: {
             $0.aliasID == aliasID
         }), state.intents[index].desiredState == .absent,
-            state.intents[index].metadata.suppressesNativePresence
+            state.intents[index].metadata.suppressesNativePresence,
+            expectedChangedAt == nil
+                || state.intents[index].changedAt == expectedChangedAt
         else { return false }
         state.intents[index].metadata.removalSupersededAt = date
         state.intents[index].changedAt = date

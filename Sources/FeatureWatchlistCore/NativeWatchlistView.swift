@@ -123,6 +123,7 @@ public struct NativeWatchlistEntry: Codable, Hashable, Sendable {
 public struct NativeWatchlistBucket: Codable, Hashable, Sendable {
     public var entries: [NativeWatchlistEntry]
     public var lastSuccessfulReadAt: Date?
+    public var identityScope: String?
     /// True when the most recent read FAILED and these entries are being kept
     /// only so a briefly-unreachable server doesn't blank the watchlist.
     public var isStale: Bool
@@ -130,6 +131,7 @@ public struct NativeWatchlistBucket: Codable, Hashable, Sendable {
     public init(
         entries: [NativeWatchlistEntry] = [],
         lastSuccessfulReadAt: Date? = nil,
+        identityScope: String? = nil,
         isStale: Bool = false
     ) {
         self.entries = entries.sorted {
@@ -137,6 +139,7 @@ public struct NativeWatchlistBucket: Codable, Hashable, Sendable {
             return $0.aliasID < $1.aliasID
         }
         self.lastSuccessfulReadAt = lastSuccessfulReadAt
+        self.identityScope = identityScope
         self.isStale = isStale
     }
 }
@@ -185,6 +188,36 @@ public struct NativeWatchlistView: Codable, Hashable, Sendable {
         return self
     }
 
+    public func scoped(
+        to scope: String,
+        destinationIdentityScopes: [String: String],
+        legacyValidatedDestinationIDs: Set<String> = []
+    ) -> Self {
+        var result = self
+        let legacyAggregateScopeMatches = identityScope == scope
+        for (destinationID, bucket) in bucketsByDestinationID {
+            guard let expectedScope =
+                    destinationIdentityScopes[destinationID] else {
+                result.bucketsByDestinationID[destinationID] = nil
+                continue
+            }
+            if let bucketScope = bucket.identityScope {
+                if bucketScope != expectedScope {
+                    result.bucketsByDestinationID[destinationID] = nil
+                }
+            } else if !legacyAggregateScopeMatches
+                        || !legacyValidatedDestinationIDs.contains(destinationID) {
+                result.bucketsByDestinationID[destinationID] = nil
+            } else {
+                var migrated = bucket
+                migrated.identityScope = expectedScope
+                result.bucketsByDestinationID[destinationID] = migrated
+            }
+        }
+        result.identityScope = scope
+        return result
+    }
+
     public static let empty = Self()
 
     public func bucket(
@@ -203,11 +236,13 @@ public struct NativeWatchlistView: Codable, Hashable, Sendable {
     public mutating func applySuccess(
         destinationID: WatchlistDestinationID,
         entries: [NativeWatchlistEntry],
+        identityScope: String? = nil,
         at date: Date = Date()
     ) {
         bucketsByDestinationID[destinationID.rawValue] = NativeWatchlistBucket(
             entries: entries,
             lastSuccessfulReadAt: date,
+            identityScope: identityScope,
             isStale: false
         )
     }
@@ -218,13 +253,32 @@ public struct NativeWatchlistView: Codable, Hashable, Sendable {
     /// must not empty their watchlist. Nothing is written for a destination that
     /// has never been read successfully — inventing an empty bucket would claim
     /// knowledge we don't have.
-    public mutating func applyFailure(destinationID: WatchlistDestinationID) {
+    public mutating func applyFailure(
+        destinationID: WatchlistDestinationID,
+        identityScope: String? = nil
+    ) {
         guard var bucket = bucketsByDestinationID[destinationID.rawValue] else {
+            return
+        }
+        if let identityScope,
+           bucket.identityScope != identityScope {
+            bucketsByDestinationID[destinationID.rawValue] = nil
             return
         }
         guard !bucket.isStale else { return }
         bucket.isStale = true
         bucketsByDestinationID[destinationID.rawValue] = bucket
+    }
+
+    public mutating func discardCachedEntries(
+        for destinationID: WatchlistDestinationID,
+        unlessIdentityScopeMatches identityScope: String
+    ) {
+        guard let bucket = bucketsByDestinationID[destinationID.rawValue],
+              bucket.identityScope != identityScope else {
+            return
+        }
+        bucketsByDestinationID[destinationID.rawValue] = nil
     }
 
     /// Drops everything the given destinations contributed.

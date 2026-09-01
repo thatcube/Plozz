@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 // MARK: - Stored tokens
@@ -7,16 +8,35 @@ public struct MALTokens: Codable, Sendable, Equatable {
     public var accessToken: String
     public var refreshToken: String
     public var expiresAt: Date
+    public var accountIdentity: String?
 
-    public init(accessToken: String, refreshToken: String, expiresAt: Date) {
+    public init(
+        accessToken: String,
+        refreshToken: String,
+        expiresAt: Date,
+        accountIdentity: String? = nil
+    ) {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.expiresAt = expiresAt
+        self.accountIdentity = accountIdentity
     }
 
     /// Expired with a 5-minute early margin.
     public var isExpired: Bool {
         Date() >= expiresAt.addingTimeInterval(-300)
+    }
+
+    public var stableAccountIdentity: String {
+        accountIdentity ?? WatchlistReconciliationIdentity.credential(
+            refreshToken.isEmpty ? accessToken : refreshToken
+        )
+    }
+
+    public func inheritingAccountIdentity(from previous: Self) -> Self {
+        var value = self
+        value.accountIdentity = previous.stableAccountIdentity
+        return value
     }
 }
 
@@ -117,4 +137,9 @@ struct MALAnimeListEntry: Decodable, Equatable {
 
 struct MALAnimeListResponse: Decodable, Equatable {
     var data: [MALAnimeListEntry]?
+    var paging: MALAnimeListPaging?
+}
+
+struct MALAnimeListPaging: Decodable, Equatable {
+    var next: String?
 }

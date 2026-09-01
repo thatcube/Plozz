@@ -15,8 +15,15 @@ import Foundation
 /// namespaces. The identity layer had carried AniList/MAL/AniDB ids all along;
 /// the watchlist target was dropping them on the way through, which is why this
 /// destination could not previously be written at all.
-public actor AniListWatchlistDestination: WatchlistDestination {
+public actor AniListWatchlistDestination:
+    WatchlistDestination, WatchlistReconciliationScopedApplying {
     public nonisolated let id: WatchlistDestinationID
+    public nonisolated var reconciliationScope: String {
+        let identity = tokenStore.load().map {
+            WatchlistReconciliationIdentity.credential($0.accessToken)
+        } ?? "disconnected"
+        return id.rawValue + "#" + identity
+    }
     /// No IMDb/TMDb/TVDb: AniList cannot look a title up by them, and offering an
     /// identity it cannot use would only mint bindings that resolve to nothing.
     ///
@@ -38,6 +45,7 @@ public actor AniListWatchlistDestination: WatchlistDestination {
     /// The viewer's AniList user id, needed to read or delete a list entry.
     /// Resolved once and kept: it cannot change without the token changing too.
     private var cachedUserID: Int?
+    private var cachedUserCredentialIdentity: String?
 
     public init(
         config: AniListConfig,
@@ -80,11 +88,29 @@ public actor AniListWatchlistDestination: WatchlistDestination {
         _ desiredState: WatchlistDesiredState,
         to binding: WatchlistDestinationBinding
     ) async throws {
+        try await apply(
+            desiredState,
+            to: binding,
+            expectedReconciliationScope: reconciliationScope
+        )
+    }
+
+    public func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
         guard binding.destinationID == id,
               let parsed = Self.parse(binding.opaqueValue) else {
             throw WatchlistDestinationError.permanent
         }
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
+        }
         let token = try accessToken()
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
+        }
         do {
             // A MAL id has to be translated into AniList's own media id first;
             // AniList indexes both, so this is a lookup rather than a guess.
@@ -92,6 +118,9 @@ public actor AniListWatchlistDestination: WatchlistDestination {
                 // AniList does not know this title. Permanent: retrying the same
                 // lookup will keep returning nothing.
                 throw WatchlistDestinationError.permanent
+            }
+            guard reconciliationScope == expectedReconciliationScope else {
+                throw WatchlistDestinationError.authenticationRequired
             }
             if desiredState == .present {
                 try await client.saveMediaListEntry(
@@ -101,9 +130,13 @@ public actor AniListWatchlistDestination: WatchlistDestination {
                     accessToken: token
                 )
             } else {
+                let resolvedUserID = try await userID(accessToken: token)
+                guard reconciliationScope == expectedReconciliationScope else {
+                    throw WatchlistDestinationError.authenticationRequired
+                }
                 try await client.deleteMediaListEntry(
                     mediaId: mediaID,
-                    userID: try await userID(accessToken: token),
+                    userID: resolvedUserID,
                     accessToken: token
                 )
             }
@@ -165,10 +198,16 @@ public actor AniListWatchlistDestination: WatchlistDestination {
     }
 
     private func userID(accessToken: String) async throws -> Int {
-        if let cachedUserID { return cachedUserID }
+        let credentialIdentity =
+            WatchlistReconciliationIdentity.credential(accessToken)
+        if let cachedUserID,
+           cachedUserCredentialIdentity == credentialIdentity {
+            return cachedUserID
+        }
         do {
             let viewer = try await client.viewer(accessToken: accessToken)
             cachedUserID = viewer.id
+            cachedUserCredentialIdentity = credentialIdentity
             return viewer.id
         } catch AppError.unauthorized {
             throw WatchlistDestinationError.authenticationRequired

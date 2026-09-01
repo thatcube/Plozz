@@ -2,8 +2,14 @@ import CoreModels
 import CoreNetworking
 import Foundation
 
-public actor TraktWatchlistDestination: WatchlistDestination {
+public actor TraktWatchlistDestination:
+    WatchlistDestination, WatchlistReconciliationScopedApplying {
     public nonisolated let id: WatchlistDestinationID
+    public nonisolated var reconciliationScope: String {
+        id.rawValue + "#" + (
+            tokenStore.load()?.stableAccountIdentity ?? "disconnected"
+        )
+    }
     public nonisolated let capabilities = WatchlistDestinationCapabilities(
         readable: true,
         writable: true,
@@ -16,6 +22,7 @@ public actor TraktWatchlistDestination: WatchlistDestination {
     private let auth: TraktAuthService
     private let tokenStore: TraktTokenStoring
     private let profileGeneration: TraktProfileGeneration
+    private let operationGate = ConcurrencyLimiter(limit: 1)
 
     public init(
         config: TraktConfig,
@@ -43,6 +50,13 @@ public actor TraktWatchlistDestination: WatchlistDestination {
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
+        try await operationGate.run { [self] in
+            try await fetchEntriesUnserialized()
+        }
+    }
+
+    private func fetchEntriesUnserialized() async throws
+        -> [WatchlistDestinationEntry] {
         let result = try await client.watchlist(
             accessToken: validAccessToken()
         )
@@ -69,15 +83,48 @@ public actor TraktWatchlistDestination: WatchlistDestination {
         _ desiredState: WatchlistDesiredState,
         to binding: WatchlistDestinationBinding
     ) async throws {
+        try await apply(
+            desiredState,
+            to: binding,
+            expectedReconciliationScope: reconciliationScope
+        )
+    }
+
+    public func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
+        try await operationGate.run { [self] in
+            try await applyUnserialized(
+                desiredState,
+                to: binding,
+                expectedReconciliationScope: expectedReconciliationScope
+            )
+        }
+    }
+
+    private func applyUnserialized(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
+    ) async throws {
         guard binding.destinationID == id,
               let parsed = Self.parse(binding.opaqueValue) else {
             throw WatchlistDestinationError.permanent
+        }
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
+        }
+        let token = try await validAccessToken()
+        guard reconciliationScope == expectedReconciliationScope else {
+            throw WatchlistDestinationError.authenticationRequired
         }
         try await client.setWatchlisted(
             desiredState == .present,
             kind: parsed.kind,
             ids: Self.ids(parsed.externalID),
-            accessToken: try await validAccessToken()
+            accessToken: token
         )
     }
 
@@ -89,6 +136,7 @@ public actor TraktWatchlistDestination: WatchlistDestination {
         guard tokens.isExpired else { return tokens.accessToken }
         do {
             let refreshed = try await auth.refresh(tokens.refreshToken)
+                .inheritingAccountIdentity(from: tokens)
             guard profileGeneration.performIfCurrent(
                 generation,
                 operation: { try? tokenStore.save(refreshed) }

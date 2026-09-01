@@ -148,6 +148,7 @@ public actor TraktScrobbler: TraktScrobbling {
         guard tokens.isExpired else { return tokens.accessToken }
         do {
             let refreshed = try await auth.refresh(tokens.refreshToken)
+                .inheritingAccountIdentity(from: tokens)
             guard profileGeneration.performIfCurrent(
                 generation,
                 operation: { try? tokenStore.save(refreshed) }

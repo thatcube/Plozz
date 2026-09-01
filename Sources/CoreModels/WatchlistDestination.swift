@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public struct WatchlistDestinationID: RawRepresentable, Codable, Hashable, Sendable, Comparable {
@@ -28,6 +29,17 @@ public struct WatchlistDestinationID: RawRepresentable, Codable, Hashable, Senda
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
+    }
+}
+
+public enum WatchlistReconciliationIdentity {
+    /// One-way credential lineage used only to invalidate stale destination
+    /// confirmations. Raw OAuth credentials are never persisted in mutation state.
+    public static func credential(_ value: String) -> String {
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return digest.prefix(16).map {
+            String(format: "%02x", $0)
+        }.joined()
     }
 }
 
@@ -449,11 +461,31 @@ public protocol WatchlistDestination: Sendable {
     var id: WatchlistDestinationID { get }
     var capabilities: WatchlistDestinationCapabilities { get }
     var routing: WatchlistDestinationRouting { get }
+    /// Stable identity of the account/user whose list this destination reads and
+    /// writes. Confirmations from another identity must never suppress or reverse
+    /// mutations for the current one.
+    var reconciliationScope: String { get }
+    /// Stable account/user identity used for cached native entries. This may be
+    /// broader than `reconciliationScope` when credentials can arrive or rotate
+    /// without changing the person whose list is being shown.
+    var cacheIdentityScope: String { get }
     func fetchEntries() async throws -> [WatchlistDestinationEntry]
     func resolve(_ target: WatchlistMutationTarget) async throws -> WatchlistDestinationBinding?
     func apply(
         _ desiredState: WatchlistDesiredState,
         to binding: WatchlistDestinationBinding
+    ) async throws
+}
+
+/// A destination whose credentials can change while it remains registered.
+///
+/// The reconciler passes the account scope captured with the queued mutation so
+/// the destination can snapshot matching credentials before issuing the write.
+public protocol WatchlistReconciliationScopedApplying: WatchlistDestination {
+    func apply(
+        _ desiredState: WatchlistDesiredState,
+        to binding: WatchlistDestinationBinding,
+        expectedReconciliationScope: String
     ) async throws
 }
 
@@ -494,6 +526,9 @@ public protocol WatchlistLibraryResolving: WatchlistDestination {
 }
 
 public extension WatchlistDestination {
+    var reconciliationScope: String { id.rawValue }
+    var cacheIdentityScope: String { reconciliationScope }
+
     var routing: WatchlistDestinationRouting {
         WatchlistDestinationRouting(
             globalIdentityNamespaces:

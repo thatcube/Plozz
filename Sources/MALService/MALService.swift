@@ -26,7 +26,7 @@ public final class MALService {
     @ObservationIgnored private let tokenStore: MALTokenStoring
     @ObservationIgnored private var connectTask: Task<Void, Never>?
     @ObservationIgnored private var pendingSession: String?
-    @ObservationIgnored private var profileGeneration: UInt64 = 0
+    @ObservationIgnored private let profileGeneration: MALProfileGeneration
 
     /// The universal watchlist's MyAnimeList destination — anime series only,
     /// and `nil` when MAL is not configured in this build.
@@ -37,12 +37,20 @@ public final class MALService {
         self.config = config
         self.auth = MALAuthService(config: config, http: http)
         self.tokenStore = tokenStore
+        let profileGeneration = MALProfileGeneration()
+        self.profileGeneration = profileGeneration
         if config.isConfigured {
-            self.scrobbler = MALScrobbler(config: config, http: http, tokenStore: tokenStore)
+            self.scrobbler = MALScrobbler(
+                config: config,
+                http: http,
+                tokenStore: tokenStore,
+                profileGeneration: profileGeneration
+            )
             self.watchlistDestination = MALWatchlistDestination(
                 config: config,
                 http: http,
-                tokenStore: tokenStore
+                tokenStore: tokenStore,
+                profileGeneration: profileGeneration
             )
             self.phase = .unknown
         } else {
@@ -55,17 +63,17 @@ public final class MALService {
     public var isConfigured: Bool { config.isConfigured }
 
     public func setActiveProfile(namespace: String?) async {
-        profileGeneration &+= 1
-        let generation = profileGeneration
+        let generation = profileGeneration.advance {
+            tokenStore.setNamespace(namespace)
+        }
         connectTask?.cancel()
         connectTask = nil
-        tokenStore.setNamespace(namespace)
         phase = config.isConfigured ? .unknown : .unavailable
         await refreshStatus(generation: generation)
     }
 
     public func refreshStatus() async {
-        await refreshStatus(generation: profileGeneration)
+        await refreshStatus(generation: profileGeneration.current)
     }
 
     private func refreshStatus(generation: UInt64) async {
@@ -77,10 +85,10 @@ public final class MALService {
                 generation: generation
             )
             let user = try await auth.userInfo(accessToken: access)
-            guard generation == profileGeneration else { return }
+            guard generation == profileGeneration.current else { return }
             phase = .connected(username: user.name)
         } catch {
-            guard generation == profileGeneration else { return }
+            guard generation == profileGeneration.current else { return }
             // A network blip is not evidence the token is bad; only the
             // server rejecting it is. Discarding it here made a momentary
             // failure a permanent sign-out.
@@ -95,7 +103,7 @@ public final class MALService {
 
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
-        profileGeneration &+= 1
+        profileGeneration.advance()
         connectTask?.cancel()
         connectTask = nil
         // Mint a 32-char TV session so the short redeem code is bound to this TV.
@@ -116,8 +124,7 @@ public final class MALService {
         }
 
         connectTask?.cancel()
-        profileGeneration &+= 1
-        let generation = profileGeneration
+        let generation = profileGeneration.advance()
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -127,7 +134,7 @@ public final class MALService {
                 }
                 let redeemURL = URL(string: redeemString)!
                 let (data, _) = try await URLSession.shared.data(from: redeemURL)
-                guard generation == self.profileGeneration else { return }
+                guard generation == self.profileGeneration.current else { return }
                 let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
 
                 let tokens = MALTokens(
@@ -136,18 +143,20 @@ public final class MALService {
                     expiresAt: Date().addingTimeInterval(Double(result.expiresIn ?? 3600))
                 )
                 try Task.checkCancellation()
-                guard generation == self.profileGeneration else { return }
-                try? self.tokenStore.save(tokens)
+                guard self.profileGeneration.performIfCurrent(
+                    generation,
+                    operation: { try? self.tokenStore.save(tokens) }
+                ) else { return }
                 let user = try? await self.auth.userInfo(accessToken: tokens.accessToken)
-                guard generation == self.profileGeneration else { return }
+                guard generation == self.profileGeneration.current else { return }
                 self.connectTask = nil
                 self.pendingSession = nil
                 self.phase = .connected(username: user?.name ?? "MyAnimeList")
             } catch is CancellationError {
-                guard generation == self.profileGeneration else { return }
+                guard generation == self.profileGeneration.current else { return }
                 self.connectTask = nil
             } catch {
-                guard generation == self.profileGeneration else { return }
+                guard generation == self.profileGeneration.current else { return }
                 self.connectTask = nil
                 self.phase = .error("Invalid or expired code — please try again")
             }
@@ -155,14 +164,14 @@ public final class MALService {
     }
 
     public func cancelConnect() {
-        profileGeneration &+= 1
+        profileGeneration.advance()
         connectTask?.cancel()
         connectTask = nil
         phase = config.isConfigured ? .disconnected : .unavailable
     }
 
     public func disconnect() async {
-        profileGeneration &+= 1
+        profileGeneration.advance()
         connectTask?.cancel()
         connectTask = nil
         try? tokenStore.clear()
@@ -175,10 +184,13 @@ public final class MALService {
     ) async throws -> String {
         guard tokens.isExpired else { return tokens.accessToken }
         let refreshed = try await auth.refresh(tokens.refreshToken)
-        guard generation == profileGeneration else {
+            .inheritingAccountIdentity(from: tokens)
+        guard profileGeneration.performIfCurrent(
+            generation,
+            operation: { try? tokenStore.save(refreshed) }
+        ) else {
             throw CancellationError()
         }
-        try? tokenStore.save(refreshed)
         return refreshed.accessToken
     }
 

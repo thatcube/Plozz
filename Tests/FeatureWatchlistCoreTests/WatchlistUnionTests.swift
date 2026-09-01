@@ -147,6 +147,166 @@ final class WatchlistUnionTests: XCTestCase {
         XCTAssertNil(nativeView.bucket(for: plex))
     }
 
+    func testFailureUnderAnotherAccountDropsCachedDestinationEntries() {
+        let alias = MediaAliasID()
+        var nativeView = NativeWatchlistView()
+        nativeView.applySuccess(
+            destinationID: plex,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: alias,
+                    kind: .movie,
+                    index: 0
+                )!
+            ],
+            identityScope: "account-a"
+        )
+
+        nativeView.applyFailure(
+            destinationID: plex,
+            identityScope: "account-b"
+        )
+
+        XCTAssertNil(nativeView.bucket(for: plex))
+    }
+
+    func testRejectedOldScopeReadDiscardsOnlyItsStaleBucket() {
+        let oldAlias = MediaAliasID()
+        let peerAlias = MediaAliasID()
+        var nativeView = NativeWatchlistView()
+        nativeView.applySuccess(
+            destinationID: plex,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: oldAlias,
+                    kind: .movie,
+                    index: 0
+                )!
+            ],
+            identityScope: "account-a"
+        )
+        nativeView.applySuccess(
+            destinationID: jellyfin,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: peerAlias,
+                    kind: .movie,
+                    index: 0
+                )!
+            ],
+            identityScope: "peer"
+        )
+
+        nativeView.discardCachedEntries(
+            for: plex,
+            unlessIdentityScopeMatches: "account-b"
+        )
+
+        XCTAssertNil(nativeView.bucket(for: plex))
+        XCTAssertEqual(
+            nativeView.bucket(for: jellyfin)?.entries.map(\.aliasID),
+            [peerAlias]
+        )
+    }
+
+    func testAggregateScopeChangePreservesBucketsForUnchangedAccounts() {
+        let plexAlias = MediaAliasID()
+        let trackerAlias = MediaAliasID()
+        let tracker = WatchlistDestinationID(rawValue: "trakt")!
+        var nativeView = NativeWatchlistView(identityScope: "old-aggregate")
+        nativeView.applySuccess(
+            destinationID: plex,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: plexAlias,
+                    kind: .movie,
+                    index: 0
+                )!
+            ],
+            identityScope: "plex-user-a"
+        )
+        nativeView.applySuccess(
+            destinationID: tracker,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: trackerAlias,
+                    kind: .movie,
+                    index: 0
+                )!
+            ],
+            identityScope: "trakt-user"
+        )
+
+        let switched = nativeView.scoped(
+            to: "new-aggregate",
+            destinationIdentityScopes: [
+                plex.rawValue: "plex-user-b",
+                tracker.rawValue: "trakt-user",
+            ]
+        )
+
+        XCTAssertNil(switched.bucket(for: plex))
+        XCTAssertEqual(
+            switched.bucket(for: tracker)?.entries.map(\.aliasID),
+            [trackerAlias]
+        )
+        XCTAssertEqual(
+            switched.bucket(for: tracker)?.identityScope,
+            "trakt-user"
+        )
+    }
+
+    func testValidatedLegacyBucketIsStampedBeforeAnOfflineRefresh() {
+        let alias = MediaAliasID()
+        var nativeView = NativeWatchlistView(identityScope: "aggregate")
+        nativeView.applySuccess(
+            destinationID: plex,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: alias,
+                    kind: .movie,
+                    index: 0
+                )!
+            ]
+        )
+
+        var migrated = nativeView.scoped(
+            to: "aggregate",
+            destinationIdentityScopes: [plex.rawValue: "plex-user"],
+            legacyValidatedDestinationIDs: [plex.rawValue]
+        )
+        migrated.applyFailure(
+            destinationID: plex,
+            identityScope: "plex-user"
+        )
+
+        XCTAssertEqual(migrated.bucket(for: plex)?.entries.map(\.aliasID), [alias])
+        XCTAssertEqual(migrated.bucket(for: plex)?.identityScope, "plex-user")
+        XCTAssertTrue(migrated.bucket(for: plex)?.isStale ?? false)
+    }
+
+    func testUnverifiedLegacyTrackerBucketIsDropped() {
+        let tracker = WatchlistDestinationID(rawValue: "trakt")!
+        var nativeView = NativeWatchlistView(identityScope: "aggregate")
+        nativeView.applySuccess(
+            destinationID: tracker,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: MediaAliasID(),
+                    kind: .movie,
+                    index: 0
+                )!
+            ]
+        )
+
+        let migrated = nativeView.scoped(
+            to: "aggregate",
+            destinationIdentityScopes: [tracker.rawValue: "trakt-user"]
+        )
+
+        XCTAssertNil(migrated.bucket(for: tracker))
+    }
+
     /// Two servers listing the same film is one row, not two.
     func testSameTitleOnTwoServersAppearsOnce() throws {
         let model = WatchlistModel()

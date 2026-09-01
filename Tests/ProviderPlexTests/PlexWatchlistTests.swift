@@ -389,6 +389,24 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertNil(unresolvedBinding)
     }
 
+    func testHomeUserTokenChangeInvalidatesDestinationScope() throws {
+        let token = MutablePlexDiscoverToken("home-user-a")
+        let provider = PlexProvider(session: makeSession())
+        let destination = try XCTUnwrap(PlexWatchlistDestination(
+            provider: provider,
+            requiresHomeUserToken: true,
+            reconciliationScope: "profile#home-user",
+            discoverToken: { token.value }
+        ))
+        let firstScope = destination.reconciliationScope
+        let cacheScope = destination.cacheIdentityScope
+
+        token.value = "home-user-b"
+
+        XCTAssertNotEqual(destination.reconciliationScope, firstScope)
+        XCTAssertEqual(destination.cacheIdentityScope, cacheScope)
+    }
+
     func testUniversalDestinationImportProducesCorroboratedAliasEvidence() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
@@ -423,6 +441,28 @@ final class PlexWatchlistTests: XCTestCase {
         )!
         let reboundResolution = try await destination.resolve(rebound)
         XCTAssertNotNil(reboundResolution)
+    }
+
+    private final class MutablePlexDiscoverToken: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedValue: String
+
+        init(_ value: String) {
+            storedValue = value
+        }
+
+        var value: String {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return storedValue
+            }
+            set {
+                lock.lock()
+                storedValue = newValue
+                lock.unlock()
+            }
+        }
     }
 
     /// Regression — the reported bug: **removing a TV SHOW from the Plex

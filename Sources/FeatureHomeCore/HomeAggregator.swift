@@ -49,7 +49,7 @@ public struct HomeAggregator: Sendable {
         policy: ContinueWatchingPolicy = .default,
         continueWatchingLimit: Int? = nil,
         latestLimit: Int = 20,
-        watchlistLimit: Int = 20,
+        watchlistLimit: Int = 10_000,
         visibility: HomeLibraryVisibility = .default,
         forceLibraryScoping: Bool = false,
         identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
@@ -246,7 +246,7 @@ public struct HomeAggregator: Sendable {
         policy: ContinueWatchingPolicy = .default,
         continueWatchingLimit: Int? = nil,
         latestLimit: Int = 20,
-        watchlistLimit: Int = 20,
+        watchlistLimit: Int = 10_000,
         perLibraryLimit: Int = 20,
         visibility: HomeLibraryVisibility = .default,
         identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }

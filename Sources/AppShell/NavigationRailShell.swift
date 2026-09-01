@@ -21,6 +21,7 @@ import FeatureProfiles
 struct NavigationRailShell<Content: View>: View {
     let profile: Profile
     let entries: [NavigationRailLibraryEntry]
+    let showsWatchlist: Bool
     let showsMusic: Bool
     @Binding var selection: NavigationRailDestination
     let onOpenProfileSwitcher: () -> Void
@@ -87,6 +88,7 @@ struct NavigationRailShell<Content: View>: View {
                 NavigationRailView(
                     profile: profile,
                     entries: entries,
+                    showsWatchlist: showsWatchlist,
                     showsMusic: showsMusic,
                     selection: $selection,
                     isExpandedOutward: $railExpanded,

@@ -80,19 +80,20 @@ struct MainTabView: View {
             switch tab {
             case .home:
                 switch activeLibraryNavigationDestination {
-                case .home, .watchlist, .library, .allLibraries: return true
-                case .search, .music, .settings: return false
+                case .home, .library, .allLibraries: return true
+                case .watchlist, .search, .music, .settings: return false
                 }
+            case .watchlist: return activeLibraryNavigationDestination == .watchlist
             case .search: return activeLibraryNavigationDestination == .search
             case .music: return activeLibraryNavigationDestination == .music
             case .settings: return activeLibraryNavigationDestination == .settings
             }
         }
-        return selectedTabRaw == tab.rawValue
+        return resolvedSelectedTab == tab
     }
 
     private enum MainTab: String {
-        case home, search, music, settings
+        case home, watchlist, search, music, settings
     }
 
     private var homeTabLabel: some View {
@@ -456,12 +457,33 @@ struct MainTabView: View {
 
     private var selectedTab: Binding<MainTab> {
         Binding(
-            get: { MainTab(rawValue: selectedTabRaw) ?? .home },
+            get: { resolvedSelectedTab },
             // Top-bar selection is deliberately separate. A viewer can leave a
             // library selected in rail/sidebar mode, use the top bar, then return
             // without that library destination being erased.
-            set: { selectedTabRaw = $0.rawValue }
+            set: { selectedTabRaw = resolvedTopBarTab($0).rawValue }
         )
+    }
+
+    private var resolvedSelectedTab: MainTab {
+        resolvedTopBarTab(MainTab(rawValue: selectedTabRaw) ?? .home)
+    }
+
+    private func resolvedTopBarTab(_ tab: MainTab) -> MainTab {
+        switch tab {
+        case .watchlist where !showsWatchlistDestination,
+             .music where !showsMusicDestination:
+            return .home
+        default:
+            return tab
+        }
+    }
+
+    private func persistPrunedTopBarSelection() {
+        let resolved = resolvedSelectedTab.rawValue
+        if selectedTabRaw != resolved {
+            selectedTabRaw = resolved
+        }
     }
 
     /// Destination currently visible under native sidebar or custom rail.
@@ -509,11 +531,12 @@ struct MainTabView: View {
         )
     }
 
-    /// Fixed top-bar equivalent of a library-aware destination. Library roots map
-    /// to Home because the compact top bar intentionally has no library tabs.
+    /// Top-bar equivalent of a library-aware destination. Library roots map to
+    /// Home because the compact top bar intentionally has no library tabs.
     private func mainTab(for destination: NavigationRailDestination) -> MainTab {
         switch destination {
-        case .home, .watchlist, .library, .allLibraries: return .home
+        case .home, .library, .allLibraries: return .home
+        case .watchlist: return .watchlist
         case .search: return .search
         case .music: return .music
         case .settings: return .settings
@@ -523,6 +546,7 @@ struct MainTabView: View {
     private func destination(for tab: MainTab) -> NavigationRailDestination {
         switch tab {
         case .home: return .home
+        case .watchlist: return .watchlist
         case .search: return .search
         case .music: return .music
         case .settings: return .settings
@@ -609,13 +633,22 @@ struct MainTabView: View {
         )
     }
 
+    private var showsWatchlistDestination: Bool {
+        navigationStyleModel.showsWatchlist
+    }
+
+    private var showsMusicDestination: Bool {
+        navigationStyleModel.showsMusic && musicAvailability.hasMusic
+    }
+
     /// The selection after pruning: a library that has been hidden, removed, or
     /// signed out of falls back to Home rather than leaving a blank screen.
     private var resolvedRailSelection: NavigationRailDestination {
         NavigationRailPlan.resolvedSelection(
             storedRailSelection,
             entries: railEntries,
-            hasMusic: musicAvailability.hasMusic
+            showsWatchlist: showsWatchlistDestination,
+            showsMusic: showsMusicDestination
         )
     }
 
@@ -898,16 +931,22 @@ struct MainTabView: View {
     /// copy of those rules.
     private var activeDestinationKey: String {
         navigationStyle == .tabBar
-            ? selectedTabRaw
+            ? resolvedSelectedTab.rawValue
             : activeLibraryNavigationDestination.storageValue
     }
 
-    /// Native top bar keeps its four compact, fixed destinations. Putting an
-    /// arbitrary number of libraries across the top would make it unusable.
+    /// Native top bar keeps a compact set of destinations rather than expanding
+    /// every library across the top.
     private var nativeTopBarShell: some View {
         TabView(selection: selectedTab) {
             Tab("Home", systemImage: "house.fill", value: MainTab.home) {
-                homeTabContent()
+                AnyView(homeTabContent())
+            }
+
+            if showsWatchlistDestination {
+                Tab("Watchlist", systemImage: "bookmark.fill", value: MainTab.watchlist) {
+                    AnyView(watchlistTabContent(isActive: isActiveTab(.watchlist)))
+                }
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
@@ -917,7 +956,7 @@ struct MainTabView: View {
             // Conditional Music tab: present only when at least one signed-in
             // account exposes a music library. Video-only users see no tab and no
             // mini-player — the app is byte-for-byte unchanged for them.
-            if musicAvailability.hasMusic {
+            if showsMusicDestination {
                 Tab("Music", systemImage: "music.note", value: MainTab.music) {
                     musicTabContent
                 }
@@ -952,12 +991,14 @@ struct MainTabView: View {
                 homeTabLabel
             }
 
-            Tab(value: NativeSidebarDestination.content(.watchlist)) {
-                watchlistTabContent(
-                    isActive: activeLibraryNavigationDestination == .watchlist
-                )
-            } label: {
-                watchlistTabLabel
+            if showsWatchlistDestination {
+                Tab(value: NativeSidebarDestination.content(.watchlist)) {
+                    watchlistTabContent(
+                        isActive: activeLibraryNavigationDestination == .watchlist
+                    )
+                } label: {
+                    watchlistTabLabel
+                }
             }
 
             Tab(value: NativeSidebarDestination.content(.search)) {
@@ -966,7 +1007,7 @@ struct MainTabView: View {
                 searchTabLabel
             }
 
-            if musicAvailability.hasMusic {
+            if showsMusicDestination {
                 Tab(value: NativeSidebarDestination.content(.music)) {
                     musicTabContent
                 } label: {
@@ -999,7 +1040,8 @@ struct MainTabView: View {
         NavigationRailShell(
             profile: activeProfile,
             entries: railEntries,
-            showsMusic: musicAvailability.hasMusic,
+            showsWatchlist: showsWatchlistDestination,
+            showsMusic: showsMusicDestination,
             selection: libraryNavigationSelection,
             onOpenProfileSwitcher: openProfileSwitcher,
             chrome: navigationChrome,
@@ -1117,7 +1159,7 @@ struct MainTabView: View {
                 onSelect: { name in
                     guard let tab = MainTab(rawValue: name) else { return }
                     if navigationStyle == .tabBar {
-                        selectedTabRaw = tab.rawValue
+                        selectedTab.wrappedValue = tab
                     } else {
                         // Sidebar and custom rail are driven by library navigation
                         // selection, not `selectedTabRaw`. Capture routing must use
@@ -1144,11 +1186,19 @@ struct MainTabView: View {
                 // Style picker lives inside Settings. Carry the screen currently
                 // visible in top bar into the new leading-edge shell, but do not
                 // overwrite a separately remembered library destination.
-                let tab = MainTab(rawValue: selectedTabRaw) ?? .home
+                let tab = resolvedSelectedTab
                 libraryNavigationEntryOverride = destination(for: tab)
             } else if current == .tabBar {
                 libraryNavigationEntryOverride = nil
+                persistPrunedTopBarSelection()
             }
+        }
+        .onChange(
+            of: "\(navigationStyle.rawValue)|\(showsWatchlistDestination)|\(showsMusicDestination)",
+            initial: true
+        ) { _, _ in
+            guard navigationStyle == .tabBar else { return }
+            persistPrunedTopBarSelection()
         }
         // Also on the FLAG, not just the value. At launch the library list is empty
         // so a stored library already resolves to Home; when discovery completes
@@ -1320,13 +1370,13 @@ struct MainTabView: View {
             // synchronous seed above already shows the tab; the probe only
             // refreshes its presence, so it can afford to yield.
             await musicAvailability.probe(accounts: accounts, visibility: homeVisibility.visibility)
-            guard musicAvailability.hasMusic else { return }
+            guard showsMusicDestination else { return }
             // Defer the heavy multi-account landing prefetch until after Home has
             // had the launch window. The Music tab still opens instantly from this
             // warm cache once the user gets there; if they open it sooner,
             // MusicLandingView's own load() fetches on demand (and caches) anyway.
             try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, musicAvailability.hasMusic else { return }
+            guard !Task.isCancelled, showsMusicDestination else { return }
             await MusicLandingPrefetch.warm(
                 accounts: musicAvailability.detectedAccounts,
                 visibleLibraryIDs: musicAvailability.visibleLibraryIDs

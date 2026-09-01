@@ -119,6 +119,19 @@ final class NavigationRailPlanTests: XCTestCase {
         XCTAssertEqual(layout.visibleKeys(available: available), ["a:1", "a:2"])
     }
 
+    func testEditingLibrariesPreservesOptionalDestinationVisibility() {
+        var layout = NavigationLibraryLayout(
+            hiddenKeys: [NavigationLibraryLayout.watchlistKey]
+        )
+        layout.apply(
+            OrderedVisibilityList.Sections(enabled: ["a:1"], disabled: []),
+            available: ["a:1"]
+        )
+
+        XCTAssertFalse(layout.isVisible(NavigationLibraryLayout.watchlistKey))
+        XCTAssertTrue(layout.isVisible(NavigationLibraryLayout.musicKey))
+    }
+
     // MARK: Selection pruning
 
     func testSelectionFallsBackToHomeWhenItsDestinationIsGone() {
@@ -130,31 +143,75 @@ final class NavigationRailPlanTests: XCTestCase {
             layout: .default
         )
         XCTAssertEqual(
-            NavigationRailPlan.resolvedSelection(.library("a:1"), entries: entries, hasMusic: false),
+            NavigationRailPlan.resolvedSelection(
+                .library("a:1"),
+                entries: entries,
+                showsWatchlist: true,
+                showsMusic: false
+            ),
             .library("a:1")
         )
         XCTAssertEqual(
-            NavigationRailPlan.resolvedSelection(.library("gone:9"), entries: entries, hasMusic: false),
+            NavigationRailPlan.resolvedSelection(
+                .library("gone:9"),
+                entries: entries,
+                showsWatchlist: true,
+                showsMusic: false
+            ),
             .home
         )
         XCTAssertEqual(
-            NavigationRailPlan.resolvedSelection(.music, entries: entries, hasMusic: false),
+            NavigationRailPlan.resolvedSelection(
+                .music,
+                entries: entries,
+                showsWatchlist: true,
+                showsMusic: false
+            ),
             .home
         )
         XCTAssertEqual(
-            NavigationRailPlan.resolvedSelection(.music, entries: entries, hasMusic: true),
+            NavigationRailPlan.resolvedSelection(
+                .music,
+                entries: entries,
+                showsWatchlist: true,
+                showsMusic: true
+            ),
             .music
         )
         XCTAssertEqual(
-            NavigationRailPlan.resolvedSelection(.watchlist, entries: [], hasMusic: false),
+            NavigationRailPlan.resolvedSelection(
+                .watchlist,
+                entries: [],
+                showsWatchlist: true,
+                showsMusic: false
+            ),
             .watchlist
         )
         XCTAssertEqual(
-            NavigationRailPlan.resolvedSelection(.allLibraries, entries: entries, hasMusic: false),
+            NavigationRailPlan.resolvedSelection(
+                .watchlist,
+                entries: [],
+                showsWatchlist: false,
+                showsMusic: true
+            ),
+            .home
+        )
+        XCTAssertEqual(
+            NavigationRailPlan.resolvedSelection(
+                .allLibraries,
+                entries: entries,
+                showsWatchlist: true,
+                showsMusic: false
+            ),
             .allLibraries
         )
         XCTAssertEqual(
-            NavigationRailPlan.resolvedSelection(.allLibraries, entries: [], hasMusic: false),
+            NavigationRailPlan.resolvedSelection(
+                .allLibraries,
+                entries: [],
+                showsWatchlist: true,
+                showsMusic: false
+            ),
             .home
         )
     }

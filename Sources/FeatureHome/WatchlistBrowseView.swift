@@ -37,7 +37,10 @@ public struct WatchlistBrowseView: View {
             emptyMessage: "Your Watchlist is empty.",
             onRetry: { Task { await viewModel.load() } }
         ) { content in
-            watchlistContent(content.watchlist)
+            watchlistContent(
+                content.watchlist,
+                isRefreshing: viewModel.isRefreshing
+            )
         }
         .task(id: visibility) {
             await viewModel.loadIfNeeded(for: visibility)
@@ -77,12 +80,23 @@ public struct WatchlistBrowseView: View {
     }
 
     @ViewBuilder
-    private func watchlistContent(_ items: [MediaItem]) -> some View {
+    private func watchlistContent(
+        _ items: [MediaItem],
+        isRefreshing: Bool
+    ) -> some View {
         if items.isEmpty {
-            ContentUnavailableView {
-                Label("Your Watchlist is empty", systemImage: "bookmark")
-            } description: {
-                Text("Add a movie or show from Plozz or any connected Watchlist.")
+            if isRefreshing {
+                VStack(spacing: PlozzTheme.Spacing.medium) {
+                    ProgressView()
+                    Text("Loading your full Watchlist…")
+                        .plozzForeground(.secondary)
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("Your Watchlist is empty", systemImage: "bookmark")
+                } description: {
+                    Text("Add a movie or show from Plozz or any connected Watchlist.")
+                }
             }
         } else {
             ScrollView(.vertical) {
@@ -90,8 +104,10 @@ public struct WatchlistBrowseView: View {
                     alignment: .leading,
                     spacing: metrics.sectionTitleSpacing
                 ) {
-                    Text("Watchlist")
-                        .font(.largeTitle.bold())
+                    WatchlistBrowseHeader(
+                        itemCount: items.count,
+                        isRefreshing: isRefreshing
+                    )
                         .padding(.leading, contentLeadingPadding)
                         .padding(.trailing, HomeLayout.horizontalPadding)
 
@@ -133,6 +149,30 @@ public struct WatchlistBrowseView: View {
               mediaItemActionHandler.isDurableWatchlistPresentationReady()
         else { return false }
         return !mediaItemActionHandler.isWatchlisted(item)
+    }
+}
+
+private struct WatchlistBrowseHeader: View {
+    let itemCount: Int
+    let isRefreshing: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PlozzTheme.Spacing.small) {
+            Text("Watchlist")
+                .font(.largeTitle.bold())
+
+            HStack(spacing: PlozzTheme.Spacing.small) {
+                Text("\(itemCount) items")
+                    .plozzForeground(.secondary)
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading your full Watchlist…")
+                        .plozzForeground(.secondary)
+                }
+            }
+            .font(.callout)
+        }
     }
 }
 #endif

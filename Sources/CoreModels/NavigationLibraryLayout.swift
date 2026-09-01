@@ -16,6 +16,11 @@ import Foundation
 /// the shared ``OrderedVisibilityList`` so a newly discovered library appears
 /// (enabled, at the end) instead of silently vanishing.
 public struct NavigationLibraryLayout: Codable, Equatable, Sendable {
+    /// Reserved keys for optional first-class destinations. Keeping these in the
+    /// existing hidden set preserves the on-disk format and profile scoping.
+    public static let watchlistKey = "plozz.navigation.watchlist"
+    public static let musicKey = "plozz.navigation.music"
+
     /// The reserved key of the synthetic **All Libraries** entry — a single
     /// combined browse over every visible library on every signed-in server. Not a
     /// real `AggregatedLibrary.key` (which is always `"accountID:libraryID"`, so

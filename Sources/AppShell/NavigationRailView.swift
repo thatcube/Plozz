@@ -112,6 +112,7 @@ enum NavigationRailMetrics {
 struct NavigationRailView: View {
     let profile: Profile
     let entries: [NavigationRailLibraryEntry]
+    let showsWatchlist: Bool
     let showsMusic: Bool
     @Binding var selection: NavigationRailDestination
     /// Mirrors "focus is inside the rail" outward, so the shell can coordinate
@@ -180,11 +181,13 @@ struct NavigationRailView: View {
 
             item(.search, symbol: "magnifyingglass", label: Text(Self.searchTitle))
             item(.home, symbol: "house.fill", label: Text(Self.homeTitle))
-            item(
-                .watchlist,
-                symbol: "bookmark.fill",
-                label: Text(Self.watchlistTitle)
-            )
+            if showsWatchlist {
+                item(
+                    .watchlist,
+                    symbol: "bookmark.fill",
+                    label: Text(Self.watchlistTitle)
+                )
+            }
             if showsMusic {
                 item(.music, symbol: "music.note", label: Text(Self.musicTitle))
             }

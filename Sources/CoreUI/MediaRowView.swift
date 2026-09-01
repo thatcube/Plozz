@@ -34,6 +34,7 @@ public struct MediaRowView: View {
     /// name (provider content), and only the caller knows which. `nil` renders no
     /// heading (previously spelled as an empty string).
     private let title: Text?
+    private let loadingStatus: LocalizedStringResource?
     /// Row contents, guaranteed to hold each `id` once.
     ///
     /// `ForEach` over `Identifiable` requires unique ids; duplicates are
@@ -184,6 +185,7 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
+        loadingStatus: LocalizedStringResource? = nil,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -204,6 +206,7 @@ public struct MediaRowView: View {
             onFocusChange: onFocusChange,
             statusCue: statusCue,
             pendingRemovalIDs: pendingRemovalIDs,
+            loadingStatus: loadingStatus,
             playsOnSelect: playsOnSelect,
             onSelect: onSelect
         )
@@ -226,10 +229,12 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
+        loadingStatus: LocalizedStringResource? = nil,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
+        self.loadingStatus = loadingStatus
         let uniqueItems = Self.uniqued(items)
         self.items = uniqueItems
         self.presentation = presentation
@@ -377,14 +382,33 @@ public struct MediaRowView: View {
         }?.stablePresentationID ?? suppliedID
     }
 
+    private struct MediaRowHeader: View {
+        let title: Text
+        let loadingStatus: LocalizedStringResource?
+        @Environment(\.plozzMetrics) private var metrics
+
+        var body: some View {
+            HStack(spacing: PlozzTheme.Spacing.small) {
+                title
+                    .font(PlozzRailTitle.font(
+                        sectionHeaderFontSize: metrics.sectionHeaderFontSize
+                    ))
+                if let loadingStatus {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(loadingStatus)
+                        .font(.callout)
+                        .plozzForeground(.secondary)
+                }
+            }
+        }
+    }
+
     public var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if let title {
-                    title
-                        .font(PlozzRailTitle.font(
-                            sectionHeaderFontSize: layoutMetrics.sectionHeaderFontSize
-                        ))
+                    MediaRowHeader(title: title, loadingStatus: loadingStatus)
                         .padding(.leading, leadingInset + navigationContentInset)
                 }
 

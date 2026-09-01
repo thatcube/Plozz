@@ -54,10 +54,19 @@ public final class NavigationStyleSettingsModel {
         didSet { store.save(style) }
     }
 
-    /// Which libraries the custom rail shows, and in what order. Only meaningful
-    /// while ``style`` is ``NavigationStyle/rail``, but persisted regardless so
-    /// switching chrome away and back never loses the arrangement.
+    /// Which optional destinations and libraries navigation shows, plus the library
+    /// order. Persisted regardless of style so switching chrome never loses it.
     public private(set) var libraryLayout: NavigationLibraryLayout
+
+    public var showsWatchlist: Bool {
+        get { libraryLayout.isVisible(NavigationLibraryLayout.watchlistKey) }
+        set { setDestination(newValue, key: NavigationLibraryLayout.watchlistKey) }
+    }
+
+    public var showsMusic: Bool {
+        get { libraryLayout.isVisible(NavigationLibraryLayout.musicKey) }
+        set { setDestination(newValue, key: NavigationLibraryLayout.musicKey) }
+    }
 
     private let store: NavigationStyleSettingsStoring
     private let layoutStore: NavigationLibraryLayoutStoring
@@ -91,8 +100,21 @@ public final class NavigationStyleSettingsModel {
 
     /// Restores the default arrangement: every library shown, in discovery order.
     public func resetLibraryLayout() {
-        guard libraryLayout != .default else { return }
-        libraryLayout = .default
+        var next = NavigationLibraryLayout.default
+        next.hiddenKeys = libraryLayout.hiddenKeys.intersection([
+            NavigationLibraryLayout.watchlistKey,
+            NavigationLibraryLayout.musicKey,
+        ])
+        guard libraryLayout != next else { return }
+        libraryLayout = next
         layoutStore.save(libraryLayout)
+    }
+
+    private func setDestination(_ visible: Bool, key: String) {
+        var next = libraryLayout
+        next.setVisible(visible, for: key)
+        guard next != libraryLayout else { return }
+        libraryLayout = next
+        layoutStore.save(next)
     }
 }

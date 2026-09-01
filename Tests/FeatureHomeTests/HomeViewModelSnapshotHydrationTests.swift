@@ -87,6 +87,26 @@ final class HomeViewModelSnapshotHydrationTests: XCTestCase {
         XCTAssertEqual(loadedContent(vm)?.continueWatching.map(\.id), ["freshA"])
     }
 
+    func testRefreshingCoversTheFullSilentRefreshLifetime() async {
+        let gate = HomeRefreshGate()
+        let provider = FakeMediaProvider(allItems: [])
+        provider.librariesGate = { await gate.wait() }
+        let vm = makeViewModel(
+            provider: provider,
+            contentStore: InMemoryHomeContentStore(snapshot(cwIDs: ["cachedA"]))
+        )
+
+        let load = Task { await vm.loadIfNeeded(for: .default) }
+        while provider.librariesCallCount == 0 {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(vm.isRefreshing, "Cached content should disclose that its live replacement is still loading")
+        gate.open()
+        await load.value
+        XCTAssertFalse(vm.isRefreshing, "The loading disclosure must clear when aggregation finishes")
+    }
+
     func testTransientEmptyRefreshKeepsCachedContent() async {
         // Cached snapshot present, but the fresh aggregate comes back empty (server
         // momentarily unreachable). The instant content must stay on screen.
@@ -204,5 +224,33 @@ final class HomeViewModelSnapshotHydrationTests: XCTestCase {
             loadedContent(vm)?.continueWatching.map(\.id), ["cachedA"],
             "An unreachable server must not blank a good snapshot"
         )
+    }
+}
+
+private final class HomeRefreshGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func open() {
+        lock.lock()
+        opened = true
+        let pending = waiters
+        waiters = []
+        lock.unlock()
+        pending.forEach { $0.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if opened {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+                lock.unlock()
+            }
+        }
     }
 }

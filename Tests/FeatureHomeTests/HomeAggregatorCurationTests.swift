@@ -84,6 +84,20 @@ final class HomeAggregatorCurationTests: XCTestCase {
         XCTAssertEqual(content.continueWatching.count, 10)
     }
 
+    func testWatchlistKeepsMoreThanTheOldTwentyItemPreview() async {
+        let many = (1...250).map {
+            MediaItem(id: "w\($0)", title: "Watchlist \($0)", kind: .movie)
+        }
+        let stub = ResumeStub(continueWatching: [], watchlist: many)
+
+        let content = await HomeAggregator().content(
+            from: [resolved("acct", provider: stub)],
+            visibility: merged
+        )
+
+        XCTAssertEqual(content.watchlist.count, 250)
+    }
+
     /// A backend that reports no recency must not have its row silently emptied.
     func testABackendThatReportsNoRecencyKeepsItsRow() async {
         let stub = ResumeStub(continueWatching: [
@@ -121,9 +135,11 @@ final class HomeAggregatorCurationTests: XCTestCase {
 private final class ResumeStub: MediaProvider, @unchecked Sendable {
     let kind: ProviderKind = .jellyfin
     private let stubbedContinueWatching: [MediaItem]
+    private let stubbedWatchlist: [MediaItem]
 
-    init(continueWatching: [MediaItem]) {
+    init(continueWatching: [MediaItem], watchlist: [MediaItem] = []) {
         self.stubbedContinueWatching = continueWatching
+        self.stubbedWatchlist = watchlist
     }
 
     var session: UserSession {
@@ -151,4 +167,9 @@ private final class ResumeStub: MediaProvider, @unchecked Sendable {
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest { throw AppError.notFound }
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {}
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }
+}
+
+extension ResumeStub: WatchlistProviding {
+    func setWatchlisted(_ watchlisted: Bool, item: MediaItem) async throws {}
+    func watchlist() async throws -> [MediaItem] { stubbedWatchlist }
 }

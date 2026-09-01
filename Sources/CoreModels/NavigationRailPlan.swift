@@ -114,13 +114,16 @@ public enum NavigationRailPlan {
     public static func resolvedSelection(
         _ selection: NavigationRailDestination,
         entries: [NavigationRailLibraryEntry],
-        hasMusic: Bool
+        showsWatchlist: Bool,
+        showsMusic: Bool
     ) -> NavigationRailDestination {
         switch selection {
-        case .home, .search, .watchlist, .settings:
+        case .home, .search, .settings:
             return selection
+        case .watchlist:
+            return showsWatchlist ? .watchlist : .home
         case .music:
-            return hasMusic ? .music : .home
+            return showsMusic ? .music : .home
         case .allLibraries:
             return entries.contains(where: \.isAllLibraries) ? .allLibraries : .home
         case let .library(key):

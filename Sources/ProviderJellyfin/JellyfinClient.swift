@@ -749,7 +749,7 @@ public struct JellyfinClient: Sendable {
     /// `GET /Users/{userId}/Items?Filters=IsFavorite` — the user's favourited
     /// movies & series, newest first, for the Watchlist row. Requests the same
     /// card-level fields as other rows so artwork resolves.
-    func favorites(userID: String, limit: Int = 60) async throws -> [BaseItemDto] {
+    func favorites(userID: String, limit: Int = 10_000) async throws -> [BaseItemDto] {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items",
             queryItems: [

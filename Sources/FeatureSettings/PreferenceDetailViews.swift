@@ -141,6 +141,17 @@ struct AppearanceDetailView: View {
             VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
                 CompactNavigationPicker(selection: $navigation.style)
 
+                SettingsDetailGroup(
+                    title: "Destinations",
+                    description: "Keep the essentials fixed and choose which media shortcuts appear."
+                ) {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Toggle("Show Watchlist", isOn: $navigation.showsWatchlist)
+                        Toggle("Show Music", isOn: $navigation.showsMusic)
+                    }
+                    .toggleStyle(SettingsSwitchToggleStyle())
+                }
+
                 if navigation.style != .tabBar {
                     SettingsDetailGroup(
                         title: "Navigation Libraries",

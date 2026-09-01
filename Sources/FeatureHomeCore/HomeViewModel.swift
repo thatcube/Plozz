@@ -127,6 +127,10 @@ public final class HomeViewModel {
     /// cached rows remain visible; Continue Watching uses a row placeholder until
     /// fresh content publishes once.
     public private(set) var isShowingCachedSnapshot = false
+    /// A network aggregation is replacing the visible snapshot. Unlike `state`,
+    /// this remains true during stale-while-revalidate so cached rows can explain
+    /// that their complete live contents are still arriving.
+    public private(set) var isRefreshing = false
     /// Prevents a restarted SwiftUI task from starting the launch refresh twice
     /// while the cached rows remain visible.
     @ObservationIgnored private var cachedSnapshotRefreshStarted = false
@@ -423,11 +427,14 @@ public final class HomeViewModel {
             return
         }
         isLoading = true
+        isRefreshing = true
         defer {
             isLoading = false
             if wantsReloadAfterCurrent {
                 wantsReloadAfterCurrent = false
                 Task { await load(showLoadingState: false) }
+            } else {
+                isRefreshing = false
             }
         }
         PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state)) silent=\(!showLoadingState)")

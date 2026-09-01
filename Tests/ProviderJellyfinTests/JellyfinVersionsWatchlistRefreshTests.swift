@@ -95,6 +95,11 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
         XCTAssertEqual(saved.first?.providerIDs["Tmdb"], "11")
         let query = stub.queryItems(forPathSuffix: "/Users/u1/Items")
         XCTAssertEqual(query?.first { $0.name == "Filters" }?.value, "IsFavorite")
+        XCTAssertEqual(
+            query?.first { $0.name == "Limit" }?.value,
+            "10000",
+            "Large Jellyfin Watchlists must not retain the old 60-item presentation cap"
+        )
         let fields = query?.first { $0.name == "Fields" }?.value ?? ""
         XCTAssertTrue(
             fields.split(separator: ",").contains(where: { $0.lowercased() == "providerids" }),

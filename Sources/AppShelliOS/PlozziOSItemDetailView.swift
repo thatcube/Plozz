@@ -1615,10 +1615,14 @@ private struct PlozziOSSeriesDownloadPicker: View {
                                     onDownloadEpisode: beginEpisodeDownload
                                 )
                             } label: {
-                                Label(
-                                    season.title,
-                                    systemImage: "rectangle.stack"
-                                )
+                                HStack(spacing: 12) {
+                                    PlozziOSDownloadThumbnail(
+                                        item: season,
+                                        style: .season
+                                    )
+                                    Text(verbatim: season.title)
+                                        .lineLimit(2)
+                                }
                             }
                         }
                     }
@@ -1838,6 +1842,10 @@ private struct PlozziOSEpisodeDownloadRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            PlozziOSDownloadThumbnail(
+                item: episode,
+                style: .episode
+            )
             VStack(alignment: .leading, spacing: 3) {
                 if let number = episode.episodeNumber {
                     Text("Episode \(number)")
@@ -1857,6 +1865,63 @@ private struct PlozziOSEpisodeDownloadRow: View {
             .buttonStyle(.borderless)
             .disabled(isBusy)
             .accessibilityLabel(Text("Download ") + Text(verbatim: episode.title))
+        }
+    }
+}
+
+private struct PlozziOSDownloadThumbnail: View {
+    @Environment(PlozziOSAppModel.self) private var appModel
+
+    enum Style {
+        case season
+        case episode
+    }
+
+    let item: MediaItem
+    let style: Style
+
+    @ViewBuilder
+    var body: some View {
+        switch style {
+        case .season:
+            FallbackAsyncImage(
+                references: item.artworkReferences(for: .poster),
+                variant: .posterCard,
+                asyncFallbackURL: {
+                    await ArtworkRouter.shared.artworkURL(.poster, for: item)
+                },
+                pinIdentity: item.stablePresentationID
+            ) {
+                MediaArtworkPlaceholder(glyphSize: 16)
+            }
+            .frame(width: 46, height: 68)
+            .clipped()
+            .clipShape(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .plozzMediaEdge(cornerRadius: 6)
+
+        case .episode:
+            FallbackAsyncImage(
+                references: item.artworkReferences(for: .episodeThumbnail),
+                variant: .landscapeCard,
+                asyncFallbackURL: {
+                    await ArtworkRouter.shared.artworkURL(.thumbnail, for: item)
+                },
+                pinIdentity: item.stablePresentationID
+            ) {
+                MediaArtworkPlaceholder(glyphSize: 16)
+            }
+            .frame(width: 80, height: 45)
+            .blur(
+                radius: appModel.settings.spoilers.settings
+                    .shouldHideThumbnail(for: item) ? 10 : 0
+            )
+            .clipped()
+            .clipShape(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .plozzMediaEdge(cornerRadius: 6)
         }
     }
 }

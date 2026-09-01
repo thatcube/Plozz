@@ -7,6 +7,7 @@ import FeatureProfiles
 import FeatureSettings
 import Foundation
 import SwiftUI
+import UIKit
 
 public struct PlozziOSRootView: View {
     @Environment(\.colorScheme) private var systemColorScheme
@@ -760,11 +761,7 @@ private struct PlozziOSTabShell: View {
                 Label {
                     Text("Downloads")
                 } icon: {
-                    if let progress = downloadsNavigationProgress {
-                        PlozziOSDownloadTabProgressIcon(progress: progress)
-                    } else {
-                        Image(systemName: "arrow.down.circle")
-                    }
+                    downloadsTabIcon
                 }
             }
 
@@ -1004,38 +1001,46 @@ private struct PlozziOSTabShell: View {
         return min(max(progress, 0), 1)
     }
 
+    private var downloadsTabIcon: Image {
+        guard let progress = downloadsNavigationProgress else {
+            return Image(systemName: "arrow.down.circle")
+        }
+        return Image(uiImage: Self.downloadsProgressImage(progress: progress))
+    }
+
+    private static func downloadsProgressImage(progress: Double) -> UIImage {
+        let size = CGSize(width: 21, height: 21)
+        let lineWidth = 2.5
+        let inset = lineWidth / 2
+        let bounds = CGRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
+        let renderer = UIGraphicsImageRenderer(size: size)
+
+        return renderer.image { _ in
+            UIColor.black.withAlphaComponent(0.25).setStroke()
+            let track = UIBezierPath(ovalIn: bounds)
+            track.lineWidth = lineWidth
+            track.stroke()
+
+            UIColor.black.setStroke()
+            let ring = UIBezierPath(
+                arcCenter: CGPoint(x: size.width / 2, y: size.height / 2),
+                radius: (size.width - lineWidth) / 2,
+                startAngle: -.pi / 2,
+                endAngle: (-.pi / 2) + (2 * .pi * max(progress, 0.02)),
+                clockwise: true
+            )
+            ring.lineWidth = lineWidth
+            ring.lineCapStyle = .round
+            ring.stroke()
+        }
+        .withRenderingMode(.alwaysTemplate)
+    }
+
     private func showSettings() {
         settingsPresentationColorScheme = settingsPalette.isLight ? .light : .dark
         showingSettings = true
     }
 
-}
-
-private struct PlozziOSDownloadTabProgressIcon: View {
-    let progress: Double
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(.primary.opacity(0.25), lineWidth: 2.5)
-            Circle()
-                .trim(from: 0, to: max(progress, 0.02))
-                .stroke(
-                    .primary,
-                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.25), value: progress)
-        }
-        .frame(width: 21, height: 21)
-        .accessibilityLabel("Downloads in progress")
-        .accessibilityValue(
-            Text(
-                progress,
-                format: .percent.precision(.fractionLength(0))
-            )
-        )
-    }
 }
 
 private struct PlozziOSDestinationView: View {

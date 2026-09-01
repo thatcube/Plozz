@@ -110,19 +110,25 @@ public protocol NavigationLibraryLayoutStoring: Sendable {
 public final class NavigationLibraryLayoutStore: NavigationLibraryLayoutStoring, @unchecked Sendable {
     private let defaults: UserDefaults
     private let key: String
+    private let defaultLayout: NavigationLibraryLayout
 
     /// - Parameter namespace: per-profile scope. `nil` (the default/primary
     ///   profile) uses the un-suffixed key; other profiles pass their `Profile.id`
     ///   so each profile arranges its own navigation.
-    public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
+    public init(
+        defaults: UserDefaults = .standard,
+        namespace: String? = nil,
+        defaultLayout: NavigationLibraryLayout = .default
+    ) {
         self.defaults = defaults
         self.key = SettingsKey.scoped("com.plozz.navigationLibraryLayout", namespace: namespace)
+        self.defaultLayout = defaultLayout
     }
 
     public func load() -> NavigationLibraryLayout {
         guard let data = defaults.data(forKey: key),
               let layout = try? JSONDecoder().decode(NavigationLibraryLayout.self, from: data) else {
-            return .default
+            return defaultLayout
         }
         return layout
     }

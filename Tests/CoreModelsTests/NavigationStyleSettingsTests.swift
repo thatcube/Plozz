@@ -34,6 +34,30 @@ final class NavigationStyleSettingsStoreTests: XCTestCase {
         XCTAssertEqual(child.load(), .sidebar)
     }
 
+    func testLayoutStoreUsesInjectedPlatformDefaultWhenUnset() {
+        let defaults = makeDefaults()
+        let fallback = NavigationLibraryLayout(
+            hiddenKeys: [NavigationLibraryLayout.watchlistKey]
+        )
+        let store = NavigationLibraryLayoutStore(
+            defaults: defaults,
+            defaultLayout: fallback
+        )
+
+        XCTAssertEqual(store.load(), fallback)
+
+        var optedIn = fallback
+        optedIn.setVisible(true, for: NavigationLibraryLayout.watchlistKey)
+        store.save(optedIn)
+
+        XCTAssertTrue(
+            NavigationLibraryLayoutStore(
+                defaults: defaults,
+                defaultLayout: fallback
+            ).load().isVisible(NavigationLibraryLayout.watchlistKey)
+        )
+    }
+
     @MainActor
     func testWatchlistVisibilityPersistsPerProfile() {
         let defaults = makeDefaults()

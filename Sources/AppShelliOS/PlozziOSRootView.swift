@@ -1038,7 +1038,7 @@ private struct PlozziOSDestinationView: View {
 
 private struct PlozziOSWatchlistLandingView: View {
     @Environment(\.mediaItemNavigator) private var navigateToItem
-    @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let appModel: PlozziOSAppModel
     let viewModel: HomeViewModel
     let onShowSettings: () -> Void
@@ -1053,7 +1053,7 @@ private struct PlozziOSWatchlistLandingView: View {
                 watchlistContent(
                     [],
                     loadingPlaceholderCount:
-                        max(metrics.posterColumns.count * 2, 6)
+                        horizontalSizeClass == .regular ? 12 : 6
                 )
             }
         ) { content in
@@ -1109,6 +1109,7 @@ private struct PlozziOSWatchlistLandingView: View {
             }
         }
         .navigationTitle("Watchlist")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 PlozziOSSettingsAvatarButton(action: onShowSettings)
@@ -1130,8 +1131,11 @@ private struct PlozziOSWatchlistLandingView: View {
         } else {
             ScrollView(.vertical) {
                 LazyVGrid(
-                    columns: metrics.posterColumns,
-                    spacing: metrics.gridSpacing
+                    columns: appModel.settings.density.density
+                        .iOSPosterGridColumns(
+                            horizontalSizeClass: horizontalSizeClass
+                        ),
+                    spacing: 18
                 ) {
                     ForEach(MediaRowView.presentationElements(
                         items: items,
@@ -1139,22 +1143,27 @@ private struct PlozziOSWatchlistLandingView: View {
                     )) { element in
                         switch element {
                         case .item(let item):
-                            PosterCardView(
-                                item: item,
-                                style: .poster,
-                                spoilerSettings:
-                                    appModel.settings.spoilers.settings,
-                                isPendingRemoval: isPendingRemoval(item)
-                            ) {
+                            Button {
                                 navigateToItem?(item)
+                            } label: {
+                                PlozziOSPosterCard(
+                                    item: item,
+                                    spoilerSettings:
+                                        appModel.settings.spoilers.settings,
+                                    isPendingRemoval: isPendingRemoval(item)
+                                )
                             }
+                            .buttonStyle(.plain)
                         case .loadingPlaceholder:
-                            SkeletonCardView(style: .poster)
+                            PlozziOSPosterCard(
+                                item: nil,
+                                spoilerSettings:
+                                    appModel.settings.spoilers.settings
+                            )
                         }
                     }
                 }
-                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, PlozzTheme.Spacing.large)
+                .padding()
             }
             .onScrollGeometryChange(for: CGFloat.self) {
                 $0.contentOffset.y

@@ -1012,10 +1012,8 @@ struct MainTabView: View {
     @ViewBuilder
     private var railDestination: some View {
         switch activeLibraryNavigationDestination {
-        case .home:
-            homeTabContent()
-        case .watchlist:
-            watchlistTabContent(isActive: true)
+        case .home, .watchlist:
+            homeBackedRailDestination
         case .search:
             searchTabContent
         case .music:
@@ -1031,6 +1029,15 @@ struct MainTabView: View {
                 homeTabContent()
             }
         }
+    }
+
+    private var homeBackedRailDestination: some View {
+        let showsWatchlist = activeLibraryNavigationDestination == .watchlist
+        return homeTabContent(
+            root: showsWatchlist ? .watchlist : .home,
+            id: showsWatchlist ? "\(homeScopeKey)|watchlist" : nil,
+            isActive: true
+        )
     }
 
     private func watchlistTabContent(isActive: Bool) -> some View {

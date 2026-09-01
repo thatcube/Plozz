@@ -84,17 +84,11 @@ public struct WatchlistBrowseView: View {
         _ items: [MediaItem],
         isRefreshing: Bool
     ) -> some View {
-        if items.isEmpty {
-            if isRefreshing {
-                ProgressView()
-                    .controlSize(.large)
-                    .accessibilityLabel(Text("Refreshing Watchlist"))
-            } else {
-                ContentUnavailableView {
-                    Label("Your Watchlist is empty", systemImage: "bookmark")
-                } description: {
-                    Text("Add a movie or show from Plozz or any connected Watchlist.")
-                }
+        if items.isEmpty, !isRefreshing {
+            ContentUnavailableView {
+                Label("Your Watchlist is empty", systemImage: "bookmark")
+            } description: {
+                Text("Add a movie or show from Plozz or any connected Watchlist.")
             }
         } else {
             ScrollView(.vertical) {
@@ -102,7 +96,7 @@ public struct WatchlistBrowseView: View {
                     alignment: .leading,
                     spacing: metrics.sectionTitleSpacing
                 ) {
-                    WatchlistBrowseHeader(isRefreshing: isRefreshing)
+                    WatchlistBrowseHeader()
                         .padding(.leading, contentLeadingPadding)
                         .padding(.trailing, HomeLayout.horizontalPadding)
 
@@ -121,13 +115,12 @@ public struct WatchlistBrowseView: View {
                             }
                         }
                         if isRefreshing {
-                            ProgressView()
-                                .controlSize(.large)
-                                .frame(
-                                    width: metrics.posterWidth,
-                                    height: metrics.posterHeight
-                                )
-                                .accessibilityLabel(Text("Refreshing Watchlist"))
+                            ForEach(
+                                0..<max(metrics.posterColumns.count * 2, 6),
+                                id: \.self
+                            ) { _ in
+                                SkeletonCardView(style: .poster)
+                            }
                         }
                     }
                     .padding(.leading, contentLeadingPadding)
@@ -157,18 +150,9 @@ public struct WatchlistBrowseView: View {
 }
 
 private struct WatchlistBrowseHeader: View {
-    let isRefreshing: Bool
-
     var body: some View {
-        HStack(spacing: PlozzTheme.Spacing.small) {
-            Text("Watchlist")
-                .font(.largeTitle.bold())
-            if isRefreshing {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel(Text("Refreshing Watchlist"))
-            }
-        }
+        Text("Watchlist")
+            .font(.largeTitle.bold())
     }
 }
 #endif

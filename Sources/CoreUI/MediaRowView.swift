@@ -34,7 +34,7 @@ public struct MediaRowView: View {
     /// name (provider content), and only the caller knows which. `nil` renders no
     /// heading (previously spelled as an empty string).
     private let title: Text?
-    private let showsLoadingIndicator: Bool
+    private let showsLoadingPlaceholders: Bool
     /// Row contents, guaranteed to hold each `id` once.
     ///
     /// `ForEach` over `Identifiable` requires unique ids; duplicates are
@@ -185,7 +185,7 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
-        showsLoadingIndicator: Bool = false,
+        showsLoadingPlaceholders: Bool = false,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -206,7 +206,7 @@ public struct MediaRowView: View {
             onFocusChange: onFocusChange,
             statusCue: statusCue,
             pendingRemovalIDs: pendingRemovalIDs,
-            showsLoadingIndicator: showsLoadingIndicator,
+            showsLoadingPlaceholders: showsLoadingPlaceholders,
             playsOnSelect: playsOnSelect,
             onSelect: onSelect
         )
@@ -229,12 +229,12 @@ public struct MediaRowView: View {
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         pendingRemovalIDs: Set<String> = [],
-        showsLoadingIndicator: Bool = false,
+        showsLoadingPlaceholders: Bool = false,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
-        self.showsLoadingIndicator = showsLoadingIndicator
+        self.showsLoadingPlaceholders = showsLoadingPlaceholders
         let uniqueItems = Self.uniqued(items)
         self.items = uniqueItems
         self.presentation = presentation
@@ -384,21 +384,13 @@ public struct MediaRowView: View {
 
     private struct MediaRowHeader: View {
         let title: Text
-        let showsLoadingIndicator: Bool
         @Environment(\.plozzMetrics) private var metrics
 
         var body: some View {
-            HStack(spacing: PlozzTheme.Spacing.small) {
-                title
-                    .font(PlozzRailTitle.font(
-                        sectionHeaderFontSize: metrics.sectionHeaderFontSize
-                    ))
-                if showsLoadingIndicator {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel(Text("Refreshing Watchlist"))
-                }
-            }
+            title
+                .font(PlozzRailTitle.font(
+                    sectionHeaderFontSize: metrics.sectionHeaderFontSize
+                ))
         }
     }
 
@@ -406,10 +398,7 @@ public struct MediaRowView: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if let title {
-                    MediaRowHeader(
-                        title: title,
-                        showsLoadingIndicator: showsLoadingIndicator
-                    )
+                    MediaRowHeader(title: title)
                         .padding(.leading, leadingInset + navigationContentInset)
                 }
 
@@ -424,14 +413,11 @@ public struct MediaRowView: View {
                             ForEach(items, id: \.stablePresentationID) { item in
                                 tappableCard(for: item)
                             }
-                            if showsLoadingIndicator {
-                                ProgressView()
-                                    .controlSize(.large)
-                                    .frame(
-                                        width: cardSlotWidth,
-                                        height: layoutMetrics.posterHeight
-                                    )
-                                    .accessibilityLabel(Text("Refreshing Watchlist"))
+                            if showsLoadingPlaceholders {
+                                ForEach(0..<5, id: \.self) { _ in
+                                    loadingPlaceholder
+                                        .frame(width: cardSlotWidth)
+                                }
                             }
                         }
                         // The row's ordinary page gutter, unchanged from before the
@@ -674,6 +660,19 @@ public struct MediaRowView: View {
             )
         case .episodeColumn:
             return EpisodeColumnCard.slotWidth
+        }
+    }
+
+    @ViewBuilder
+    private var loadingPlaceholder: some View {
+        switch presentation {
+        case .poster:
+            SkeletonCardView(style: .poster)
+        case .landscape:
+            SkeletonCardView(style: .landscape)
+        case .episodeColumn:
+            SkeletonCardView(style: .landscape)
+                .environment(\.plozzMetrics, .standard)
         }
     }
 

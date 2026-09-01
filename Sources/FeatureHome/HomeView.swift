@@ -1024,7 +1024,7 @@ public struct HomeView: View {
                     for: row.items,
                     revision: watchlistIntentRevision
                 ),
-                showsLoadingIndicator: viewModel.isRefreshing,
+                showsLoadingPlaceholders: viewModel.isRefreshing,
                 onSelect: onSelectItem
             )
         case .recentlyAdded:

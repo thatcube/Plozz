@@ -1592,7 +1592,6 @@ private struct PlozziOSSeriesDownloadPicker: View {
     @State private var isBusy = false
     @State private var errorMessage: String?
     @State private var prompt: PlozziOSSeasonDownloadPrompt?
-    @State private var episodePrompt: MediaItem?
 
     let series: MediaItem
     let seasons: [MediaItem]
@@ -1657,7 +1656,7 @@ private struct PlozziOSSeriesDownloadPicker: View {
                             PlozziOSEpisodeDownloadRow(
                                 episode: episode,
                                 isBusy: isBusy,
-                                onDownload: beginEpisodeDownload
+                                onDownload: startEpisodeDownload
                             )
                         }
                     }
@@ -1678,11 +1677,10 @@ private struct PlozziOSSeriesDownloadPicker: View {
         .confirmationDialog(
             downloadConfirmationTitle,
             isPresented: Binding(
-                get: { prompt != nil || episodePrompt != nil },
+                get: { prompt != nil },
                 set: {
                     if !$0 {
                         prompt = nil
-                        episodePrompt = nil
                     }
                 }
             ),
@@ -1710,35 +1708,11 @@ private struct PlozziOSSeriesDownloadPicker: View {
                 Button("Cancel", role: .cancel) {
                     self.prompt = nil
                 }
-            } else if let episodePrompt {
-                Button("Original") {
-                    self.episodePrompt = nil
-                    startEpisodeDownload(episodePrompt, quality: .original)
-                }
-                if appModel.downloads.supportsReducedQuality(for: episodePrompt) {
-                    Button("1080p • 20 Mbps") {
-                        self.episodePrompt = nil
-                        startEpisodeDownload(episodePrompt, quality: .hd1080)
-                    }
-                    Button("720p • 4 Mbps") {
-                        self.episodePrompt = nil
-                        startEpisodeDownload(episodePrompt, quality: .hd720)
-                    }
-                    Button("480p • 1.5 Mbps") {
-                        self.episodePrompt = nil
-                        startEpisodeDownload(episodePrompt, quality: .sd480)
-                    }
-                }
-                Button("Cancel", role: .cancel) {
-                    self.episodePrompt = nil
-                }
             }
         } message: {
             if let prompt {
                 Text(prompt.message)
                     + Text(" Reduced qualities are transcoded by your media server.")
-            } else {
-                Text("Reduced qualities are transcoded by your media server.")
             }
         }
         .alert(
@@ -1758,11 +1732,6 @@ private struct PlozziOSSeriesDownloadPicker: View {
         if let prompt {
             return Text(prompt.title)
         }
-        if let episodePrompt {
-            return Text("Download ")
-                + Text(verbatim: episodePrompt.title)
-                + Text("?")
-        }
         return Text("Download?")
     }
 
@@ -1774,7 +1743,7 @@ private struct PlozziOSSeriesDownloadPicker: View {
             onDownloadSeason: {
                 beginSeasonDownload(season, episodes: $0)
             },
-            onDownloadEpisode: beginEpisodeDownload
+            onDownloadEpisode: startEpisodeDownload
         )
     }
 
@@ -1825,24 +1794,16 @@ private struct PlozziOSSeriesDownloadPicker: View {
     ) {
         guard !episodes.isEmpty else { return }
         if episodes.count == 1, let episode = episodes.first {
-            beginEpisodeDownload(episode)
+            startEpisodeDownload(
+                episode,
+                quality: appModel.downloads.downloadQuality
+            )
         } else {
             prompt = PlozziOSSeasonDownloadPrompt(
                 scope: .season(season.title),
                 batches: [.init(season: season, episodes: episodes)]
             )
         }
-    }
-
-    private func beginEpisodeDownload(_ episode: MediaItem) {
-        if appModel.downloads.asksBeforeDownloading {
-            episodePrompt = episode
-            return
-        }
-        startEpisodeDownload(
-            episode,
-            quality: appModel.downloads.downloadQuality
-        )
     }
 
     private func startEpisodeDownload(
@@ -2017,7 +1978,7 @@ private struct PlozziOSSeasonDownloadPicker: View {
     let viewModel: ItemDetailViewModel
     let isBusy: Bool
     let onDownloadSeason: ([MediaItem]) -> Void
-    let onDownloadEpisode: (MediaItem) -> Void
+    let onDownloadEpisode: (MediaItem, DownloadQuality) -> Void
 
     var body: some View {
         Group {
@@ -2133,10 +2094,11 @@ private struct PlozziOSSeasonDownloadPicker: View {
 
 private struct PlozziOSEpisodeDownloadRow: View {
     @Environment(PlozziOSAppModel.self) private var appModel
+    @State private var showsDownloadConfirmation = false
 
     let episode: MediaItem
     let isBusy: Bool
-    let onDownload: (MediaItem) -> Void
+    let onDownload: (MediaItem, DownloadQuality) -> Void
 
     var body: some View {
         let record = currentDownloadRecord
@@ -2178,13 +2140,45 @@ private struct PlozziOSEpisodeDownloadRow: View {
                 }
             } else {
                 Button {
-                    onDownload(episode)
+                    if appModel.downloads.asksBeforeDownloading {
+                        showsDownloadConfirmation = true
+                    } else {
+                        onDownload(
+                            episode,
+                            appModel.downloads.downloadQuality
+                        )
+                    }
                 } label: {
                     PlozziOSDownloadControl()
                 }
                 .buttonStyle(.plain)
                 .disabled(isBusy)
                 .accessibilityLabel(Text("Download ") + Text(verbatim: episode.title))
+                .confirmationDialog(
+                    Text("Download ")
+                        + Text(verbatim: episode.title)
+                        + Text("?"),
+                    isPresented: $showsDownloadConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Original") {
+                        onDownload(episode, .original)
+                    }
+                    if appModel.downloads.supportsReducedQuality(for: episode) {
+                        Button("1080p • 20 Mbps") {
+                            onDownload(episode, .hd1080)
+                        }
+                        Button("720p • 4 Mbps") {
+                            onDownload(episode, .hd720)
+                        }
+                        Button("480p • 1.5 Mbps") {
+                            onDownload(episode, .sd480)
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Reduced qualities are transcoded by your media server.")
+                }
             }
         }
     }

@@ -1009,24 +1009,29 @@ struct MainTabView: View {
     }
 
     /// The destination custom rail has selected.
-    @ViewBuilder
-    private var railDestination: some View {
+    ///
+    /// This root-level erasure is intentional. `HomeTab` has a large generic view
+    /// type, and adding another Home-backed destination pushed the result builder's
+    /// nested `_ConditionalContent` metadata past tvOS's runtime stack limit during
+    /// launch. Rail destinations switch only on explicit user input, so erasing at
+    /// this coarse boundary avoids that crash without affecting scrolling content.
+    private var railDestination: AnyView {
         switch activeLibraryNavigationDestination {
         case .home, .watchlist:
-            homeBackedRailDestination
+            return AnyView(homeBackedRailDestination)
         case .search:
-            searchTabContent
+            return AnyView(searchTabContent)
         case .music:
-            musicTabContent
+            return AnyView(musicTabContent)
         case .settings:
-            settingsTabContent
+            return AnyView(settingsTabContent)
         case .allLibraries, .library:
             if let entry = railEntries.first(where: {
                 $0.destination == activeLibraryNavigationDestination
             }) {
-                libraryDestination(entry)
+                return AnyView(libraryDestination(entry))
             } else {
-                homeTabContent()
+                return AnyView(homeTabContent())
             }
         }
     }

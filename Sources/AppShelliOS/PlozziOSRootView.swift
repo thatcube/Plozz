@@ -744,11 +744,7 @@ private struct PlozziOSTabShell: View {
                 }
             }
 
-            Tab(
-                "Downloads",
-                systemImage: "arrow.down.circle",
-                value: PlozziOSDestination.downloads
-            ) {
+            Tab(value: PlozziOSDestination.downloads) {
                 NavigationStack {
                     PlozziOSDestinationView(
                         destination: .downloads,
@@ -760,6 +756,16 @@ private struct PlozziOSTabShell: View {
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .background { AppBackground(palette: palette) }
+            } label: {
+                Label {
+                    Text("Downloads")
+                } icon: {
+                    if let progress = downloadsNavigationProgress {
+                        PlozziOSDownloadTabProgressIcon(progress: progress)
+                    } else {
+                        Image(systemName: "arrow.down.circle")
+                    }
+                }
             }
 
             // Last, and with the SEARCH ROLE rather than an ordinary tab: on a
@@ -789,6 +795,7 @@ private struct PlozziOSTabShell: View {
                 .background { AppBackground(palette: palette) }
             }
         }
+
         .tabViewStyle(.tabBarOnly)
         .onChange(of: appModel.settings.navigation.showsWatchlist) {
             _, showsWatchlist in
@@ -969,11 +976,66 @@ private struct PlozziOSTabShell: View {
         return "\(appModel.profiles.activeProfileID)#\(credentials)#\(active)"
     }
 
+    /// Overall progress for work that is actively transferring. Completed
+    /// siblings in the same season batch remain in the denominator so the tab
+    /// ring advances monotonically instead of resetting each time an episode
+    /// finishes and the next queued episode starts.
+    private var downloadsNavigationProgress: Double? {
+        let active = appModel.downloads.records.filter {
+            $0.status == .queued || $0.status == .downloading
+        }
+        guard !active.isEmpty else { return nil }
+
+        let activeKeys = Set(active.map(\.identityKey))
+        let activeGroupIDs = Set(active.compactMap(\.groupID))
+        let tracked = appModel.downloads.records.filter {
+            activeKeys.contains($0.identityKey)
+                || $0.groupID.map(activeGroupIDs.contains) == true
+        }
+
+        // Keep one aggregation strategy for the lifetime of the cohort. Total
+        // byte counts arrive only after each transfer starts; switching from
+        // item-average to byte-weighted progress at that point makes the ring
+        // visibly jump backward.
+        let progress = tracked.reduce(0.0) {
+            $0 + ($1.fractionCompleted
+                ?? ($1.status == .completed ? 1 : 0))
+        } / Double(tracked.count)
+        return min(max(progress, 0), 1)
+    }
+
     private func showSettings() {
         settingsPresentationColorScheme = settingsPalette.isLight ? .light : .dark
         showingSettings = true
     }
 
+}
+
+private struct PlozziOSDownloadTabProgressIcon: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(.green.opacity(0.25), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: max(progress, 0.02))
+                .stroke(
+                    .green,
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.25), value: progress)
+        }
+        .frame(width: 21, height: 21)
+        .accessibilityLabel("Downloads in progress")
+        .accessibilityValue(
+            Text(
+                progress,
+                format: .percent.precision(.fractionLength(0))
+            )
+        )
+    }
 }
 
 private struct PlozziOSDestinationView: View {

@@ -2066,22 +2066,75 @@ private struct PlozziOSDownloadControl: View {
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(.black.opacity(0.58))
             if isPreparing {
                 ProgressView()
                     .controlSize(.small)
-                    .tint(.white)
+                    .tint(.primary)
+                    .accessibilityLabel("Preparing Download")
             } else if let state {
-                MediaDownloadBadge(state: state, size: 20)
+                statusIcon(state)
             } else {
-                Image(systemName: fallbackSystemImage)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
+                Image(systemName: "\(fallbackSystemImage).circle")
+                    .font(.system(size: 25, weight: .regular))
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("Download")
             }
         }
         .frame(width: 32, height: 32)
         .contentShape(Circle())
+    }
+
+    @ViewBuilder
+    private func statusIcon(_ state: MediaDownloadBadgeState) -> some View {
+        switch state {
+        case .completed:
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 25, weight: .regular))
+                .foregroundStyle(.green)
+                .accessibilityLabel("Downloaded")
+        case .inProgress(let fraction):
+            progressRing(fraction: fraction, color: .green)
+                .accessibilityLabel("Downloading")
+                .accessibilityValue(
+                    Text(
+                        fraction,
+                        format: .percent.precision(.fractionLength(0))
+                    )
+                )
+        case .paused(let fraction):
+            progressRing(fraction: fraction, color: .orange)
+                .accessibilityLabel("Download Paused")
+                .accessibilityValue(
+                    Text(
+                        fraction,
+                        format: .percent.precision(.fractionLength(0))
+                    )
+                )
+        case .failed:
+            Image(systemName: "exclamationmark.circle")
+                .font(.system(size: 25, weight: .regular))
+                .foregroundStyle(.orange)
+                .accessibilityLabel("Download Failed")
+        }
+    }
+
+    private func progressRing(
+        fraction: Double,
+        color: Color
+    ) -> some View {
+        ZStack {
+            Circle()
+                .stroke(color.opacity(0.25), lineWidth: 3)
+            Circle()
+                .trim(from: 0, to: max(fraction, 0.02))
+                .stroke(
+                    color,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.25), value: fraction)
+        }
+        .frame(width: 25, height: 25)
     }
 }
 

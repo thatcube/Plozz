@@ -1363,67 +1363,36 @@ final class PlexProviderMappingTests: XCTestCase {
         )
     }
 
-    func testOfflineTranscodeDecisionURLMatchesProgressiveRequest() throws {
+    func testOfflineTranscodeDownloadQueueURLPreservesProxyAndAuth() throws {
         let progressiveURL = try XCTUnwrap(
             URL(
                 string:
-                    "https://example.test/plex/video/:/transcode/universal/start.mp4?path=%2Flibrary%2Fmetadata%2F7&session=s1&X-Plex-Token=secret"
+                    "https://example.test/plex/video/:/transcode/universal/start.mp4?path=%2Flibrary%2Fmetadata%2F7&session=s1&X-Plex-Token=secret&X-Plex-Client-Identifier=client&X-Plex-Client-Profile-Name=Generic"
             )
         )
-        let decisionURL = try XCTUnwrap(
-            PlexOfflineTranscodeURLBuilder.makeDecisionURL(
+        let queueURL = try XCTUnwrap(
+            PlexOfflineTranscodeURLBuilder.makeDownloadQueueURL(
                 from: progressiveURL
             )
         )
         let components = try XCTUnwrap(
             URLComponents(
-                url: decisionURL,
+                url: queueURL,
                 resolvingAgainstBaseURL: false
             )
         )
-
-        XCTAssertEqual(
-            components.path,
-            "/plex/video/:/transcode/universal/decision"
-        )
-        XCTAssertEqual(
-            components.queryItems,
-            URLComponents(
-                url: progressiveURL,
-                resolvingAgainstBaseURL: false
-            )?.queryItems
-        )
-    }
-
-    func testOfflineTranscodeDecisionAcceptsPlayableResponse() throws {
-        let data = Data(
-            #"{"MediaContainer":{"generalDecisionCode":1001,"generalDecisionText":"Transcode selected"}}"#
-                .utf8
+        let query = Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).map {
+                ($0.name, $0.value)
+            }
         )
 
-        XCTAssertNil(
-            try PlexOfflineTranscodeDecisionParser.rejectionReason(from: data)
-        )
-    }
-
-    func testOfflineTranscodeDecisionSurfacesServerRejection() throws {
-        let data = Data(
-            #"{"MediaContainer":{"generalDecisionCode":2000,"generalDecisionText":"Not enough bandwidth","transcodeDecisionText":"Cannot convert video"}}"#
-                .utf8
-        )
-
-        XCTAssertEqual(
-            try PlexOfflineTranscodeDecisionParser.rejectionReason(from: data),
-            "Not enough bandwidth"
-        )
-    }
-
-    func testOfflineTranscodeDecisionRequiresDecisionCode() {
-        let data = Data(#"{"MediaContainer":{}}"#.utf8)
-
-        XCTAssertThrowsError(
-            try PlexOfflineTranscodeDecisionParser.rejectionReason(from: data)
-        )
+        XCTAssertEqual(components.path, "/plex/downloadQueue")
+        XCTAssertEqual(query["X-Plex-Token"]!, "secret")
+        XCTAssertEqual(query["X-Plex-Client-Identifier"]!, "client")
+        XCTAssertNil(query["path"] ?? nil)
+        XCTAssertNil(query["session"] ?? nil)
+        XCTAssertNil(query["X-Plex-Client-Profile-Name"] ?? nil)
     }
 
     func testOfflineTranscodeURLCanDisableSubtitles() throws {

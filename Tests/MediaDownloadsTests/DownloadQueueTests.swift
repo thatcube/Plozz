@@ -306,6 +306,57 @@ final class DownloadQueueTests: XCTestCase {
         XCTAssertNil(stored?.directShareSource)
     }
 
+    func testManagedPreparationReferenceCanBePersistedDuringDownload() async throws {
+        let registry = DownloadedMediaRegistry(
+            store: InMemoryDownloadedMediaStore()
+        )
+        let (queue, dir) = makeQueue(
+            registry: registry,
+            engine: FakeDownloadEngine.completing(at: 100)
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = ManagedHTTPDownloadSource(
+            provider: .plex,
+            accountID: "account-1",
+            itemID: "episode-1",
+            quality: .constrained(
+                .init(
+                    maximumHeight: 720,
+                    maximumVideoBitrateBps: 4_000_000
+                )
+            )
+        )
+        let record = try await queue.enqueue(
+            .managedHTTP(
+                identity: DownloadTestFactory.imdbIdentity(),
+                source: source,
+                snapshot: PinnedMediaSnapshot(
+                    title: "Episode",
+                    kind: .episode
+                ),
+                fileExtension: "mp4"
+            )
+        )
+        let updated = ManagedHTTPDownloadSource(
+            provider: source.provider,
+            accountID: source.accountID,
+            itemID: source.itemID,
+            quality: source.quality,
+            preparationReference: .init(
+                queueIdentifier: "12",
+                itemIdentifier: "34"
+            )
+        )
+
+        try await registry.setManagedHTTPSource(
+            identityKey: record.identityKey,
+            source: updated
+        )
+
+        let stored = await registry.record(forKey: record.identityKey)
+        XCTAssertEqual(stored?.managedHTTPSource, updated)
+    }
+
     func testEnqueueGroupSharesGroupID() async throws {
         let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
         let (queue, dir) = makeQueue(registry: registry, engine: FakeDownloadEngine.completing(at: 10))

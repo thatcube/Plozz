@@ -2207,7 +2207,14 @@ private struct PlozziOSEpisodeDownloadRow: View {
         case .queued:
             Text("Queued")
         case .preparing:
-            Text("Preparing on server")
+            if let fraction = record.preparationFraction {
+                Text("Preparing on server ") + Text(
+                    fraction,
+                    format: .percent.precision(.fractionLength(0))
+                )
+            } else {
+                Text("Preparing on server")
+            }
         case .downloading:
             downloadingStatusText(for: record)
         case .paused:
@@ -2453,13 +2460,18 @@ private func downloadCollectionBadgeState(
         progressRecords.first?.batchExpectedCount
         ?? expectedCount
         ?? progressRecords.count
+    func visibleFraction(_ record: DownloadedMediaRecord) -> Double? {
+        record.status == .preparing
+            ? record.preparationFraction
+            : record.fractionCompleted
+    }
     let hasUnknownProgress = progressRecords.contains {
-        $0.status != .completed && $0.fractionCompleted == nil
+        $0.status != .completed && visibleFraction($0) == nil
     }
     let fraction: Double? = hasUnknownProgress
         ? nil
         : progressRecords.reduce(0.0) { partial, record in
-            partial + (record.fractionCompleted
+            partial + (visibleFraction(record)
                 ?? (record.status == .completed ? 1 : 0))
         } / Double(max(1, progressExpectedCount))
 

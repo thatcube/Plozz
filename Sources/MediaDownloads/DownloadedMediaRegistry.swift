@@ -228,6 +228,34 @@ public actor DownloadedMediaRegistry {
         try persist(record)
     }
 
+    public func setManagedHTTPSource(
+        identityKey: String,
+        source: ManagedHTTPDownloadSource
+    ) throws {
+        guard var record = state.records[identityKey],
+              record.managedHTTPSource != source else {
+            return
+        }
+        record.managedHTTPSource = source
+        record.updatedAt = Date()
+        try persist(record)
+    }
+
+    public func updatePreparationProgress(
+        identityKey: String,
+        fraction: Double?
+    ) throws {
+        guard var record = state.records[identityKey],
+              record.status == .preparing || record.status == .queued else {
+            return
+        }
+        record.preparationFraction = fraction.map {
+            min(1, max(0, $0))
+        }
+        record.updatedAt = Date()
+        try persist(record)
+    }
+
     /// Records byte progress for an in-flight download.
     public func updateProgress(
         identityKey: String,
@@ -271,6 +299,9 @@ public actor DownloadedMediaRegistry {
         record.status = status
         record.failureReason = failureReason
         record.pauseReason = status == .paused ? pauseReason : nil
+        if status == .downloading || status == .completed {
+            record.preparationFraction = nil
+        }
         record.updatedAt = Date()
         lastProgressPersistence[identityKey] = nil
         try persist(record)

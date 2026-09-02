@@ -1,6 +1,20 @@
 import CoreModels
 import Foundation
 
+public struct ManagedHTTPPreparationReference:
+    Codable,
+    Sendable,
+    Hashable
+{
+    public let queueIdentifier: String
+    public let itemIdentifier: String
+
+    public init(queueIdentifier: String, itemIdentifier: String) {
+        self.queueIdentifier = queueIdentifier
+        self.itemIdentifier = itemIdentifier
+    }
+}
+
 /// Secret-free reopen information for a managed-provider background download.
 ///
 /// Credentials and resolved URLs are deliberately excluded. The iOS app resolves
@@ -14,6 +28,7 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
     public let quality: DownloadQuality
     public let includesAllAudioTracks: Bool
     public let includesTextSubtitleTracks: Bool
+    public let preparationReference: ManagedHTTPPreparationReference?
 
     public init(
         provider: ProviderKind,
@@ -22,7 +37,8 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
         mediaSourceID: String? = nil,
         quality: DownloadQuality = .original,
         includesAllAudioTracks: Bool = false,
-        includesTextSubtitleTracks: Bool = true
+        includesTextSubtitleTracks: Bool = true,
+        preparationReference: ManagedHTTPPreparationReference? = nil
     ) {
         self.provider = provider
         self.accountID = accountID
@@ -31,6 +47,7 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
         self.quality = quality
         self.includesAllAudioTracks = includesAllAudioTracks
         self.includesTextSubtitleTracks = includesTextSubtitleTracks
+        self.preparationReference = preparationReference
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -41,6 +58,7 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
         case quality
         case includesAllAudioTracks
         case includesTextSubtitleTracks
+        case preparationReference
     }
 
     public init(from decoder: any Decoder) throws {
@@ -59,5 +77,9 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
             Bool.self,
             forKey: .includesTextSubtitleTracks
         ) ?? true
+        preparationReference = try container.decodeIfPresent(
+            ManagedHTTPPreparationReference.self,
+            forKey: .preparationReference
+        )
     }
 }

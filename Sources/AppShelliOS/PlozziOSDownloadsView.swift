@@ -356,7 +356,15 @@ enum DownloadFormatting {
         let base: Text
         switch record.status {
         case .queued: base = Text("Queued")
-        case .preparing: base = Text("Preparing on server")
+        case .preparing:
+            if let fraction = record.preparationFraction {
+                base = Text("Preparing on server ") + Text(
+                    fraction,
+                    format: .percent.precision(.fractionLength(0))
+                )
+            } else {
+                base = Text("Preparing on server")
+            }
         case .downloading:
             if let fraction = record.fractionCompleted {
                 base = Text(

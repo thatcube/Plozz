@@ -44,6 +44,8 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
     public var localFileName: String
     public var bytesDownloaded: Int64
     public var totalBytes: Int64?
+    /// Server-side rendition preparation progress before media bytes are ready.
+    public var preparationFraction: Double?
     public var contentType: String?
     /// Human-readable reason for a `.failed`/`.paused` state (never secret).
     public var failureReason: String?
@@ -74,6 +76,7 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         localFileName: String,
         bytesDownloaded: Int64 = 0,
         totalBytes: Int64? = nil,
+        preparationFraction: Double? = nil,
         contentType: String? = nil,
         failureReason: String? = nil,
         pauseReason: DownloadPauseReason? = nil,
@@ -98,6 +101,7 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         self.localFileName = localFileName
         self.bytesDownloaded = bytesDownloaded
         self.totalBytes = totalBytes
+        self.preparationFraction = preparationFraction
         self.contentType = contentType
         self.failureReason = failureReason
         self.pauseReason = pauseReason

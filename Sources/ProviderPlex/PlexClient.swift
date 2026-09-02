@@ -7,8 +7,6 @@ public enum PlexOfflineTranscodeURLBuilder {
         "/video/:/transcode/universal/start.m3u8"
     private static let progressiveEndpoint =
         "/video/:/transcode/universal/start.mp4"
-    private static let decisionEndpoint =
-        "/video/:/transcode/universal/decision"
 
     public static func makeURL(
         from hlsURL: URL,
@@ -95,7 +93,7 @@ public enum PlexOfflineTranscodeURLBuilder {
         return components.url
     }
 
-    public static func makeDecisionURL(from progressiveURL: URL) -> URL? {
+    public static func makeDownloadQueueURL(from progressiveURL: URL) -> URL? {
         guard var components = URLComponents(
             url: progressiveURL,
             resolvingAgainstBaseURL: false
@@ -104,50 +102,17 @@ public enum PlexOfflineTranscodeURLBuilder {
         }
         components.path = String(
             components.path.dropLast(progressiveEndpoint.count)
-        ) + decisionEndpoint
-        return components.url
-    }
-}
-
-public enum PlexOfflineTranscodeDecisionParser {
-    public enum ParsingError: Error {
-        case missingDecisionCode
-    }
-
-    private struct Response: Decodable {
-        let MediaContainer: Container
-    }
-
-    private struct Container: Decodable {
-        let generalDecisionCode: Int?
-        let generalDecisionText: String?
-        let directPlayDecisionText: String?
-        let transcodeDecisionText: String?
-    }
-
-    public static func rejectionReason(from data: Data) throws -> String? {
-        let container = try JSONDecoder().decode(
-            Response.self,
-            from: data
-        ).MediaContainer
-        guard let decisionCode = container.generalDecisionCode else {
-            throw ParsingError.missingDecisionCode
-        }
-        guard decisionCode >= 2_000 else { return nil }
-        return [
-            container.generalDecisionText,
-            container.transcodeDecisionText,
-            container.directPlayDecisionText
+        ) + "/downloadQueue"
+        let excludedNames = [
+            "x-plex-session-identifier",
+            "x-plex-client-profile-name",
+            "x-plex-client-profile-extra"
         ]
-        .compactMap { text in
-            guard let text = text?.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ), !text.isEmpty else {
-                return nil
-            }
-            return text
+        components.queryItems = components.queryItems?.filter {
+            $0.name.lowercased().hasPrefix("x-plex-")
+                && !excludedNames.contains($0.name.lowercased())
         }
-        .first ?? "The server rejected the transcode."
+        return components.url
     }
 }
 

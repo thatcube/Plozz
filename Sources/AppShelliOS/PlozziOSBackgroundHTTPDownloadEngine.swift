@@ -52,10 +52,19 @@ struct PlozziOSBackgroundHTTPDownloadEngine:
     struct Resolution: Sendable {
         let url: URL
         let expectedDuration: TimeInterval?
+        let cleanupURL: URL?
     }
 
+    typealias SourceUpdater =
+        @Sendable (ManagedHTTPDownloadSource) async -> Void
+    typealias PreparationProgressUpdater =
+        @Sendable (Double?) async -> Void
     typealias URLResolver =
-        @Sendable (ManagedHTTPDownloadSource) async throws -> Resolution
+        @Sendable (
+            ManagedHTTPDownloadSource,
+            @escaping SourceUpdater,
+            @escaping PreparationProgressUpdater
+        ) async throws -> Resolution
 
     private let profileID: String
     private let registry: DownloadedMediaRegistry
@@ -108,7 +117,21 @@ struct PlozziOSBackgroundHTTPDownloadEngine:
         guard let source = record.managedHTTPSource else {
             throw BackgroundDownloadError.missingSource
         }
-        let resolution = try await resolveURL(source)
+        let resolution = try await resolveURL(
+            source,
+            { updatedSource in
+                try? await registry.setManagedHTTPSource(
+                    identityKey: record.identityKey,
+                    source: updatedSource
+                )
+            },
+            { fraction in
+                try? await registry.updatePreparationProgress(
+                    identityKey: record.identityKey,
+                    fraction: fraction
+                )
+            }
+        )
         let url = resolution.url
         if let expectedDuration = resolution.expectedDuration,
            expectedDuration > 0 {
@@ -199,10 +222,23 @@ struct PlozziOSBackgroundHTTPDownloadEngine:
                     at: destination.appendingPathExtension("resume")
                 )
                 await onProgress(0, record.totalBytes ?? 0)
+                await removeRemotePreparation(at: resolution.cleanupURL)
                 throw error
             }
         }
+        await removeRemotePreparation(at: resolution.cleanupURL)
         return transferredBytes
+    }
+
+    private func removeRemotePreparation(at url: URL?) async {
+        guard let url else { return }
+        var request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 20
+        )
+        request.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: request)
     }
 }
 

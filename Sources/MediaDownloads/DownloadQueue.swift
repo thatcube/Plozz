@@ -344,13 +344,20 @@ public actor DownloadQueue {
         var attempt = 0
         while true {
             do {
+                guard let currentRecord = await registry.record(
+                    forKey: identityKey
+                ) else {
+                    return
+                }
                 try? await registry.setStatus(
                     identityKey: identityKey,
-                    record.quality == .original ? .downloading : .preparing
+                    currentRecord.quality == .original
+                        ? .downloading
+                        : .preparing
                 )
                 let registry = self.registry
                 let total = try await engine.download(
-                    record: record,
+                    record: currentRecord,
                     to: destination
                 ) { bytes, total in
                     if bytes > 0,

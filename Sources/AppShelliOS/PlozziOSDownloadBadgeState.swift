@@ -14,7 +14,9 @@ extension DownloadedMediaRecord {
     var badgeState: MediaDownloadBadgeState? {
         switch status {
         case .completed: return .completed
-        case .preparing, .downloading, .queued:
+        case .preparing:
+            return .inProgress(fraction: preparationFraction)
+        case .downloading, .queued:
             return .inProgress(fraction: fractionCompleted)
         case .paused: return .paused(fraction: fractionCompleted)
         case .failed: return .failed

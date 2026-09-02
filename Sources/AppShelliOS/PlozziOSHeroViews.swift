@@ -1914,9 +1914,11 @@ private struct PlozziOSDetailHeroForeground: View {
                 if currentDownloadRecord?.status == .completed {
                     return Text("Change Offline Copy of ")
                         + Text(verbatim: $0.title)
-                        + Text("?")
+                        + Text(verbatim: "?")
                 }
-                return Text("Download ") + Text(verbatim: $0.title) + Text("?")
+                return Text("Download ")
+                    + Text(verbatim: $0.title)
+                    + Text(verbatim: "?")
             } ?? Text("Download?"),
             isPresented: $showsDownloadConfirmation,
             titleVisibility: .visible
@@ -1953,7 +1955,7 @@ private struct PlozziOSDetailHeroForeground: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(downloadConfirmationMessage)
+            downloadConfirmationMessage
         }
     }
 
@@ -2424,7 +2426,7 @@ private struct PlozziOSDetailHeroForeground: View {
         guard let downloadItem else { return }
         do {
             guard let provider = appModel.provider(for: downloadItem) else {
-                downloadError = "The selected server is no longer available."
+                downloadError = String(localized: "The selected server is no longer available.") // l10n:content — alert storage requires resolved text
                 return
             }
             downloadRecord = try await appModel.downloads.enqueue(
@@ -2437,12 +2439,18 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
-    private var downloadConfirmationMessage: String {
-        let source = selectedSource?.displayName ?? "Selected server"
+    private var downloadConfirmationMessage: Text {
+        let source = selectedSource.map {
+            Text(verbatim: $0.displayName)
+        } ?? Text("Selected server")
         let size = selectedVersion?.sizeBytes.map {
-            $0.formatted(.byteCount(style: .file))
-        } ?? "Size unavailable"
-        return "\(source) • \(size). Reduced qualities are transcoded by your media server."
+            Text(verbatim: $0.formatted(.byteCount(style: .file)))
+        } ?? Text("Size unavailable")
+        return source
+            + Text(verbatim: " • ")
+            + size
+            + Text(verbatim: ". ")
+            + Text("Reduced qualities are transcoded by your media server.")
     }
 
     private func pauseDownload() async {

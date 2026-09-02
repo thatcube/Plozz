@@ -1658,7 +1658,7 @@ private struct PlozziOSSeriesDownloadPicker: View {
                             if completedEpisodeCount > 0,
                                showDownloadState == nil {
                                 Text(
-                                    "\(completedEpisodeCount) downloaded"
+                                    "Downloaded: \(completedEpisodeCount.formatted())"
                                 )
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -1727,7 +1727,7 @@ private struct PlozziOSSeriesDownloadPicker: View {
             titleVisibility: .visible
         ) {
             if let prompt {
-                Button("Original • \(prompt.count) Episodes") {
+                Button("Original • Episodes: \(prompt.count.formatted())") {
                     self.prompt = nil
                     performDownload(prompt, quality: .original)
                 }
@@ -1988,7 +1988,7 @@ private struct PlozziOSSeasonDownloadRow: View {
             Text(verbatim: season.title)
                 .lineLimit(2)
             if completedEpisodeCount > 0, downloadState == nil {
-                Text("\(completedEpisodeCount) downloaded")
+                Text("Downloaded: \(completedEpisodeCount.formatted())")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2224,7 +2224,7 @@ private struct PlozziOSEpisodeDownloadRow: View {
                 .confirmationDialog(
                     Text("Download ")
                         + Text(verbatim: episode.title)
-                        + Text("?"),
+                        + Text(verbatim: "?"),
                     isPresented: $showsDownloadConfirmation,
                     titleVisibility: .visible
                 ) {

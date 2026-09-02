@@ -247,13 +247,15 @@ private enum PlexRenditionValidator {
         case unreadable
         case incomplete
 
-        var errorDescription: String? {
+        var errorDescription: String? { // l10n:content — LocalizedError protocol requires resolved text
+            let resource: LocalizedStringResource
             switch self {
             case .unreadable:
-                "Plex returned a rendition that could not be opened."
+                resource = "Plex returned a rendition that could not be opened."
             case .incomplete:
-                "Plex returned an incomplete rendition. Please retry the download."
+                resource = "Plex returned an incomplete rendition. Please retry the download."
             }
+            return String(localized: resource) // l10n:content — LocalizedError requires resolved text.
         }
     }
 
@@ -414,7 +416,7 @@ private final class BackgroundHLSDownloadCoordinator:
                 profileID: String,
                 identityKey: String,
                 localFileName: String,
-                title: String,
+                title: String, // l10n:content — provider media title persisted with the transfer
                 from url: URL,
                 to destination: URL,
                 constraint: DownloadRenditionConstraint,
@@ -904,18 +906,23 @@ private enum BackgroundDownloadError: LocalizedError {
     case incompleteTransfer(expected: Int64, actual: Int64)
     case unavailableRendition
 
-    var errorDescription: String? {
+    var errorDescription: String? { // l10n:content — LocalizedError protocol requires resolved text
+        let resource: LocalizedStringResource
         switch self {
-        case .missingSource: "The managed download source is unavailable."
-        case .missingTaskIdentity: "The background download lost its identity."
-        case .missingTemporaryFile: "The downloaded file could not be finalized."
+        case .missingSource:
+            resource = "The managed download source is unavailable."
+        case .missingTaskIdentity:
+            resource = "The background download lost its identity."
+        case .missingTemporaryFile:
+            resource = "The downloaded file could not be finalized."
         case let .unexpectedHTTPStatus(status):
-            "The media server returned HTTP \(status) instead of a media file."
+            resource = "The media server returned HTTP \(status) instead of a media file."
         case let .incompleteTransfer(expected, actual):
-            "The download ended after \(actual) of \(expected) bytes."
+            resource = "The download ended after \(actual) of \(expected) bytes."
         case .unavailableRendition:
-            "The media server could not create an offline rendition."
+            resource = "The media server could not create an offline rendition."
         }
+        return String(localized: resource) // l10n:content — LocalizedError requires resolved text.
     }
 }
 

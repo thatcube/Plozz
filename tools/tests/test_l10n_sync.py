@@ -47,6 +47,18 @@ def info_documents(*languages: str) -> dict[Path, dict]:
 
 
 class LanguageReleaseParityTests(unittest.TestCase):
+    def test_stale_catalog_entries_are_not_active(self) -> None:
+        active = entry("nl")
+        stale = entry("nl")
+        stale["extractionState"] = "stale"
+
+        self.assertEqual(
+            l10n_sync.active_catalog_strings(
+                {"Active": active, "Removed": stale}
+            ),
+            {"Active": active},
+        )
+
     def test_exact_release_catalog_permission_parity_passes(self) -> None:
         strings = {"A": entry("nl", "pl"), "B": entry("nl", "pl")}
         self.assertEqual(

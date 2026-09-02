@@ -3006,21 +3006,23 @@ private enum PlexOfflineDownloadQueueError: LocalizedError {
     case serverFailure
     case invalidStatus(String)
 
-    var errorDescription: String? {
+    var errorDescription: String? { // l10n:content — LocalizedError protocol requires resolved text
+        let resource: LocalizedStringResource
         switch self {
         case .invalidRequest:
-            "Plex could not build the offline download request."
+            resource = "Plex could not build the offline download request."
         case .invalidResponse:
-            "Plex returned an invalid offline download response."
+            resource = "Plex returned an invalid offline download response."
         case let .rejected(status):
-            "Plex rejected offline download preparation with HTTP \(status)."
+            resource = "Plex rejected offline download preparation with HTTP \(status)."
         case .missingItem:
-            "Plex removed the prepared download before it could be transferred."
+            resource = "Plex removed the prepared download before it could be transferred."
         case .serverFailure:
-            "Plex could not prepare this offline rendition."
+            resource = "Plex could not prepare this offline rendition."
         case let .invalidStatus(status):
-            "Plex returned an unknown offline download status: \(status)."
+            resource = "Plex returned an unknown offline download status: \(status)."
         }
+        return String(localized: resource) // l10n:content — LocalizedError requires resolved text.
     }
 }
 #endif

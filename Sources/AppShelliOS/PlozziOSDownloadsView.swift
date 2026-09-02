@@ -107,9 +107,9 @@ struct PlozziOSDownloadsView: View {
     private var activeTransfersHeader: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(model.activeTransfers.count) active")
+                Text("Active downloads: \(model.activeTransfers.count.formatted())")
                     .font(.headline)
-                Text(activeTransferSummary)
+                activeTransferSummary
                     .font(.caption)
                     .plozzForeground(.secondary)
             }
@@ -132,27 +132,32 @@ struct PlozziOSDownloadsView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private var activeTransferSummary: String {
-        var parts = [model.activeLimitDescription]
+    private var activeTransferSummary: Text {
+        var parts = [Text(model.activeLimitDescription)]
         if model.aggregateBytesPerSecond > 0 {
             parts.insert(
-                model.aggregateBytesPerSecond.formatted(.byteCount(style: .file))
-                    + "/s",
+                Text(
+                    verbatim: model.aggregateBytesPerSecond
+                        .formatted(.byteCount(style: .file)) + "/s"
+                ),
                 at: 0
             )
         }
         if let eta = model.aggregateETA {
+            let duration = Duration.seconds(eta).formatted(
+                .units(
+                    allowed: [.hours, .minutes],
+                    width: .abbreviated,
+                    maximumUnitCount: 2
+                )
+            )
             parts.append(
-                Duration.seconds(eta).formatted(
-                    .units(
-                        allowed: [.hours, .minutes],
-                        width: .abbreviated,
-                        maximumUnitCount: 2
-                    )
-                ) + " remaining"
+                Text("\(duration) remaining")
             )
         }
-        return parts.joined(separator: " • ")
+        return parts.dropFirst().reduce(parts[0]) {
+            $0 + Text(verbatim: " • ") + $1
+        }
     }
 
     /// Landscape download tiles: one column on a compact phone, two on an iPad in

@@ -98,12 +98,16 @@ class TranslationImportTests(unittest.TestCase):
                 allow_translated_state=False,
             )
 
+    def test_precision_printf_syntax_is_supported(self) -> None:
+        l10n_import.validate_known_format_syntax("Progress %.2f", "test string")
+        self.assertEqual(l10n_import.placeholder_types("Progress %.2f"), ["f"])
+
     def test_unknown_printf_syntax_fails_instead_of_being_ignored(self) -> None:
         with self.assertRaisesRegex(
             l10n_import.ImportErrorDetail, "unsupported format sequence"
         ):
             l10n_import.validate_known_format_syntax(
-                "Progress %.2f", "test string"
+                "Progress %q", "test string"
             )
 
     def test_language_tag_rejects_underscore_and_wrong_case(self) -> None:

@@ -237,7 +237,7 @@ def validate_catalog() -> int:
     whatever the route, a brand must not end up in front of a translator.
     """
     catalog = json.loads(CATALOG.read_text())
-    strings = catalog.get("strings", {})
+    strings = active_catalog_strings(catalog.get("strings", {}))
     problems: list[str] = []
 
     config_path = REPO / "tools/l10n-guard.json"
@@ -261,6 +261,15 @@ def validate_catalog() -> int:
     for problem in problems:
         print(f"  ✗ {problem}")
     return len(problems)
+
+
+def active_catalog_strings(strings: dict) -> dict:
+    """Entries still emitted by source extraction, excluding retained stale history."""
+    return {
+        key: entry
+        for key, entry in strings.items()
+        if entry.get("extractionState") != "stale"
+    }
 
 
 # An integer placeholder. `%lld`/`%d`, optionally positional (`%2$lld`).
@@ -427,7 +436,7 @@ def report_coverage() -> None:
     usable model translation as 0% coverage.
     """
     catalog = json.loads(CATALOG.read_text())
-    strings = catalog.get("strings", {})
+    strings = active_catalog_strings(catalog.get("strings", {}))
     source = catalog.get("sourceLanguage", "en")
 
     translatable = {k: v for k, v in strings.items() if v.get("shouldTranslate") is not False}
@@ -513,6 +522,8 @@ def plural_problems(strings: dict) -> list[str]:
     # Counts that are identifiers or measurements, not quantities of a noun.
     exempt = {
         "%lld", "%lld%%", "%lld of %lld", "Items: %lld", ":%lld", "%lld sec",
+        "%lld Mbps", "Custom • %lldp", "Maximum Resolution: %lldp",
+        "Custom • %lldp • %@ Mbps",
         "Episode %lld", "Track %lld", "Downloading %lld%%", "Downloading %lld percent",
         "Left %lld%%", "Right %lld%%", "%lld queued", "%lld unavailable",
         "+ %lld more", "· +%lld more",
@@ -520,6 +531,8 @@ def plural_problems(strings: dict) -> list[str]:
         # as "Episode %lld": an index, not a count of anything.
         "PIN %lld of %lld", "PIN progress: %lld of %lld",
         "The media server returned HTTP %lld instead of a media file.",
+        "Plex rejected offline download preparation with HTTP %lld.",
+        "The download ended after %lld of %lld bytes.",
     }
 
     for key in sorted(strings):

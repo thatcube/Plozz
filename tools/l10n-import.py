@@ -46,6 +46,7 @@ INFO_CATALOGS = {
 # affected screen.
 FORMAT_RE = re.compile(
     r"%(?!%)(?:(?P<position>\d+)\$)?"
+    r"(?:\.\d+)?"
     r"(?P<type>lld|llu|ld|lu|lf|d|u|f|@)"
 )
 SUBSTITUTION_RE = re.compile(r"%#@(?P<name>[A-Za-z0-9_]+)@")

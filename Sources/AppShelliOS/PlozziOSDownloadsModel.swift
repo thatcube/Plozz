@@ -381,7 +381,7 @@ final class PlozziOSDownloadsModel {
         return downloadQuality
     }
 
-    var customDownloadQualityTitle: String? {
+    var customDownloadQualityTitle: LocalizedStringResource? {
         guard case .constrained(let constraint) = customDownloadQuality else {
             return nil
         }
@@ -1151,10 +1151,11 @@ final class PlozziOSDownloadsModel {
             / TimeInterval(aggregateBytesPerSecond)
     }
 
-    var activeLimitDescription: String {
-        maximumDownloadMegabitsPerSecond.map {
-            "\($0.formatted()) Mbps limit"
-        } ?? "No speed limit"
+    var activeLimitDescription: LocalizedStringResource {
+        if let limit = maximumDownloadMegabitsPerSecond {
+            return "\(limit.formatted()) Mbps limit"
+        }
+        return "No speed limit"
     }
 
     func transferMetrics(
@@ -1481,18 +1482,26 @@ final class PlozziOSDownloadsModel {
                 continue
             }
             notifiedBatchIDs.insert(batchID)
-            let title = records.first?.batchTitle ?? "Downloads"
+            let body: LocalizedStringResource
+            if let title = records.first?.batchTitle {
+                body = "\(title) is available offline."
+            } else {
+                body = "Downloads are available offline."
+            }
             scheduleNotification(
                 title: "Download Complete",
-                body: "\(title) is available offline."
+                body: body
             )
         }
     }
 
-    private func scheduleNotification(title: String, body: String) {
+    private func scheduleNotification(
+        title: LocalizedStringResource,
+        body: LocalizedStringResource
+    ) {
         let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
+        content.title = String(localized: title) // l10n:content — notification API requires resolved text
+        content.body = String(localized: body) // l10n:content — notification API requires resolved text
         content.sound = .default
         let request = UNNotificationRequest(
             identifier: UUID().uuidString,

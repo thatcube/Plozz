@@ -2,6 +2,41 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "id": "release/032",
+      "version": "2026.9.2",
+      "build": 32,
+      "releasedAt": "2026-09-02",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            {
+              "text": "Offline downloads",
+              "platforms": ["iOS"]
+            }
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Configurable Watchlist navigation"
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            "Watchlist changes made in other apps now sync correctly",
+            "Large Watchlist loading and updates",
+            {
+              "text": "Plex reduced-quality offline playback",
+              "platforms": ["iOS"]
+            },
+            "Native playback stability"
+          ]
+        }
+      ]
+    },
+    {
       "id": "release/031",
       "version": "2026.8.31",
       "build": 31,

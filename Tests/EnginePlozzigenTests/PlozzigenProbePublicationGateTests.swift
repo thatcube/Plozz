@@ -3,6 +3,49 @@ import CoreModels
 @testable import EnginePlozzigen
 
 final class PlozzigenProbePublicationGateTests: XCTestCase {
+    @MainActor
+    func testLocalPlaybackUsesKnownItemRuntimeAsDeclaredDuration() {
+        let item = MediaItem(
+            id: "episode",
+            title: "Episode",
+            kind: .episode,
+            runtime: 1_440
+        )
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(fileURLWithPath: "/tmp/media.mp4")
+        )
+
+        XCTAssertEqual(
+            PlozzigenVideoEngine.declaredDuration(
+                for: request,
+                sourceURL: request.streamURL!
+            ),
+            1_440
+        )
+    }
+
+    @MainActor
+    func testRemotePlaybackDoesNotOverrideContainerDuration() {
+        let item = MediaItem(
+            id: "episode",
+            title: "Episode",
+            kind: .episode,
+            runtime: 1_440
+        )
+        let request = PlaybackRequest(
+            item: item,
+            streamURL: URL(string: "https://example.test/media.mp4")!
+        )
+
+        XCTAssertNil(
+            PlozzigenVideoEngine.declaredDuration(
+                for: request,
+                sourceURL: request.streamURL!
+            )
+        )
+    }
+
     func testNewLoadInvalidatesPriorGeneration() {
         var gate = PlozzigenProbePublicationGate()
         let first = gate.beginLoad()

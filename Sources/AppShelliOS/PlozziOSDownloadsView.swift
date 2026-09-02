@@ -358,7 +358,14 @@ enum DownloadFormatting {
         case .queued: base = Text("Queued")
         case .preparing: base = Text("Preparing on server")
         case .downloading:
-            base = Text((record.fractionCompleted ?? 0), format: .percent.precision(.fractionLength(0)))
+            if let fraction = record.fractionCompleted {
+                base = Text(
+                    fraction,
+                    format: .percent.precision(.fractionLength(0))
+                )
+            } else {
+                base = Text("Downloading")
+            }
         case .paused: base = Text("Paused")
         case .completed:
             base = Text("Available offline • \(byteText(record.bytesDownloaded))")
@@ -388,7 +395,7 @@ enum DownloadFormatting {
                 || record.status == .queued else {
             return nil
         }
-        return record.fractionCompleted ?? 0
+        return record.fractionCompleted
     }
 
     static func failure(for record: DownloadedMediaRecord) -> String? {
@@ -747,7 +754,7 @@ struct PlozziOSDownloadSettingsView: View {
                     )
                 } else {
                     Text(
-                        "Reduced quality asks Plex, Jellyfin, or Emby to transcode a separate offline copy. Preparation can take time and use significant server CPU. Network shares support Original only."
+                        "Reduced quality asks Plex, Jellyfin, or Emby to transcode a separate offline copy. Plex keeps one audio track; choose Original to keep every track. Preparation can take time and use significant server CPU. Network shares support Original only."
                     )
                 }
             }

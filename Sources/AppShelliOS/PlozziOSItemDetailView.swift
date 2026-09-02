@@ -2209,10 +2209,7 @@ private struct PlozziOSEpisodeDownloadRow: View {
         case .preparing:
             Text("Preparing on server")
         case .downloading:
-            Text("Downloading ") + Text(
-                record.fractionCompleted ?? 0,
-                format: .percent.precision(.fractionLength(0))
-            )
+            downloadingStatusText(for: record)
         case .paused:
             Text("Paused")
         case .failed:
@@ -2220,6 +2217,42 @@ private struct PlozziOSEpisodeDownloadRow: View {
         case .completed:
             Text("Downloaded")
         }
+    }
+
+    @ViewBuilder
+    private func downloadingStatusText(
+        for record: DownloadedMediaRecord
+    ) -> some View {
+        if let fraction = record.fractionCompleted {
+            Text("Downloading ") + Text(
+                fraction,
+                format: .percent.precision(.fractionLength(0))
+            ) + transferMetricsText(for: record)
+        } else {
+            Text("Downloading") + transferMetricsText(for: record)
+        }
+    }
+
+    private func transferMetricsText(
+        for record: DownloadedMediaRecord
+    ) -> Text {
+        guard let metrics = appModel.downloads.transferMetrics(for: record),
+              metrics.bytesPerSecond > 0 else {
+            return Text(verbatim: "")
+        }
+        var detail = metrics.bytesPerSecond.formatted(
+            .byteCount(style: .file)
+        ) + "/s"
+        if let eta = metrics.estimatedTimeRemaining, eta >= 1 {
+            detail += " • " + Duration.seconds(eta).formatted(
+                .units(
+                    allowed: [.hours, .minutes],
+                    width: .abbreviated,
+                    maximumUnitCount: 2
+                )
+            ) + " remaining"
+        }
+        return Text(verbatim: " • \(detail)")
     }
 }
 
@@ -2314,23 +2347,37 @@ private struct PlozziOSDownloadControl: View {
                 .foregroundStyle(.green)
                 .accessibilityLabel("Downloaded")
         case .inProgress(let fraction):
-            progressRing(fraction: fraction, color: .primary)
-                .accessibilityLabel("Downloading")
-                .accessibilityValue(
-                    Text(
-                        fraction,
-                        format: .percent.precision(.fractionLength(0))
+            if let fraction {
+                progressRing(fraction: fraction, color: .primary)
+                    .accessibilityLabel("Downloading")
+                    .accessibilityValue(
+                        Text(
+                            fraction,
+                            format: .percent.precision(.fractionLength(0))
+                        )
                     )
-                )
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.primary)
+                    .accessibilityLabel("Downloading")
+            }
         case .paused(let fraction):
-            progressRing(fraction: fraction, color: .orange)
-                .accessibilityLabel("Download Paused")
-                .accessibilityValue(
-                    Text(
-                        fraction,
-                        format: .percent.precision(.fractionLength(0))
+            if let fraction {
+                progressRing(fraction: fraction, color: .orange)
+                    .accessibilityLabel("Download Paused")
+                    .accessibilityValue(
+                        Text(
+                            fraction,
+                            format: .percent.precision(.fractionLength(0))
+                        )
                     )
-                )
+            } else {
+                Image(systemName: "pause.circle.fill")
+                    .font(.system(size: 25, weight: .regular))
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Download Paused")
+            }
         case .failed:
             Image(systemName: "exclamationmark.circle")
                 .font(.system(size: 25, weight: .regular))
@@ -2406,10 +2453,15 @@ private func downloadCollectionBadgeState(
         progressRecords.first?.batchExpectedCount
         ?? expectedCount
         ?? progressRecords.count
-    let fraction = progressRecords.reduce(0.0) { partial, record in
-        partial + (record.fractionCompleted
-            ?? (record.status == .completed ? 1 : 0))
-    } / Double(max(1, progressExpectedCount))
+    let hasUnknownProgress = progressRecords.contains {
+        $0.status != .completed && $0.fractionCompleted == nil
+    }
+    let fraction: Double? = hasUnknownProgress
+        ? nil
+        : progressRecords.reduce(0.0) { partial, record in
+            partial + (record.fractionCompleted
+                ?? (record.status == .completed ? 1 : 0))
+        } / Double(max(1, progressExpectedCount))
 
     if progressRecords.contains(where: { $0.status == .failed }) {
         return .failed

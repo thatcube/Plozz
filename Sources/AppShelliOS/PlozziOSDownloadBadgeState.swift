@@ -15,8 +15,8 @@ extension DownloadedMediaRecord {
         switch status {
         case .completed: return .completed
         case .preparing, .downloading, .queued:
-            return .inProgress(fraction: fractionCompleted ?? 0)
-        case .paused: return .paused(fraction: fractionCompleted ?? 0)
+            return .inProgress(fraction: fractionCompleted)
+        case .paused: return .paused(fraction: fractionCompleted)
         case .failed: return .failed
         }
     }

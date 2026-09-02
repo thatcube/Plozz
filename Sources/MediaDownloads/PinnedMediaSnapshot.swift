@@ -33,6 +33,9 @@ public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
     /// season sections and "S1 · E5"-style labels. `nil` for movies/legacy.
     public var seasonNumber: Int?
     public var episodeNumber: Int?
+    /// Runtime in seconds, retained so offline playback and rendition validation
+    /// do not depend on a container carrying duration metadata.
+    public var runtime: TimeInterval?
     /// The item's cross-provider IDs (TVDB/TMDB/Jellyfin/etc.), captured so a
     /// reconstructed offline item reproduces the same identity the pinned file
     /// was keyed by — letting downloaded episodes (and their neighbors) resolve
@@ -50,6 +53,7 @@ public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
         seriesID: String? = nil,
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
+        runtime: TimeInterval? = nil,
         providerIDs: [String: String] = [:]
     ) {
         self.title = title
@@ -62,12 +66,13 @@ public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
         self.seriesID = seriesID
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
+        self.runtime = runtime
         self.providerIDs = providerIDs
     }
 
     private enum CodingKeys: String, CodingKey {
         case title, kind, year, sourceAccountID, sourceItemID, artworkFileName
-        case seriesTitle, seriesID, seasonNumber, episodeNumber, providerIDs
+        case seriesTitle, seriesID, seasonNumber, episodeNumber, runtime, providerIDs
     }
 
     /// Custom decode so records pinned before the enrichment fields shipped keep
@@ -98,6 +103,9 @@ public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
         episodeNumber = try container.decodeIfPresent(
             Int.self, forKey: .episodeNumber
         )
+        runtime = try container.decodeIfPresent(
+            TimeInterval.self, forKey: .runtime
+        )
         providerIDs = try container.decodeIfPresent(
             [String: String].self, forKey: .providerIDs
         ) ?? [:]
@@ -121,6 +129,7 @@ public extension PinnedMediaSnapshot {
             seriesID: item.seriesID,
             seasonNumber: item.seasonNumber,
             episodeNumber: item.episodeNumber,
+            runtime: item.runtime,
             providerIDs: item.providerIDs
         )
     }

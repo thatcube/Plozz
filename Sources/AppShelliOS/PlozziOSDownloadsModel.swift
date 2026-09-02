@@ -9,6 +9,11 @@ import UserNotifications
 @MainActor
 @Observable
 final class PlozziOSDownloadsModel {
+    struct TransferMetrics: Equatable {
+        let bytesPerSecond: Int64
+        let estimatedTimeRemaining: TimeInterval?
+    }
+
     private(set) var records: [DownloadedMediaRecord] = [] {
         didSet {
             recordsByKey = Dictionary(
@@ -92,6 +97,7 @@ final class PlozziOSDownloadsModel {
         didSet { persistPreferences() }
     }
     private(set) var aggregateBytesPerSecond: Int64 = 0
+    private(set) var transferMetricsByKey: [String: TransferMetrics] = [:]
 
     let offlineResolver: (any OfflinePlaybackResolving)?
 
@@ -103,6 +109,7 @@ final class PlozziOSDownloadsModel {
     private let preferencesKey: String
     private var policy: DownloadNetworkPolicy
     private var speedSample: (date: Date, bytes: Int64)?
+    private var speedSamplesByKey: [String: (date: Date, bytes: Int64)] = [:]
     private var hasLoadedRecords = false
     private var notifiedBatchIDs: Set<String> = []
     private var isUsingUncappedBackgroundPolicy = false
@@ -113,6 +120,8 @@ final class PlozziOSDownloadsModel {
     nonisolated(unsafe) private var eventsTask: Task<Void, Never>?
     @ObservationIgnored
     nonisolated(unsafe) private var networkTask: Task<Void, Never>?
+    @ObservationIgnored
+    nonisolated(unsafe) private var metricsExpiryTask: Task<Void, Never>?
 
     init(
         profileID: String,
@@ -143,6 +152,7 @@ final class PlozziOSDownloadsModel {
             ),
             managedHTTP: PlozziOSBackgroundHTTPDownloadEngine(
                 profileID: profileID,
+                registry: registry,
                 resolveURL: managedURLResolver
             )
         )
@@ -203,6 +213,7 @@ final class PlozziOSDownloadsModel {
         }
         Task {
             await queue.updatePolicy(policy)
+            await Self.invalidateLegacyPlexRenditions(in: registry)
             await queue.resumeInterrupted()
         }
     }
@@ -235,6 +246,7 @@ final class PlozziOSDownloadsModel {
     deinit {
         eventsTask?.cancel()
         networkTask?.cancel()
+        metricsExpiryTask?.cancel()
     }
 
     /// Any downloaded copy of this title, regardless of version. For "does this
@@ -425,6 +437,7 @@ final class PlozziOSDownloadsModel {
             title: record.snapshot.title,
             kind: record.snapshot.kind,
             productionYear: record.snapshot.year,
+            runtime: record.snapshot.runtime,
             sourceAccountID: accountID
         )
     }
@@ -527,11 +540,6 @@ final class PlozziOSDownloadsModel {
             .displayLabel
         let request: DownloadRequest
         let quality = requestedQuality ?? policy.quality
-        if quality != .original, policy.maximumBytesPerSecond != nil {
-            throw PlozziOSDownloadError.unavailable(
-                "Reduced-quality downloads use Apple’s background media transfer and cannot be speed-limited. Choose Original or set Download Speed to Full Speed."
-            )
-        }
         switch playback.downloadableOriginalSource {
         case .networkFile(let locator):
             request = DownloadRequest.directShare(
@@ -555,6 +563,20 @@ final class PlozziOSDownloadsModel {
                   kind != .mediaShare else {
                 throw PlozziOSDownloadError.unavailable(
                     "This server did not provide a downloadable original file."
+                )
+            }
+            if quality != .original,
+               policy.maximumBytesPerSecond != nil,
+               kind != .plex {
+                throw PlozziOSDownloadError.unavailable(
+                    "Reduced-quality Jellyfin and Emby downloads cannot be speed-limited. Choose Original or set Download Speed to Full Speed."
+                )
+            }
+            if quality != .original,
+               policy.includesAllAudioTracks,
+               kind == .plex {
+                throw PlozziOSDownloadError.unavailable(
+                    "Plex reduced-quality downloads support one audio track. Turn off Include All Audio Tracks or choose Original quality."
                 )
             }
             let source = ManagedHTTPDownloadSource(
@@ -582,8 +604,13 @@ final class PlozziOSDownloadsModel {
                 batchExpectedCount: batchExpectedCount,
                 expectedBytes: quality == .original
                     ? playback.sourceMetadata?.fileSizeBytes
-                    : nil,
-                fileExtension: quality == .original ? fileExtension : "movpkg",
+                    : Self.estimatedRenditionBytes(
+                        runtime: item.runtime,
+                        quality: quality
+                    ),
+                fileExtension: quality == .original
+                    ? fileExtension
+                    : (kind == .plex ? "mp4" : "movpkg"),
                 quality: quality
             )
         case .publicURL, .dlnaResource, nil:
@@ -674,8 +701,133 @@ final class PlozziOSDownloadsModel {
     }
 
     func resume(_ record: DownloadedMediaRecord) async {
-        await queue?.resume(identityKey: record.identityKey)
+        await resumeWithoutReload(record)
         await reload()
+    }
+
+    private func resumeWithoutReload(_ record: DownloadedMediaRecord) async {
+        if record.status == .failed,
+           requiresFreshRetry(record),
+           let request = retryRequest(for: record) {
+            do {
+                _ = try await queue?.restartFailed(request)
+                return
+            } catch {
+                try? await registry?.setStatus(
+                    identityKey: record.identityKey,
+                    .failed,
+                    failureReason: error.localizedDescription
+                )
+                return
+            }
+        }
+        await queue?.resume(identityKey: record.identityKey)
+    }
+
+    private func requiresFreshRetry(_ record: DownloadedMediaRecord) -> Bool {
+        record.quality != .original
+            && record.managedHTTPSource?.provider == .plex
+    }
+
+    private func retryRequest(
+        for record: DownloadedMediaRecord
+    ) -> DownloadRequest? {
+        var managedSource = record.managedHTTPSource
+        if record.sourceKind == .managedHTTP, managedSource == nil {
+            guard let accountID = record.snapshot.sourceAccountID,
+                  let itemID = record.snapshot.sourceItemID,
+                  let kind = providerKind(accountID),
+                  kind != .mediaShare else {
+                return nil
+            }
+            managedSource = ManagedHTTPDownloadSource(
+                provider: kind,
+                accountID: accountID,
+                itemID: itemID,
+                mediaSourceID: record.versionID,
+                quality: record.quality,
+                includesAllAudioTracks: policy.includesAllAudioTracks,
+                includesTextSubtitleTracks: policy.includesTextSubtitleTracks
+            )
+        }
+        if record.quality != .original,
+           let source = managedSource,
+           source.provider == .plex {
+            managedSource = ManagedHTTPDownloadSource(
+                provider: source.provider,
+                accountID: source.accountID,
+                itemID: source.itemID,
+                mediaSourceID: source.mediaSourceID,
+                quality: source.quality,
+                includesAllAudioTracks: policy.includesAllAudioTracks,
+                includesTextSubtitleTracks:
+                    policy.includesTextSubtitleTracks
+            )
+        }
+
+        let fileExtension: String?
+        if record.quality != .original,
+           managedSource?.provider == .plex {
+            fileExtension = "mp4"
+        } else {
+            let pathExtension = (
+                record.localFileName as NSString
+            ).pathExtension
+            fileExtension = pathExtension.isEmpty ? nil : pathExtension
+        }
+        return DownloadRequest(
+            identity: record.identity,
+            versionID: record.versionID,
+            versionLabel: record.versionLabel,
+            groupID: record.groupID,
+            batchID: record.batchID,
+            batchKind: record.batchKind,
+            batchTitle: record.batchTitle,
+            batchExpectedCount: record.batchExpectedCount,
+            expectedBytes: record.quality == .original
+                ? record.totalBytes
+                : Self.estimatedRenditionBytes(
+                    runtime: record.snapshot.runtime,
+                    quality: record.quality
+                ),
+            sourceKind: record.sourceKind,
+            quality: record.quality,
+            directShareSource: record.directShareSource,
+            managedHTTPSource: managedSource,
+            contentType: record.contentType,
+            fileExtension: fileExtension,
+            snapshot: record.snapshot
+        )
+    }
+
+    static func estimatedRenditionBytes(
+        runtime: TimeInterval?,
+        quality: DownloadQuality
+    ) -> Int64? {
+        guard let runtime, runtime > 0,
+              case .constrained(let constraint) = quality else {
+            return nil
+        }
+        let audioAndContainerBitsPerSecond = 256_000.0
+        let estimatedBits = runtime
+            * (Double(constraint.maximumVideoBitrateBps) + audioAndContainerBitsPerSecond)
+        return Int64((estimatedBits / 8).rounded(.up))
+    }
+
+    private static func invalidateLegacyPlexRenditions(
+        in registry: DownloadedMediaRegistry
+    ) async {
+        for record in await registry.all()
+        where record.status == .completed
+            && record.quality != .original
+            && record.managedHTTPSource?.provider == .plex
+            && record.localFileName.lowercased().hasSuffix(".mkv") {
+            try? await registry.setStatus(
+                identityKey: record.identityKey,
+                .failed,
+                failureReason: "This older Plex rendition may be incomplete. Resume to download a verified copy."
+            )
+        }
     }
 
     func pause(_ records: [DownloadedMediaRecord]) async {
@@ -687,7 +839,7 @@ final class PlozziOSDownloadsModel {
 
     func resume(_ records: [DownloadedMediaRecord]) async {
         for record in records where record.status == .paused || record.status == .failed {
-            await queue?.resume(identityKey: record.identityKey)
+            await resumeWithoutReload(record)
         }
         await reload()
     }
@@ -698,7 +850,11 @@ final class PlozziOSDownloadsModel {
     }
 
     func resumeBatch(_ batchID: String) async {
-        await queue?.resume(batchID: batchID)
+        for record in records
+        where record.batchID == batchID
+            && (record.status == .paused || record.status == .failed) {
+            await resumeWithoutReload(record)
+        }
         await reload()
     }
 
@@ -731,8 +887,11 @@ final class PlozziOSDownloadsModel {
     var hasActiveTransfers: Bool { !activeTransfers.isEmpty }
 
     var remainingActiveBytes: Int64? {
+        guard activeTransfers.allSatisfy({ $0.status == .downloading }) else {
+            return nil
+        }
         let known = activeTransfers.compactMap { record -> Int64? in
-            guard let total = record.totalBytes else { return nil }
+            guard let total = record.totalBytes, total > 0 else { return nil }
             return max(0, total - record.bytesDownloaded)
         }
         guard known.count == activeTransfers.count else { return nil }
@@ -751,7 +910,13 @@ final class PlozziOSDownloadsModel {
     var activeLimitDescription: String {
         maximumDownloadMegabitsPerSecond.map {
             "\($0.formatted()) Mbps limit"
-        } ?? "Unlimited"
+        } ?? "No speed limit"
+    }
+
+    func transferMetrics(
+        for record: DownloadedMediaRecord
+    ) -> TransferMetrics? {
+        transferMetricsByKey[record.identityKey]
     }
 
     /// Removes many records as a single unit (a whole season, a whole show, or
@@ -789,10 +954,10 @@ final class PlozziOSDownloadsModel {
 
     /// Resumes every paused or failed download.
     func resumeAllPaused() async {
-        guard let queue else { return }
+        guard queue != nil else { return }
         for record in records
         where record.status == .paused || record.status == .failed {
-            await queue.resume(identityKey: record.identityKey)
+            await resumeWithoutReload(record)
         }
         await reload()
     }
@@ -1018,19 +1183,74 @@ final class PlozziOSDownloadsModel {
     ) {
         let active = refreshed.filter { $0.status == .downloading }
         guard !active.isEmpty else {
+            metricsExpiryTask?.cancel()
+            metricsExpiryTask = nil
             speedSample = nil
+            speedSamplesByKey = [:]
+            transferMetricsByKey = [:]
             aggregateBytesPerSecond = 0
             return
         }
         let now = Date()
+        let activeKeys = Set(active.map(\.identityKey))
+        speedSamplesByKey = speedSamplesByKey.filter {
+            activeKeys.contains($0.key)
+        }
+        var metrics = transferMetricsByKey.filter {
+            activeKeys.contains($0.key)
+        }
+        for record in active {
+            if let sample = speedSamplesByKey[record.identityKey] {
+                let interval = now.timeIntervalSince(sample.date)
+                if interval >= 0.4 {
+                    let speed = max(
+                        0,
+                        Int64(
+                            Double(record.bytesDownloaded - sample.bytes)
+                                / interval
+                        )
+                    )
+                    let eta: TimeInterval?
+                    if speed > 0,
+                       let total = record.totalBytes,
+                       total > record.bytesDownloaded {
+                        eta = TimeInterval(total - record.bytesDownloaded)
+                            / TimeInterval(speed)
+                    } else {
+                        eta = nil
+                    }
+                    metrics[record.identityKey] = TransferMetrics(
+                        bytesPerSecond: speed,
+                        estimatedTimeRemaining: eta
+                    )
+                    speedSamplesByKey[record.identityKey] = (
+                        now,
+                        record.bytesDownloaded
+                    )
+                }
+            } else {
+                speedSamplesByKey[record.identityKey] = (
+                    now,
+                    record.bytesDownloaded
+                )
+            }
+        }
+        transferMetricsByKey = metrics
+        aggregateBytesPerSecond = metrics.values.reduce(0) {
+            $0 + $1.bytesPerSecond
+        }
+        metricsExpiryTask?.cancel()
+        metricsExpiryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.transferMetricsByKey = [:]
+            self?.aggregateBytesPerSecond = 0
+        }
+
         let bytes = active.reduce(0) { $0 + $1.bytesDownloaded }
         if let speedSample {
             let interval = now.timeIntervalSince(speedSample.date)
             if interval >= 0.4 {
-                aggregateBytesPerSecond = max(
-                    0,
-                    Int64(Double(bytes - speedSample.bytes) / interval)
-                )
                 self.speedSample = (now, bytes)
             }
         } else {

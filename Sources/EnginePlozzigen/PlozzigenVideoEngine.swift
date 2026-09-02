@@ -3,6 +3,7 @@ import Foundation
 import AVFoundation
 import Combine
 import CoreModels
+import CoreNetworking
 import FeaturePlayback
 #if canImport(UIKit)
 import UIKit
@@ -338,6 +339,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 guard let url = resolvedURL else {
                     throw MediaTransportError.invalidInput(reason: "missing playback source")
                 }
+                options.declaredDurationSeconds = Self.declaredDuration(
+                    for: request,
+                    sourceURL: url
+                )
                 stage = "engine.load"
                 try await engine.load(
                     url: url,
@@ -377,6 +382,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 "aether LOAD_FAILED stage=\(stage) "
                     + "detail=\(HandoffDiagnostics.redactedDetail(detail))"
             )
+            PlozzLog.playback.error(
+                "Plozzigen load failed at \(stage): "
+                    + HandoffDiagnostics.redactedDetail(detail)
+            )
             let err: AppError = .unknown(detail)
             status = .failed(err)
             onFailure?(err)
@@ -395,6 +404,19 @@ public final class PlozzigenVideoEngine: VideoEngine {
         case "avi":                 return "avi"
         default:                    return nil
         }
+    }
+
+    static func declaredDuration(
+        for request: PlaybackRequest,
+        sourceURL: URL
+    ) -> TimeInterval? {
+        guard sourceURL.isFileURL,
+              let runtime = request.item.runtime,
+              runtime.isFinite,
+              runtime > 0 else {
+            return nil
+        }
+        return runtime
     }
 
     public func play() {
@@ -694,6 +716,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 case .error(let msg):
                     HandoffDiagnostics.emit(
                         "aether STATE_ERROR detail="
+                            + HandoffDiagnostics.redactedDetail(msg)
+                    )
+                    PlozzLog.playback.error(
+                        "Plozzigen playback failed: "
                             + HandoffDiagnostics.redactedDetail(msg)
                     )
                     let err: AppError = .unknown(msg)

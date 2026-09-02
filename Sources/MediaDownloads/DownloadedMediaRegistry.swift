@@ -214,6 +214,20 @@ public actor DownloadedMediaRegistry {
         return true
     }
 
+    public func setRuntime(
+        identityKey: String,
+        runtime: TimeInterval
+    ) throws {
+        guard runtime > 0,
+              var record = state.records[identityKey],
+              record.snapshot.runtime != runtime else {
+            return
+        }
+        record.snapshot.runtime = runtime
+        record.updatedAt = Date()
+        try persist(record)
+    }
+
     /// Records byte progress for an in-flight download.
     public func updateProgress(
         identityKey: String,

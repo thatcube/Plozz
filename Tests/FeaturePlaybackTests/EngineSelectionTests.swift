@@ -66,6 +66,38 @@ final class EngineSelectionTests: XCTestCase {
         XCTAssertEqual(route(req, plozzigenAvailable: true), .native)
     }
 
+    func testLegacyProgressiveFileWithMovpkgExtensionRoutesToPlozzigen() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("media.movpkg")
+        try Data("matroska".utf8).write(to: file)
+
+        XCTAssertEqual(
+            route(request(streamURL: file), plozzigenAvailable: true),
+            .plozzigen
+        )
+    }
+
+    func testExistingMovpkgDirectoryRoutesToNativeAVFoundation() throws {
+        let package = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).movpkg", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: package,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: package) }
+
+        XCTAssertEqual(
+            route(request(streamURL: package), plozzigenAvailable: true),
+            .native
+        )
+    }
+
     func testNetworkFileAlwaysRoutesToPlozzigen() throws {
         let identity = try RemoteFileIdentity(kind: .strongETag, value: "\"movie-v1\"")
         let representation = try RemoteFileRepresentation(

@@ -2,6 +2,155 @@ import Foundation
 import CoreModels
 import CoreNetworking
 
+public enum PlexOfflineTranscodeURLBuilder {
+    private static let hlsEndpoint =
+        "/video/:/transcode/universal/start.m3u8"
+    private static let progressiveEndpoint =
+        "/video/:/transcode/universal/start.mp4"
+    private static let decisionEndpoint =
+        "/video/:/transcode/universal/decision"
+
+    public static func makeURL(
+        from hlsURL: URL,
+        maximumVideoBitrateBps: Int,
+        maximumHeight: Int,
+        audioStreamID: Int?,
+        textSubtitleStreamID: Int?,
+        includesTextSubtitle: Bool
+    ) -> URL? {
+        guard var components = URLComponents(
+            url: hlsURL,
+            resolvingAgainstBaseURL: false
+        ) else {
+            return nil
+        }
+        guard components.path.hasSuffix(hlsEndpoint) else { return nil }
+        components.path = String(
+            components.path.dropLast(hlsEndpoint.count)
+        ) + progressiveEndpoint
+
+        var items = components.queryItems ?? []
+        func setQueryItem(_ name: String, _ value: String) {
+            items.removeAll {
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }
+            items.append(URLQueryItem(name: name, value: value))
+        }
+        let sessionID = items.first {
+            $0.name.caseInsensitiveCompare("session") == .orderedSame
+        }?.value.flatMap { $0.isEmpty ? nil : $0 } ?? UUID().uuidString
+
+        let approximateWidth = Int(
+            (Double(maximumHeight) * 16.0 / 9.0).rounded()
+        )
+        let maximumWidth = approximateWidth.isMultiple(of: 2)
+            ? approximateWidth
+            : approximateWidth + 1
+        setQueryItem(
+            "maxVideoBitrate",
+            String(maximumVideoBitrateBps / 1_000)
+        )
+        setQueryItem(
+            "videoResolution",
+            "\(maximumWidth)x\(maximumHeight)"
+        )
+        setQueryItem("session", sessionID)
+        setQueryItem("transcodeSessionId", sessionID)
+        setQueryItem("X-Plex-Session-Identifier", sessionID)
+        setQueryItem("hasMDE", "1")
+        setQueryItem("protocol", "http")
+        setQueryItem("context", "static")
+        setQueryItem("offlineTranscode", "1")
+        setQueryItem("directPlay", "0")
+        setQueryItem("directStream", "1")
+        setQueryItem("directStreamAudio", "1")
+        setQueryItem(
+            "videoBitrate",
+            String(maximumVideoBitrateBps / 1_000)
+        )
+        setQueryItem("transcodeType", "video")
+        setQueryItem("videoQuality", "100")
+        setQueryItem("offset", "0")
+        setQueryItem("fastSeek", "1")
+        setQueryItem("copyts", "1")
+        setQueryItem("X-Plex-Client-Profile-Name", "Generic")
+        setQueryItem(
+            "X-Plex-Client-Profile-Extra",
+            "add-transcode-target(type=videoProfile&context=static&protocol=http&container=mp4&videoCodec=h264&audioCodec=aac&subtitleCodec=mov_text&replace=true)"
+        )
+        if let audioStreamID {
+            setQueryItem("audioStreamID", String(audioStreamID))
+        }
+        if includesTextSubtitle, let textSubtitleStreamID {
+            setQueryItem("subtitleStreamID", String(textSubtitleStreamID))
+            setQueryItem("subtitles", "auto")
+        } else if !includesTextSubtitle {
+            items.removeAll {
+                $0.name.caseInsensitiveCompare("subtitleStreamID")
+                    == .orderedSame
+            }
+            setQueryItem("subtitles", "none")
+        }
+        components.queryItems = items
+        return components.url
+    }
+
+    public static func makeDecisionURL(from progressiveURL: URL) -> URL? {
+        guard var components = URLComponents(
+            url: progressiveURL,
+            resolvingAgainstBaseURL: false
+        ), components.path.hasSuffix(progressiveEndpoint) else {
+            return nil
+        }
+        components.path = String(
+            components.path.dropLast(progressiveEndpoint.count)
+        ) + decisionEndpoint
+        return components.url
+    }
+}
+
+public enum PlexOfflineTranscodeDecisionParser {
+    public enum ParsingError: Error {
+        case missingDecisionCode
+    }
+
+    private struct Response: Decodable {
+        let MediaContainer: Container
+    }
+
+    private struct Container: Decodable {
+        let generalDecisionCode: Int?
+        let generalDecisionText: String?
+        let directPlayDecisionText: String?
+        let transcodeDecisionText: String?
+    }
+
+    public static func rejectionReason(from data: Data) throws -> String? {
+        let container = try JSONDecoder().decode(
+            Response.self,
+            from: data
+        ).MediaContainer
+        guard let decisionCode = container.generalDecisionCode else {
+            throw ParsingError.missingDecisionCode
+        }
+        guard decisionCode >= 2_000 else { return nil }
+        return [
+            container.generalDecisionText,
+            container.transcodeDecisionText,
+            container.directPlayDecisionText
+        ]
+        .compactMap { text in
+            guard let text = text?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ), !text.isEmpty else {
+                return nil
+            }
+            return text
+        }
+        .first ?? "The server rejected the transcode."
+    }
+}
+
 /// Low-level Plex Media Server REST client.
 ///
 /// One instance is bound to a single server `baseURL` + `token`. It deals only

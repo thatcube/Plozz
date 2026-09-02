@@ -166,6 +166,51 @@ public actor DownloadQueue {
         schedule(identityKey)
     }
 
+    /// Rebuilds a failed transfer from fresh secret-free source metadata. Unlike
+    /// resume, this deliberately discards stale background work and partial bytes.
+    @discardableResult
+    public func restartFailed(
+        _ request: DownloadRequest
+    ) async throws -> DownloadedMediaRecord {
+        let replacement = makeRecord(for: request)
+        guard let existing = await registry.record(
+            forKey: replacement.identityKey
+        ), existing.status == .failed else {
+            return try await enqueue(request)
+        }
+
+        if let persistentEngine = engine as? any DownloadPersistentWorkCancelling {
+            await persistentEngine.discardPersistentWork(
+                identityKey: existing.identityKey
+            )
+        }
+        let task = running[existing.identityKey]
+        task?.cancel()
+        await task?.value
+        running[existing.identityKey] = nil
+
+        let folder = try storage.pinnedFolderURL(
+            forKey: existing.identityKey
+        )
+        for fileName in Set([
+            existing.localFileName,
+            replacement.localFileName
+        ]) {
+            let file = folder.appendingPathComponent(fileName)
+            try? fileManager.removeItem(at: file)
+            try? fileManager.removeItem(
+                at: file.appendingPathExtension("source")
+            )
+            try? fileManager.removeItem(
+                at: file.appendingPathExtension("resume")
+            )
+        }
+
+        let stored = try await registry.beginQualityReplacement(replacement)
+        schedule(stored.identityKey)
+        return stored
+    }
+
     public func pause(batchID: String, reason: DownloadPauseReason = .manual) async {
         for record in await registry.records(inBatch: batchID)
         where record.status.isActive {
@@ -318,7 +363,7 @@ public actor DownloadQueue {
                     try? await registry.updateProgress(
                         identityKey: identityKey,
                         bytesDownloaded: bytes,
-                        totalBytes: total
+                        totalBytes: total > 0 ? total : nil
                     )
                 }
                 try? await registry.markCompleted(identityKey: identityKey, totalBytes: total)
@@ -343,7 +388,7 @@ public actor DownloadQueue {
                 if attempt >= maxAttempts {
                     try? await registry.setStatus(
                         identityKey: identityKey, .failed,
-                        failureReason: String(describing: error)
+                        failureReason: error.localizedDescription
                     )
                     return
                 }

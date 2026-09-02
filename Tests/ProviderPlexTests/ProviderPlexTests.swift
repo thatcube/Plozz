@@ -1302,6 +1302,162 @@ final class PlexProviderMappingTests: XCTestCase {
         )
     }
 
+    func testOfflineTranscodeURLUsesProgressiveMP4AndPreservesBasePath() throws {
+        let hlsURL = try XCTUnwrap(
+            URL(
+                string:
+                    "https://example.test/plex/video/:/transcode/universal/start.m3u8?protocol=hls&session=s1&X-Plex-Token=secret"
+            )
+        )
+        let url = try XCTUnwrap(
+            PlexOfflineTranscodeURLBuilder.makeURL(
+                from: hlsURL,
+                maximumVideoBitrateBps: 4_000_000,
+                maximumHeight: 480,
+                audioStreamID: 11,
+                textSubtitleStreamID: 12,
+                includesTextSubtitle: true
+            )
+        )
+        let components = try XCTUnwrap(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)
+        )
+        let query = Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).map {
+                ($0.name, $0.value)
+            }
+        )
+
+        XCTAssertEqual(
+            components.path,
+            "/plex/video/:/transcode/universal/start.mp4"
+        )
+        XCTAssertEqual(query["protocol"]!, "http")
+        XCTAssertEqual(query["offlineTranscode"]!, "1")
+        XCTAssertEqual(query["hasMDE"]!, "1")
+        XCTAssertEqual(query["context"]!, "static")
+        XCTAssertEqual(query["directPlay"]!, "0")
+        XCTAssertEqual(query["directStream"]!, "1")
+        XCTAssertEqual(query["directStreamAudio"]!, "1")
+        XCTAssertEqual(query["transcodeSessionId"]!, "s1")
+        XCTAssertEqual(query["videoQuality"]!, "100")
+        XCTAssertEqual(query["videoBitrate"]!, "4000")
+        XCTAssertEqual(query["transcodeType"]!, "video")
+        XCTAssertEqual(query["offset"]!, "0")
+        XCTAssertEqual(query["fastSeek"]!, "1")
+        XCTAssertEqual(query["maxVideoBitrate"]!, "4000")
+        XCTAssertEqual(query["videoResolution"]!, "854x480")
+        XCTAssertEqual(query["audioStreamID"]!, "11")
+        XCTAssertEqual(query["subtitleStreamID"]!, "12")
+        XCTAssertEqual(query["subtitles"]!, "auto")
+        XCTAssertEqual(query["session"]!, "s1")
+        XCTAssertEqual(query["X-Plex-Session-Identifier"]!, "s1")
+        XCTAssertEqual(query["X-Plex-Token"]!, "secret")
+        XCTAssertEqual(query["X-Plex-Client-Profile-Name"]!, "Generic")
+        XCTAssertTrue(
+            try XCTUnwrap(
+                query["X-Plex-Client-Profile-Extra"] ?? nil
+            ).contains(
+                "context=static&protocol=http&container=mp4&videoCodec=h264&audioCodec=aac&subtitleCodec=mov_text"
+            )
+        )
+    }
+
+    func testOfflineTranscodeDecisionURLMatchesProgressiveRequest() throws {
+        let progressiveURL = try XCTUnwrap(
+            URL(
+                string:
+                    "https://example.test/plex/video/:/transcode/universal/start.mp4?path=%2Flibrary%2Fmetadata%2F7&session=s1&X-Plex-Token=secret"
+            )
+        )
+        let decisionURL = try XCTUnwrap(
+            PlexOfflineTranscodeURLBuilder.makeDecisionURL(
+                from: progressiveURL
+            )
+        )
+        let components = try XCTUnwrap(
+            URLComponents(
+                url: decisionURL,
+                resolvingAgainstBaseURL: false
+            )
+        )
+
+        XCTAssertEqual(
+            components.path,
+            "/plex/video/:/transcode/universal/decision"
+        )
+        XCTAssertEqual(
+            components.queryItems,
+            URLComponents(
+                url: progressiveURL,
+                resolvingAgainstBaseURL: false
+            )?.queryItems
+        )
+    }
+
+    func testOfflineTranscodeDecisionAcceptsPlayableResponse() throws {
+        let data = Data(
+            #"{"MediaContainer":{"generalDecisionCode":1001,"generalDecisionText":"Transcode selected"}}"#
+                .utf8
+        )
+
+        XCTAssertNil(
+            try PlexOfflineTranscodeDecisionParser.rejectionReason(from: data)
+        )
+    }
+
+    func testOfflineTranscodeDecisionSurfacesServerRejection() throws {
+        let data = Data(
+            #"{"MediaContainer":{"generalDecisionCode":2000,"generalDecisionText":"Not enough bandwidth","transcodeDecisionText":"Cannot convert video"}}"#
+                .utf8
+        )
+
+        XCTAssertEqual(
+            try PlexOfflineTranscodeDecisionParser.rejectionReason(from: data),
+            "Not enough bandwidth"
+        )
+    }
+
+    func testOfflineTranscodeDecisionRequiresDecisionCode() {
+        let data = Data(#"{"MediaContainer":{}}"#.utf8)
+
+        XCTAssertThrowsError(
+            try PlexOfflineTranscodeDecisionParser.rejectionReason(from: data)
+        )
+    }
+
+    func testOfflineTranscodeURLCanDisableSubtitles() throws {
+        let hlsURL = try XCTUnwrap(
+            URL(
+                string:
+                    "https://example.test/video/:/transcode/universal/start.m3u8?protocol=hls&subtitleStreamID=12"
+            )
+        )
+        let url = try XCTUnwrap(
+            PlexOfflineTranscodeURLBuilder.makeURL(
+                from: hlsURL,
+                maximumVideoBitrateBps: 8_000_000,
+                maximumHeight: 720,
+                audioStreamID: nil,
+                textSubtitleStreamID: nil,
+                includesTextSubtitle: false
+            )
+        )
+        let components = try XCTUnwrap(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)
+        )
+
+        XCTAssertNil(
+            components.queryItems?.first {
+                $0.name == "subtitleStreamID"
+            }
+        )
+        XCTAssertEqual(
+            components.queryItems?.first { $0.name == "subtitles" }?.value,
+            "none"
+        )
+    }
+
     func testPlaybackInfoDirectPlaysSupportedContainer() async throws {
         // An MP4/h264/aac file is natively playable, so the provider should hand
         // AVPlayer the original part URL (direct play, no transcode).

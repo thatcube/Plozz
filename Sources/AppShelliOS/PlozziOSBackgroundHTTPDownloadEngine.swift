@@ -49,13 +49,25 @@ struct PlozziOSBackgroundHTTPDownloadEngine:
     DownloadPolicyApplying,
     DownloadPersistentWorkCancelling
 {
-    typealias URLResolver = @Sendable (ManagedHTTPDownloadSource) async throws -> URL
+    struct Resolution: Sendable {
+        let url: URL
+        let expectedDuration: TimeInterval?
+    }
+
+    typealias URLResolver =
+        @Sendable (ManagedHTTPDownloadSource) async throws -> Resolution
 
     private let profileID: String
+    private let registry: DownloadedMediaRegistry
     private let resolveURL: URLResolver
 
-    init(profileID: String, resolveURL: @escaping URLResolver) {
+    init(
+        profileID: String,
+        registry: DownloadedMediaRegistry,
+        resolveURL: @escaping URLResolver
+    ) {
         self.profileID = profileID
+        self.registry = registry
         self.resolveURL = resolveURL
         BackgroundDownloadSession.shared.activate()
     }
@@ -96,8 +108,19 @@ struct PlozziOSBackgroundHTTPDownloadEngine:
         guard let source = record.managedHTTPSource else {
             throw BackgroundDownloadError.missingSource
         }
-        let url = try await resolveURL(source)
-        if case .constrained(let constraint) = source.quality {
+        let resolution = try await resolveURL(source)
+        let url = resolution.url
+        if let expectedDuration = resolution.expectedDuration,
+           expectedDuration > 0 {
+            try? await registry.setRuntime(
+                identityKey: record.identityKey,
+                runtime: expectedDuration
+            )
+        }
+        let usesProgressiveRendition =
+            source.provider == .plex && source.quality != .original
+        if case .constrained(let constraint) = source.quality,
+           !usesProgressiveRendition {
             return try await BackgroundHLSDownloadSession.shared.download(
                 profileID: profileID,
                 identityKey: record.identityKey,
@@ -111,13 +134,30 @@ struct PlozziOSBackgroundHTTPDownloadEngine:
                 onProgress: onProgress
             )
         }
+        if usesProgressiveRendition {
+            // Builds before progressive Plex renditions used AVAssetDownloadTask.
+            // Cancel any persisted HLS task before reusing the same identity.
+            await BackgroundHLSDownloadSession.shared.discard(
+                profileID: profileID,
+                identityKey: record.identityKey
+            )
+            if record.localFileName.lowercased().hasSuffix(".movpkg"),
+               (
+                   try? destination.resourceValues(
+                       forKeys: [.isDirectoryKey]
+                   ).isDirectory
+               ) == true {
+                try? FileManager.default.removeItem(at: destination)
+            }
+        }
+        let transferredBytes: Int64
         if BackgroundDownloadSession.shared.usesForegroundRateLimit(
             profileID: profileID
         ) {
             let policy = BackgroundDownloadSession.shared.policy(
                 profileID: profileID
             )
-            return try await ForegroundManagedDownloadCoordinator.shared
+            transferredBytes = try await ForegroundManagedDownloadCoordinator.shared
                 .download(
                     profileID: profileID,
                     policy: policy,
@@ -125,23 +165,138 @@ struct PlozziOSBackgroundHTTPDownloadEngine:
                     to: destination,
                     onProgress: onProgress
                 )
-        }
-        if FileManager.default.fileExists(
-            atPath: destination.appendingPathExtension("source").path
-        ) {
-            try? FileManager.default.removeItem(at: destination)
-            try? FileManager.default.removeItem(
-                at: destination.appendingPathExtension("source")
+        } else {
+            if FileManager.default.fileExists(
+                atPath: destination.appendingPathExtension("source").path
+            ) {
+                try? FileManager.default.removeItem(at: destination)
+                try? FileManager.default.removeItem(
+                    at: destination.appendingPathExtension("source")
+                )
+            }
+            transferredBytes = try await BackgroundDownloadSession.shared.download(
+                profileID: profileID,
+                identityKey: record.identityKey,
+                localFileName: record.localFileName,
+                from: url,
+                to: destination,
+                onProgress: onProgress
             )
         }
-        return try await BackgroundDownloadSession.shared.download(
-            profileID: profileID,
-            identityKey: record.identityKey,
-            localFileName: record.localFileName,
-            from: url,
-            to: destination,
-            onProgress: onProgress
+        if usesProgressiveRendition {
+            do {
+                try await PlexRenditionValidator.validate(
+                    fileURL: destination,
+                    expectedDuration:
+                        resolution.expectedDuration ?? record.snapshot.runtime
+                )
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+                try? FileManager.default.removeItem(
+                    at: destination.appendingPathExtension("source")
+                )
+                try? FileManager.default.removeItem(
+                    at: destination.appendingPathExtension("resume")
+                )
+                await onProgress(0, record.totalBytes ?? 0)
+                throw error
+            }
+        }
+        return transferredBytes
+    }
+}
+
+private enum PlexRenditionValidator {
+    enum ValidationError: LocalizedError {
+        case unreadable
+        case incomplete
+
+        var errorDescription: String? {
+            switch self {
+            case .unreadable:
+                "Plex returned a rendition that could not be opened."
+            case .incomplete:
+                "Plex returned an incomplete rendition. Please retry the download."
+            }
+        }
+    }
+
+    static func validate(
+        fileURL: URL,
+        expectedDuration: TimeInterval?
+    ) async throws {
+        let asset = AVURLAsset(url: fileURL)
+        let duration: CMTime
+        do {
+            duration = try await asset.load(.duration)
+        } catch {
+            throw ValidationError.unreadable
+        }
+        let actual = duration.seconds
+        guard actual.isFinite, actual > 0 else {
+            throw ValidationError.unreadable
+        }
+        guard let expectedDuration, expectedDuration > 0 else { return }
+        let tolerance = max(2, min(10, expectedDuration * 0.005))
+        let minimumAcceptable = max(1, expectedDuration - tolerance)
+        guard actual >= minimumAcceptable else {
+            throw ValidationError.incomplete
+        }
+
+        let tracks: [AVAssetTrack]
+        do {
+            tracks = try await asset.loadTracks(withMediaType: .video)
+        } catch {
+            throw ValidationError.unreadable
+        }
+        guard let track = tracks.first else {
+            throw ValidationError.unreadable
+        }
+
+        let reader: AVAssetReader
+        do {
+            reader = try AVAssetReader(asset: asset)
+        } catch {
+            throw ValidationError.unreadable
+        }
+        let output = AVAssetReaderTrackOutput(
+            track: track,
+            outputSettings: nil
         )
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else {
+            throw ValidationError.unreadable
+        }
+        reader.add(output)
+        let verificationStart = max(0, minimumAcceptable - 5)
+        reader.timeRange = CMTimeRange(
+            start: CMTime(seconds: verificationStart, preferredTimescale: 600),
+            duration: CMTime(
+                seconds: max(1, actual - verificationStart),
+                preferredTimescale: 600
+            )
+        )
+        guard reader.startReading() else {
+            throw ValidationError.unreadable
+        }
+
+        var latestSampleEnd = 0.0
+        while let sample = output.copyNextSampleBuffer() {
+            let presentationTime = CMSampleBufferGetPresentationTimeStamp(
+                sample
+            )
+            let sampleDuration = CMSampleBufferGetDuration(sample)
+            let sampleEnd = sampleDuration.isValid
+                ? CMTimeAdd(presentationTime, sampleDuration)
+                : presentationTime
+            let seconds = sampleEnd.seconds
+            if seconds.isFinite {
+                latestSampleEnd = max(latestSampleEnd, seconds)
+            }
+        }
+        guard latestSampleEnd >= minimumAcceptable else {
+            throw ValidationError.incomplete
+        }
     }
 }
 
@@ -713,7 +868,7 @@ private enum BackgroundDownloadError: LocalizedError {
     case incompleteTransfer(expected: Int64, actual: Int64)
     case unavailableRendition
 
-    var errorDescription: LocalizedStringResource? {
+    var errorDescription: String? {
         switch self {
         case .missingSource: "The managed download source is unavailable."
         case .missingTaskIdentity: "The background download lost its identity."

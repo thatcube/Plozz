@@ -190,7 +190,11 @@ final class DownloadQueueTests: XCTestCase {
     }
 
     func testFatalErrorMarksFailed() async throws {
-        struct Boom: Error {}
+        struct Boom: LocalizedError {
+            var errorDescription: String? {
+                "The media server rejected the download."
+            }
+        }
         let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
         let (queue, dir) = makeQueue(
             registry: registry, engine: FakeDownloadEngine.failing(with: Boom())
@@ -202,6 +206,10 @@ final class DownloadQueueTests: XCTestCase {
 
         let final = await registry.record(forKey: record.identityKey)
         XCTAssertEqual(final?.status, .failed)
+        XCTAssertEqual(
+            final?.failureReason,
+            "The media server rejected the download."
+        )
     }
 
     func testResumeRetriesFailedDownload() async throws {
@@ -223,6 +231,47 @@ final class DownloadQueueTests: XCTestCase {
         let completed = await registry.record(forKey: record.identityKey)
         XCTAssertEqual(completed?.status, .completed)
         XCTAssertEqual(completed?.bytesDownloaded, 42)
+    }
+
+    func testRestartFailedReplacesStaleFileAndSourceMetadata() async throws {
+        struct Failure: Error {}
+        let registry = DownloadedMediaRegistry(
+            store: InMemoryDownloadedMediaStore()
+        )
+        let (failingQueue, dir) = makeQueue(
+            registry: registry,
+            engine: FakeDownloadEngine.failing(with: Failure())
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let failed = try await failingQueue.enqueue(
+            try DownloadTestFactory.request(quality: .hd720)
+        )
+        await failingQueue.drainForTesting()
+        let storage = FixedDownloadStorageLocator(root: dir)
+        let staleURL = try storage.pinnedFileURL(for: failed)
+        try FileManager.default.createDirectory(
+            at: staleURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("stale".utf8).write(to: staleURL)
+
+        let replacementQueue = DownloadQueue(
+            registry: registry,
+            storage: storage,
+            engine: FakeDownloadEngine.completing(at: 100),
+            maxAttempts: 1,
+            backoff: { _ in }
+        )
+        var request = try DownloadTestFactory.request(quality: .hd720)
+        request.fileExtension = "mkv"
+        let restarted = try await replacementQueue.restartFailed(request)
+        await replacementQueue.drainForTesting()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleURL.path))
+        XCTAssertEqual(restarted.localFileName, "media.mkv")
+        let completed = await registry.record(forKey: restarted.identityKey)
+        XCTAssertEqual(completed?.status, .completed)
+        XCTAssertEqual(completed?.localFileName, "media.mkv")
     }
 
     func testManagedRequestPersistsSecretFreeReopenSource() async throws {

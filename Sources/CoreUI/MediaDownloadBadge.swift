@@ -12,10 +12,10 @@ import SwiftUI
 public enum MediaDownloadBadgeState: Equatable, Sendable {
     /// Fully downloaded and playable offline.
     case completed
-    /// Queued or actively fetching; `fraction` is 0...1.
-    case inProgress(fraction: Double)
+    /// Queued or actively fetching; `nil` means the byte total is not known yet.
+    case inProgress(fraction: Double?)
     /// Interrupted with a recoverable partial file.
-    case paused(fraction: Double)
+    case paused(fraction: Double?)
     /// Fatal error; needs user action.
     case failed
 }
@@ -46,21 +46,36 @@ public struct MediaDownloadBadge: View {
     private var content: some View {
         switch state {
         case .completed:
-            Image(systemName: "arrow.down.circle.fill")
+            Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: size))
                 .foregroundStyle(.white.opacity(0.85))
                 .accessibilityLabel("Downloaded")
         case .inProgress(let fraction):
-            ring(fraction: fraction)
+            progress(fraction: fraction)
                 .accessibilityLabel("Downloading")
         case .paused(let fraction):
-            ring(fraction: fraction, dimmed: true)
+            progress(fraction: fraction, dimmed: true)
                 .accessibilityLabel("Download paused")
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: size))
                 .foregroundStyle(.orange)
                 .accessibilityLabel("Download failed")
+        }
+    }
+
+    @ViewBuilder
+    private func progress(fraction: Double?, dimmed: Bool = false) -> some View {
+        if let fraction {
+            ring(fraction: fraction, dimmed: dimmed)
+        } else if dimmed {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: size))
+                .foregroundStyle(.white.opacity(0.6))
+        } else {
+            ProgressView()
+                .controlSize(size >= 24 ? .regular : .small)
+                .tint(.white)
         }
     }
 

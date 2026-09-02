@@ -39,6 +39,35 @@ final class DurableDownloadedMediaStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.load(), state)
     }
 
+    func testPinnedSnapshotRoundTripsRuntime() throws {
+        let snapshot = PinnedMediaSnapshot(
+            title: "Episode",
+            kind: .episode,
+            runtime: 1_440
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(
+            PinnedMediaSnapshot.self,
+            from: data
+        )
+
+        XCTAssertEqual(decoded.runtime, 1_440)
+    }
+
+    func testPinnedSnapshotDecodesLegacyPayloadWithoutRuntime() throws {
+        let data = Data(
+            #"{"title":"Episode","kind":"episode","providerIDs":{}}"#.utf8
+        )
+
+        let decoded = try JSONDecoder().decode(
+            PinnedMediaSnapshot.self,
+            from: data
+        )
+
+        XCTAssertNil(decoded.runtime)
+    }
+
     func testProfilesAreIsolated() throws {
         let secure = MemorySecureStore()
         let a = try makeStore(secure: secure, profileID: "profA")

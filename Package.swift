@@ -608,6 +608,7 @@ let package = Package(
             name: "EnginePlozzigen",
             dependencies: [
                 "CoreModels",
+                "CoreNetworking",
                 "MediaTransportCore",
                 "FeaturePlayback",
                 .product(name: "AetherEngine", package: "AetherEngine"),

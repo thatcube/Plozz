@@ -18,6 +18,7 @@ import MediaDownloads
 import MediaTransportCore
 import MetadataKit
 import Observation
+import ProviderPlex
 import ProviderShare
 import SeerService
 import SimklService
@@ -1727,24 +1728,99 @@ final class PlozziOSAppModel {
                         }
                         switch source.provider {
                         case .plex:
-                            let approximateWidth = Int(
-                                (
-                                    Double(constraint.maximumHeight)
-                                        * 16.0 / 9.0
-                                ).rounded()
+                            guard !source.includesAllAudioTracks else {
+                                throw MediaTransportError.unsupportedCapability(
+                                    "Plex reduced-quality downloads support one audio track. Turn off Include All Audio Tracks or choose Original quality."
+                                )
+                            }
+                            let audioStreamID = playback.audioTracks.first {
+                                $0.isDefault
+                            }?.id ?? playback.audioTracks.first?.id
+                            let textSubtitleStreamID = playback.subtitleTracks
+                                .first {
+                                    $0.isDefault && !$0.isImageBasedSubtitle
+                                }?.id
+                                ?? playback.subtitleTracks.first {
+                                    !$0.isImageBasedSubtitle
+                                }?.id
+                            guard let constrainedURL =
+                                    PlexOfflineTranscodeURLBuilder.makeURL(
+                                        from: streamURL,
+                                        maximumVideoBitrateBps:
+                                            constraint.maximumVideoBitrateBps,
+                                        maximumHeight: constraint.maximumHeight,
+                                        audioStreamID: audioStreamID,
+                                        textSubtitleStreamID:
+                                            textSubtitleStreamID,
+                                        includesTextSubtitle:
+                                            source.includesTextSubtitleTracks
+                                    ) else {
+                                throw MediaTransportError.unsupportedCapability(
+                                    "This Plex server did not provide a compatible offline rendition."
+                                )
+                            }
+                            guard let decisionURL =
+                                    PlexOfflineTranscodeURLBuilder.makeDecisionURL(
+                                        from: constrainedURL
+                                    ) else {
+                                throw PlexOfflineTranscodePreparationError
+                                    .invalidRequest
+                            }
+                            var decisionRequest = URLRequest(
+                                url: decisionURL,
+                                cachePolicy: .reloadIgnoringLocalCacheData,
+                                timeoutInterval: 20
                             )
-                            let maximumWidth = approximateWidth.isMultiple(of: 2)
-                                ? approximateWidth
-                                : approximateWidth + 1
-                            setQueryItem(
-                                "maxVideoBitrate",
-                                String(constraint.maximumVideoBitrateBps / 1_000)
+                            decisionRequest.setValue(
+                                "application/json",
+                                forHTTPHeaderField: "Accept"
                             )
-                            setQueryItem(
-                                "videoResolution",
-                                "\(maximumWidth)x\(constraint.maximumHeight)"
+                            if let sessionID = URLComponents(
+                                url: constrainedURL,
+                                resolvingAgainstBaseURL: false
+                            )?.queryItems?.first(where: {
+                                $0.name == "X-Plex-Session-Identifier"
+                            })?.value {
+                                decisionRequest.setValue(
+                                    sessionID,
+                                    forHTTPHeaderField:
+                                        "X-Plex-Session-Identifier"
+                                )
+                            }
+                            let (decisionData, decisionResponse) = try await URLSession
+                                .shared
+                                .data(for: decisionRequest)
+                            guard let decisionHTTPResponse =
+                                    decisionResponse as? HTTPURLResponse else {
+                                throw PlexOfflineTranscodePreparationError
+                                    .invalidResponse
+                            }
+                            guard (200..<300).contains(
+                                decisionHTTPResponse.statusCode
+                            ) else {
+                                throw PlexOfflineTranscodePreparationError
+                                    .rejected(
+                                        status:
+                                            decisionHTTPResponse.statusCode
+                                    )
+                            }
+                            let rejectionReason: String?
+                            do {
+                                rejectionReason =
+                                    try PlexOfflineTranscodeDecisionParser
+                                        .rejectionReason(from: decisionData)
+                            } catch {
+                                throw PlexOfflineTranscodePreparationError
+                                    .invalidResponse
+                            }
+                            if let rejectionReason {
+                                throw PlexOfflineTranscodePreparationError
+                                    .rejectedDecision(rejectionReason)
+                            }
+                            return .init(
+                                url: constrainedURL,
+                                expectedDuration: playback.item.runtime
                             )
-                            setQueryItem("copyts", "1")
                         case .jellyfin, .emby:
                             setQueryItem(
                                 "VideoBitrate",
@@ -1765,7 +1841,10 @@ final class PlozziOSAppModel {
                                 "The offline rendition URL was invalid."
                             )
                         }
-                        return constrainedURL
+                        return .init(
+                            url: constrainedURL,
+                            expectedDuration: playback.item.runtime
+                        )
                     }
                     guard case .authenticatedHTTP(let locator) =
                             playback.downloadableOriginalSource,
@@ -1774,7 +1853,10 @@ final class PlozziOSAppModel {
                             "managed background download requires a direct file"
                         )
                     }
-                    return try await authenticatedHTTPResolver.resolve(locator)
+                    return .init(
+                        url: try await authenticatedHTTPResolver.resolve(locator),
+                        expectedDuration: playback.item.runtime
+                    )
                 }
             )
         } catch {
@@ -2491,6 +2573,28 @@ private struct PlozziOSMediaShareArtworkCacheLifecycle:
             accountID: accountID,
             credentialRevision: credentialRevision
         )
+    }
+}
+#endif
+
+#if os(iOS)
+private enum PlexOfflineTranscodePreparationError: LocalizedError {
+    case invalidRequest
+    case invalidResponse
+    case rejected(status: Int)
+    case rejectedDecision(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRequest:
+            "Plex could not build the offline-transcode preparation request."
+        case .invalidResponse:
+            "Plex did not return a valid offline-transcode preparation response."
+        case let .rejected(status):
+            "Plex rejected offline-transcode preparation with HTTP \(status)."
+        case let .rejectedDecision(reason):
+            "Plex could not create this offline rendition: \(reason)"
+        }
     }
 }
 #endif

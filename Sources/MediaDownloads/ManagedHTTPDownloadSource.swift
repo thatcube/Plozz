@@ -28,6 +28,7 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
     public let quality: DownloadQuality
     public let includesAllAudioTracks: Bool
     public let includesTextSubtitleTracks: Bool
+    public let preferredAudioLanguages: [String]
     public let preparationReference: ManagedHTTPPreparationReference?
 
     public init(
@@ -38,6 +39,7 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
         quality: DownloadQuality = .original,
         includesAllAudioTracks: Bool = false,
         includesTextSubtitleTracks: Bool = true,
+        preferredAudioLanguages: [String] = [],
         preparationReference: ManagedHTTPPreparationReference? = nil
     ) {
         self.provider = provider
@@ -47,6 +49,7 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
         self.quality = quality
         self.includesAllAudioTracks = includesAllAudioTracks
         self.includesTextSubtitleTracks = includesTextSubtitleTracks
+        self.preferredAudioLanguages = preferredAudioLanguages
         self.preparationReference = preparationReference
     }
 
@@ -58,6 +61,7 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
         case quality
         case includesAllAudioTracks
         case includesTextSubtitleTracks
+        case preferredAudioLanguages
         case preparationReference
     }
 
@@ -77,6 +81,10 @@ public struct ManagedHTTPDownloadSource: Codable, Sendable, Hashable {
             Bool.self,
             forKey: .includesTextSubtitleTracks
         ) ?? true
+        preferredAudioLanguages = try container.decodeIfPresent(
+            [String].self,
+            forKey: .preferredAudioLanguages
+        ) ?? []
         preparationReference = try container.decodeIfPresent(
             ManagedHTTPPreparationReference.self,
             forKey: .preparationReference

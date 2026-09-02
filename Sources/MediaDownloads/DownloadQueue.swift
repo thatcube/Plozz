@@ -23,6 +23,7 @@ public actor DownloadQueue {
     private let backoff: @Sendable (Int) async -> Void
 
     private var running: [String: Task<Void, Never>] = [:]
+    private var schedulingEnabled = true
 
     public init(
         registry: DownloadedMediaRegistry,
@@ -140,6 +141,12 @@ public actor DownloadQueue {
 
     // MARK: - Controls
 
+    /// Permanently closes this queue to new scheduling while its owning profile
+    /// is being retired. Persisted requests remain available to a new queue.
+    public func suspendScheduling() {
+        schedulingEnabled = false
+    }
+
     public func pause(
         identityKey: String,
         reason: DownloadPauseReason = .manual
@@ -160,8 +167,10 @@ public actor DownloadQueue {
     }
 
     public func resume(identityKey: String) async {
+        guard schedulingEnabled else { return }
         guard let record = await registry.record(forKey: identityKey),
               record.status != .completed else { return }
+        guard schedulingEnabled else { return }
         try? await registry.setStatus(identityKey: identityKey, .queued)
         schedule(identityKey)
     }
@@ -261,7 +270,9 @@ public actor DownloadQueue {
     /// Restarts work interrupted by process termination. Explicitly paused records
     /// stay paused until the corresponding user/policy action resumes them.
     public func resumeInterrupted() async {
+        guard schedulingEnabled else { return }
         for record in await registry.all() where record.status.isActive {
+            guard schedulingEnabled else { return }
             if record.status != .queued {
                 try? await registry.setStatus(
                     identityKey: record.identityKey,
@@ -275,7 +286,7 @@ public actor DownloadQueue {
     // MARK: - Draining
 
     private func schedule(_ identityKey: String) {
-        guard running[identityKey] == nil else { return }
+        guard schedulingEnabled, running[identityKey] == nil else { return }
         let task = Task { [weak self] in
             guard let self else { return }
             await self.limiterRun(identityKey)
@@ -489,6 +500,10 @@ public actor DownloadQueue {
             "Paused"
         case .networkPolicy:
             "Waiting for an allowed network"
+        case .speedLimitPolicy:
+            "Paused because this server cannot apply the download speed limit"
+        case .inactiveProfile:
+            "Paused while another profile is active"
         case .backgroundPolicy:
             "Paused while Plozz is in the background"
         case .directShareBackground:

@@ -189,6 +189,28 @@ final class DownloadQueueTests: XCTestCase {
         XCTAssertEqual(final?.bytesDownloaded, 64)
     }
 
+    func testSuspendedSchedulingDoesNotStartOrResumeWork() async throws {
+        let registry = DownloadedMediaRegistry(
+            store: InMemoryDownloadedMediaStore()
+        )
+        let (queue, dir) = makeQueue(
+            registry: registry,
+            engine: FakeDownloadEngine.completing(at: 100)
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        await queue.suspendScheduling()
+        let record = try await queue.enqueue(
+            try DownloadTestFactory.request()
+        )
+        await queue.resume(identityKey: record.identityKey)
+        await queue.drainForTesting()
+
+        let final = await registry.record(forKey: record.identityKey)
+        XCTAssertEqual(final?.status, .queued)
+        XCTAssertEqual(final?.bytesDownloaded, 0)
+    }
+
     func testFatalErrorMarksFailed() async throws {
         struct Boom: LocalizedError {
             var errorDescription: String? {
@@ -285,7 +307,8 @@ final class DownloadQueueTests: XCTestCase {
             provider: .jellyfin,
             accountID: "account-1",
             itemID: "movie-1",
-            mediaSourceID: "source-1"
+            mediaSourceID: "source-1",
+            preferredAudioLanguages: ["ja", "en"]
         )
         let request = DownloadRequest.managedHTTP(
             identity: DownloadTestFactory.imdbIdentity(),

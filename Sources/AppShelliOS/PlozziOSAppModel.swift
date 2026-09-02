@@ -281,6 +281,10 @@ final class PlozziOSAppModel {
     let requiresLaunchProfileSelection: Bool
     private(set) var settings: PlozziOSSettingsModel
     private var backgroundWorkRevision: UInt64 = 0
+    @ObservationIgnored
+    private var applicationIsActive = true
+    @ObservationIgnored
+    private var downloadProfileGeneration = 0
     private(set) var seriesTrackStore: SeriesTrackPreferenceStore
     private(set) var versionPreferences: VersionPreferenceStore
     private(set) var downloads: PlozziOSDownloadsModel
@@ -556,9 +560,10 @@ final class PlozziOSAppModel {
         self.crashReporting = CrashReportingSettingsModel()
         self.crashReportingController = CrashReportingController()
         self.requiresLaunchProfileSelection = requiresLaunchProfileSelection
-        self.settings = PlozziOSSettingsModel(
+        let initialSettings = PlozziOSSettingsModel(
             namespace: profiles.activeNamespace
         )
+        self.settings = initialSettings
         self.seriesTrackStore = SeriesTrackPreferenceStore(
             namespace: profiles.activeNamespace
         )
@@ -570,6 +575,7 @@ final class PlozziOSAppModel {
             durableStore: durableLocalStateStore,
             mediaShareRuntime: mediaShareRuntime,
             accountsProviders: accountsProviders,
+            settings: initialSettings,
             authenticatedHTTPResolver: authenticatedHTTPResolver
         )
         self.pendingLibrarySelection = nil
@@ -824,6 +830,7 @@ final class PlozziOSAppModel {
     }
 
     func setBackgroundWorkAllowed(_ allowed: Bool) {
+        applicationIsActive = allowed
         backgroundWorkRevision &+= 1
         let revision = backgroundWorkRevision
         Task { [mediaShareRuntime] in
@@ -1380,13 +1387,7 @@ final class PlozziOSAppModel {
         versionPreferences = VersionPreferenceStore(
             namespace: profiles.activeNamespace
         )
-        downloads = Self.makeDownloadsModel(
-            namespace: profiles.activeProfileID,
-            durableStore: durableLocalStateStore,
-            mediaShareRuntime: mediaShareRuntime,
-            accountsProviders: accountsProviders,
-            authenticatedHTTPResolver: authenticatedHTTPResolver
-        )
+        transitionDownloads(to: profiles.activeProfileID)
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
         reloadAccountsAndCrashContext()
         identityIndex.reset()
@@ -1399,7 +1400,35 @@ final class PlozziOSAppModel {
             await updateTrackersForActiveProfile()
             await prepareUniversalWatchlist()
         }
+
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
+    }
+
+    private func transitionDownloads(to profileID: String) {
+        let outgoing = downloads
+        outgoing.beginProfileTransition()
+        downloads = PlozziOSDownloadsModel(
+            initializationError: "Switching download profiles."
+        )
+        downloadProfileGeneration &+= 1
+        let generation = downloadProfileGeneration
+        Task { @MainActor [weak self] in
+            await outgoing.quiesceForProfileSwitch()
+            guard let self,
+                  self.downloadProfileGeneration == generation,
+                  self.profiles.activeProfileID == profileID else {
+                return
+            }
+            self.downloads = Self.makeDownloadsModel(
+                namespace: profileID,
+                durableStore: self.durableLocalStateStore,
+                mediaShareRuntime: self.mediaShareRuntime,
+                accountsProviders: self.accountsProviders,
+                settings: self.settings,
+                startsActive: self.applicationIsActive,
+                authenticatedHTTPResolver: self.authenticatedHTTPResolver
+            )
+        }
     }
 
     /// Re-points every tracker at the active profile's namespace.
@@ -1658,6 +1687,8 @@ final class PlozziOSAppModel {
         durableStore: DurableLocalStateStore?,
         mediaShareRuntime: DefaultMediaShareRuntime,
         accountsProviders: AccountsProvidersModel,
+        settings: PlozziOSSettingsModel,
+        startsActive: Bool = true,
         authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     ) -> PlozziOSDownloadsModel {
         guard let durableStore else {
@@ -1675,6 +1706,22 @@ final class PlozziOSAppModel {
                         $0.id == accountID
                     }?.server.provider
                 },
+                preferredAudioLanguages: { item in
+                    let playbackSettings = settings.playback.settings
+                    let policy = settings.audioPolicy.resolvedPolicy(
+                        settings: playbackSettings
+                    )
+                    return AudioLanguagePolicy.preferredAudioLanguages(
+                        remembered: nil,
+                        preference: policy.effectivePreference(
+                            for: ContentClassifier.audioCategory(for: item)
+                        ),
+                        originalLanguage:
+                            ContentClassifier.originalAudioLanguage(for: item),
+                        deviceLanguage: LanguageMatch.deviceLanguageCode
+                    )
+                },
+                startsActive: startsActive,
                 managedURLResolver: {
                     source,
                     updateSource,
@@ -1737,8 +1784,19 @@ final class PlozziOSAppModel {
                                 )
                             }
                             let audioStreamID = playback.audioTracks.first {
-                                $0.isDefault
-                            }?.id ?? playback.audioTracks.first?.id
+                                track in
+                                source.preferredAudioLanguages.contains {
+                                    preferred in
+                                    Self.languagesMatch(
+                                        preferred,
+                                        track.language
+                                    )
+                                }
+                            }?.id
+                                ?? playback.audioTracks.first {
+                                    $0.isDefault
+                                }?.id
+                                ?? playback.audioTracks.first?.id
                             let textSubtitleStreamID = playback.subtitleTracks
                                 .first {
                                     $0.isDefault && !$0.isImageBasedSubtitle
@@ -1771,6 +1829,21 @@ final class PlozziOSAppModel {
                                     updatePreparationProgress
                             )
                         case .jellyfin, .emby:
+                            if let audioStreamID = playback.audioTracks.first(
+                                where: { track in
+                                    source.preferredAudioLanguages.contains {
+                                        Self.languagesMatch(
+                                            $0,
+                                            track.language
+                                        )
+                                    }
+                                }
+                            )?.id {
+                                setQueryItem(
+                                    "AudioStreamIndex",
+                                    String(audioStreamID)
+                                )
+                            }
                             setQueryItem(
                                 "VideoBitrate",
                                 String(constraint.maximumVideoBitrateBps)
@@ -1784,6 +1857,7 @@ final class PlozziOSAppModel {
                                 "This server cannot create reduced-quality downloads."
                             )
                         }
+
                         components.queryItems = items
                         guard let constrainedURL = components.url else {
                             throw MediaTransportError.unsupportedCapability(
@@ -1815,6 +1889,13 @@ final class PlozziOSAppModel {
                 initializationError: error.localizedDescription
             )
         }
+    }
+
+    nonisolated private static func languagesMatch(
+        _ preferred: String,
+        _ candidate: String?
+    ) -> Bool {
+        LanguageMatch.matches(preferred, candidate)
     }
 
     /// Creates or updates a profile from a shared `ProfileEditorView` draft —
@@ -1909,13 +1990,7 @@ final class PlozziOSAppModel {
             versionPreferences = VersionPreferenceStore(
                 namespace: profiles.activeNamespace
             )
-            downloads = Self.makeDownloadsModel(
-                namespace: profiles.activeProfileID,
-                durableStore: durableLocalStateStore,
-                mediaShareRuntime: mediaShareRuntime,
-                accountsProviders: accountsProviders,
-                authenticatedHTTPResolver: authenticatedHTTPResolver
-            )
+            transitionDownloads(to: profiles.activeProfileID)
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
         reloadAccountsAndCrashContext()
@@ -2590,6 +2665,8 @@ private enum PlexOfflineDownloadQueue {
                         source.includesAllAudioTracks,
                     includesTextSubtitleTracks:
                         source.includesTextSubtitleTracks,
+                    preferredAudioLanguages:
+                        source.preferredAudioLanguages,
                     preparationReference: reference
                 )
             )
@@ -2803,7 +2880,9 @@ private enum PlexOfflineDownloadQueue {
                 quality: source.quality,
                 includesAllAudioTracks: source.includesAllAudioTracks,
                 includesTextSubtitleTracks:
-                    source.includesTextSubtitleTracks
+                    source.includesTextSubtitleTracks,
+                preferredAudioLanguages:
+                    source.preferredAudioLanguages
             )
         )
     }

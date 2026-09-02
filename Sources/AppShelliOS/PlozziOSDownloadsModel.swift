@@ -14,6 +14,17 @@ final class PlozziOSDownloadsModel {
         let estimatedTimeRemaining: TimeInterval?
     }
 
+    struct BatchGroup {
+        let season: MediaItem
+        let episodes: [MediaItem]
+        let provider: any MediaProvider
+    }
+
+    private struct RenditionCapability: Codable {
+        let isSupported: Bool
+        let checkedAt: Date
+    }
+
     private(set) var records: [DownloadedMediaRecord] = [] {
         didSet {
             recordsByKey = Dictionary(
@@ -107,7 +118,11 @@ final class PlozziOSDownloadsModel {
     private let defaults: UserDefaults?
     private let policyKey: String
     private let preferencesKey: String
+    private let renditionCapabilitiesKey: String
     private var policy: DownloadNetworkPolicy
+    private var renditionCapabilities: [String: RenditionCapability]
+    private var renditionCapabilityTasks:
+        [String: Task<Bool, any Error>] = [:]
     private var speedSample: (date: Date, bytes: Int64)?
     private var speedSamplesByKey: [String: (date: Date, bytes: Int64)] = [:]
     private var hasLoadedRecords = false
@@ -115,7 +130,12 @@ final class PlozziOSDownloadsModel {
     private var isUsingUncappedBackgroundPolicy = false
     private let uncappedBackgroundPolicyKey: String
     private var applicationActivityGeneration = 0
+    private var applicationIsActive: Bool
+    private var acceptsNewWork = true
+    private var inFlightEnqueueCount = 0
+    private var enqueueDrainWaiters: [CheckedContinuation<Void, Never>] = []
     private let providerKind: @MainActor (String) -> ProviderKind?
+    private let preferredAudioLanguages: @MainActor (MediaItem) -> [String]
     @ObservationIgnored
     nonisolated(unsafe) private var eventsTask: Task<Void, Never>?
     @ObservationIgnored
@@ -128,6 +148,9 @@ final class PlozziOSDownloadsModel {
         durableStore: DurableLocalStateStore,
         networkFileResolver: any MediaTransportNetworkFileResolving,
         providerKind: @escaping @MainActor (String) -> ProviderKind?,
+        preferredAudioLanguages:
+            @escaping @MainActor (MediaItem) -> [String],
+        startsActive: Bool = true,
         managedURLResolver:
             @escaping PlozziOSBackgroundHTTPDownloadEngine.URLResolver
     ) throws {
@@ -142,6 +165,8 @@ final class PlozziOSDownloadsModel {
         let policyKey = "downloads.policy.\(profileID)"
         let policy = Self.loadPolicy(key: policyKey)
         let preferencesKey = "downloads.preferences.\(profileID)"
+        let renditionCapabilitiesKey =
+            "downloads.rendition-capabilities.\(profileID)"
         let uncappedBackgroundPolicyKey =
             "downloads.uncapped-background-policy.\(profileID)"
         let preferences = Self.loadPreferences(key: preferencesKey)
@@ -174,9 +199,14 @@ final class PlozziOSDownloadsModel {
         self.defaults = .standard
         self.policyKey = policyKey
         self.preferencesKey = preferencesKey
+        self.renditionCapabilitiesKey = renditionCapabilitiesKey
+        self.renditionCapabilities = Self.loadRenditionCapabilities(
+            key: renditionCapabilitiesKey
+        )
         self.uncappedBackgroundPolicyKey = uncappedBackgroundPolicyKey
         self.policy = policy
         self.providerKind = providerKind
+        self.preferredAudioLanguages = preferredAudioLanguages
         self.allowsCellular = policy.allowsExpensiveNetwork
         self.pausesOnLowDataMode = policy.pausesOnConstrainedNetwork
         self.downloadQuality = policy.quality
@@ -190,6 +220,7 @@ final class PlozziOSDownloadsModel {
         self.isUsingUncappedBackgroundPolicy = UserDefaults.standard.bool(
             forKey: uncappedBackgroundPolicyKey
         )
+        self.applicationIsActive = startsActive
         self.asksBeforeDownloading = preferences.asksBeforeDownloading
         self.notifiesOnStandaloneCompletion =
             preferences.notifiesOnStandaloneCompletion
@@ -207,14 +238,18 @@ final class PlozziOSDownloadsModel {
         networkTask = Task { [weak self, queue, networkObserver] in
             for await conditions in networkObserver.updates() {
                 guard !Task.isCancelled else { return }
+                await self?.enforceSpeedLimitPausePolicy()
+                guard !Task.isCancelled else { return }
                 await queue.networkConditionsDidChange(conditions)
+                guard !Task.isCancelled else { return }
                 await self?.reload()
             }
         }
-        Task {
+        Task { [weak self] in
             await queue.updatePolicy(policy)
             await Self.invalidateLegacyPlexRenditions(in: registry)
-            await queue.resumeInterrupted()
+            guard let self else { return }
+            await self.setApplicationActive(self.applicationIsActive)
         }
     }
 
@@ -227,9 +262,13 @@ final class PlozziOSDownloadsModel {
         self.defaults = nil
         self.policyKey = ""
         self.preferencesKey = ""
+        self.renditionCapabilitiesKey = ""
+        self.renditionCapabilities = [:]
         self.uncappedBackgroundPolicyKey = ""
         self.policy = .default
+        self.applicationIsActive = true
         self.providerKind = { _ in nil }
+        self.preferredAudioLanguages = { _ in [] }
         self.allowsCellular = false
         self.pausesOnLowDataMode = true
         self.downloadQuality = .original
@@ -247,6 +286,35 @@ final class PlozziOSDownloadsModel {
         eventsTask?.cancel()
         networkTask?.cancel()
         metricsExpiryTask?.cancel()
+    }
+
+    func beginProfileTransition() {
+        acceptsNewWork = false
+        applicationActivityGeneration += 1
+        networkTask?.cancel()
+    }
+
+    func quiesceForProfileSwitch() async {
+        beginProfileTransition()
+        guard let queue else { return }
+        await queue.suspendScheduling()
+        if inFlightEnqueueCount > 0 {
+            await withCheckedContinuation { continuation in
+                enqueueDrainWaiters.append(continuation)
+            }
+        }
+        while true {
+            let active = (await registry?.all() ?? []).filter {
+                $0.status.isActive
+            }
+            guard !active.isEmpty else { return }
+            for record in active {
+                await queue.pause(
+                    identityKey: record.identityKey,
+                    reason: .inactiveProfile
+                )
+            }
+        }
     }
 
     /// Any downloaded copy of this title, regardless of version. For "does this
@@ -294,13 +362,41 @@ final class PlozziOSDownloadsModel {
     }
 
     func supportsReducedQuality(for item: MediaItem) -> Bool {
-        guard let accountID = item.sourceAccountID else { return false }
-        switch providerKind(accountID) {
-        case .plex, .jellyfin, .emby:
-            return true
-        default:
+        guard let accountID = item.sourceAccountID,
+              let capability = freshRenditionCapability(for: accountID) else {
             return false
         }
+        return capability.isSupported
+    }
+
+    var customDownloadQuality: DownloadQuality? {
+        guard case .constrained = downloadQuality,
+              ![
+                  DownloadQuality.hd1080,
+                  .hd720,
+                  .sd480
+              ].contains(downloadQuality) else {
+            return nil
+        }
+        return downloadQuality
+    }
+
+    var customDownloadQualityTitle: String? {
+        guard case .constrained(let constraint) = customDownloadQuality else {
+            return nil
+        }
+        let megabits = Double(constraint.maximumVideoBitrateBps) / 1_000_000
+        return "Custom • \(constraint.maximumHeight)p • \(megabits.formatted(.number.precision(.fractionLength(1)))) Mbps"
+    }
+
+    func refreshReducedQualitySupport(
+        for item: MediaItem,
+        provider: any MediaProvider
+    ) async {
+        _ = try? await confirmReducedQualitySupport(
+            for: item,
+            provider: provider
+        )
     }
 
     /// Synchronous version-agnostic lookup for visual status surfaces. When an
@@ -344,6 +440,8 @@ final class PlozziOSDownloadsModel {
         provider: any MediaProvider,
         quality: DownloadQuality? = nil
     ) async throws -> DownloadedMediaRecord {
+        try beginEnqueue()
+        defer { finishEnqueue() }
         let request = try await makeRequest(
             item: item,
             provider: provider,
@@ -372,40 +470,75 @@ final class PlozziOSDownloadsModel {
         batchExpectedCount: Int? = nil,
         quality: DownloadQuality? = nil
     ) async throws -> [DownloadedMediaRecord] {
+        try await enqueueBatch(
+            groups: [
+                BatchGroup(
+                    season: season,
+                    episodes: episodes,
+                    provider: provider
+                )
+            ],
+            batchID: batchID,
+            batchKind: batchKind,
+            batchTitle: batchTitle ?? season.title,
+            batchExpectedCount: batchExpectedCount ?? episodes.count,
+            quality: quality
+        )
+    }
+
+    /// Builds every request before persisting any record, then commits the whole
+    /// season/show batch in one registry transaction.
+    @discardableResult
+    func enqueueBatch(
+        groups: [BatchGroup],
+        batchID: String? = nil,
+        batchKind: DownloadBatchKind,
+        batchTitle: String,
+        batchExpectedCount: Int,
+        quality: DownloadQuality? = nil
+    ) async throws -> [DownloadedMediaRecord] {
+        try beginEnqueue()
+        defer { finishEnqueue() }
         guard let queue else {
             throw PlozziOSDownloadError.unavailable(
                 initializationError ?? "Downloads are unavailable."
             )
         }
-        guard !episodes.isEmpty else {
+        let episodeCount = groups.reduce(0) { $0 + $1.episodes.count }
+        guard episodeCount > 0 else {
             throw PlozziOSDownloadError.unavailable(
-                "This season has no downloadable episodes."
+                "This selection has no downloadable episodes."
             )
         }
-        let accountID = season.sourceAccountID
-            ?? episodes.first?.sourceAccountID
-            ?? "unknown"
-        let groupID = "season:\(accountID):\(season.id)"
         let explicitBatchID = batchID ?? UUID().uuidString
         var requests: [DownloadRequest] = []
-        requests.reserveCapacity(episodes.count)
-        for episode in episodes {
-            requests.append(
-                try await makeRequest(
-                    item: episode,
-                    provider: provider,
-                    groupID: groupID,
-                    batchID: explicitBatchID,
-                    batchKind: batchKind,
-                    batchTitle: batchTitle ?? season.title,
-                    batchExpectedCount: batchExpectedCount ?? episodes.count,
-                    requestedQuality: quality
+        requests.reserveCapacity(episodeCount)
+        var artworkItems: [MediaItem] = []
+        artworkItems.reserveCapacity(episodeCount)
+        for group in groups {
+            let accountID = group.season.sourceAccountID
+                ?? group.episodes.first?.sourceAccountID
+                ?? "unknown"
+            let groupID = "season:\(accountID):\(group.season.id)"
+            for episode in group.episodes {
+                requests.append(
+                    try await makeRequest(
+                        item: episode,
+                        provider: group.provider,
+                        groupID: groupID,
+                        batchID: explicitBatchID,
+                        batchKind: batchKind,
+                        batchTitle: batchTitle,
+                        batchExpectedCount: batchExpectedCount,
+                        requestedQuality: quality
+                    )
                 )
-            )
+                artworkItems.append(episode)
+            }
         }
         let records = try await queue.enqueueGroup(requests)
         await reload()
-        for (episode, record) in zip(episodes, records) {
+        for (episode, record) in zip(artworkItems, records) {
             pinArtworkIfAvailable(for: episode, record: record)
         }
         return records
@@ -542,6 +675,11 @@ final class PlozziOSDownloadsModel {
         let quality = requestedQuality ?? policy.quality
         switch playback.downloadableOriginalSource {
         case .networkFile(let locator):
+            guard quality == .original else {
+                throw PlozziOSDownloadError.unavailable(
+                    "Network shares support Original quality only."
+                )
+            }
             request = DownloadRequest.directShare(
                 identity: identity,
                 locator: locator,
@@ -565,6 +703,12 @@ final class PlozziOSDownloadsModel {
                     "This server did not provide a downloadable original file."
                 )
             }
+            if quality != .original {
+                _ = try await confirmReducedQualitySupport(
+                    for: item,
+                    provider: provider
+                )
+            }
             if quality != .original,
                policy.maximumBytesPerSecond != nil,
                kind != .plex {
@@ -586,7 +730,8 @@ final class PlozziOSDownloadsModel {
                 mediaSourceID: locator.mediaSourceID ?? item.selectedVersionID,
                 quality: quality,
                 includesAllAudioTracks: policy.includesAllAudioTracks,
-                includesTextSubtitleTracks: policy.includesTextSubtitleTracks
+                includesTextSubtitleTracks: policy.includesTextSubtitleTracks,
+                preferredAudioLanguages: preferredAudioLanguages(item)
             )
             let fileExtension = playback.sourceFileName.map {
                 ($0 as NSString).pathExtension
@@ -619,6 +764,95 @@ final class PlozziOSDownloadsModel {
             )
         }
         return request
+    }
+
+    private func confirmReducedQualitySupport(
+        for item: MediaItem,
+        provider: any MediaProvider
+    ) async throws -> Bool {
+        guard let accountID = item.sourceAccountID,
+              [.plex, .jellyfin, .emby].contains(provider.kind) else {
+            throw PlozziOSDownloadError.unavailable(
+                "This source supports Original quality only."
+            )
+        }
+        if let capability = freshRenditionCapability(for: accountID) {
+            guard capability.isSupported else {
+                throw PlozziOSDownloadError.unavailable(
+                    "This account cannot create reduced-quality downloads."
+                )
+            }
+            return true
+        }
+        if let task = renditionCapabilityTasks[accountID] {
+            let isSupported = try await task.value
+            guard isSupported else {
+                throw PlozziOSDownloadError.unavailable(
+                    "This account cannot create reduced-quality downloads."
+                )
+            }
+            return true
+        }
+
+        let mediaSourceID = item.selectedVersionID
+        let task = Task {
+            let playback = try await provider.playbackInfo(
+                for: item.id,
+                mediaSourceID: mediaSourceID,
+                forceTranscode: true
+            )
+            return playback.isTranscoding
+                || playback.deliveryMode == .transcode
+        }
+        renditionCapabilityTasks[accountID] = task
+        defer { renditionCapabilityTasks[accountID] = nil }
+
+        do {
+            let isSupported = try await task.value
+            storeRenditionCapability(
+                isSupported,
+                accountID: accountID
+            )
+            guard isSupported else {
+                throw PlozziOSDownloadError.unavailable(
+                    "This account cannot create reduced-quality downloads."
+                )
+            }
+            return true
+        } catch let error as AppError where !error.isTransportFailure {
+            storeRenditionCapability(false, accountID: accountID)
+            throw PlozziOSDownloadError.unavailable(
+                "This account cannot create reduced-quality downloads."
+            )
+        }
+    }
+
+    private func freshRenditionCapability(
+        for accountID: String
+    ) -> RenditionCapability? {
+        guard let capability = renditionCapabilities[accountID] else {
+            return nil
+        }
+        let lifetime: TimeInterval = capability.isSupported
+            ? 24 * 60 * 60
+            : 5 * 60
+        guard Date().timeIntervalSince(capability.checkedAt) < lifetime else {
+            return nil
+        }
+        return capability
+    }
+
+    private func storeRenditionCapability(
+        _ isSupported: Bool,
+        accountID: String
+    ) {
+        renditionCapabilities[accountID] = RenditionCapability(
+            isSupported: isSupported,
+            checkedAt: Date()
+        )
+        if let data = try? JSONEncoder().encode(renditionCapabilities) {
+            defaults?.set(data, forKey: renditionCapabilitiesKey)
+        }
     }
 
     private func pinArtworkIfAvailable(
@@ -706,6 +940,14 @@ final class PlozziOSDownloadsModel {
     }
 
     private func resumeWithoutReload(_ record: DownloadedMediaRecord) async {
+        guard acceptsNewWork else { return }
+        if mustRemainPausedForSpeedLimit(record) {
+            await queue?.pause(
+                identityKey: record.identityKey,
+                reason: .speedLimitPolicy
+            )
+            return
+        }
         if record.status == .failed,
            requiresFreshRetry(record),
            let request = retryRequest(for: record) {
@@ -761,7 +1003,9 @@ final class PlozziOSDownloadsModel {
                 quality: source.quality,
                 includesAllAudioTracks: policy.includesAllAudioTracks,
                 includesTextSubtitleTracks:
-                    policy.includesTextSubtitleTracks
+                    policy.includesTextSubtitleTracks,
+                preferredAudioLanguages:
+                    source.preferredAudioLanguages
             )
         }
 
@@ -963,6 +1207,8 @@ final class PlozziOSDownloadsModel {
     }
 
     func setApplicationActive(_ isActive: Bool) async {
+        applicationIsActive = isActive
+        guard acceptsNewWork else { return }
         guard let queue else { return }
         applicationActivityGeneration += 1
         let generation = applicationActivityGeneration
@@ -987,11 +1233,23 @@ final class PlozziOSDownloadsModel {
                 guard applicationTransitionIsCurrent(generation) else { return }
                 await queue.updatePolicy(policy)
                 guard applicationTransitionIsCurrent(generation) else { return }
+                await enforceSpeedLimitPausePolicy()
+                guard applicationTransitionIsCurrent(generation) else { return }
                 await queue.resumePaused(reason: .backgroundPolicy)
                 guard applicationTransitionIsCurrent(generation) else { return }
                 isUsingUncappedBackgroundPolicy = false
                 defaults?.set(false, forKey: uncappedBackgroundPolicyKey)
             }
+            guard applicationTransitionIsCurrent(generation) else { return }
+            await enforceSpeedLimitPausePolicy()
+            guard applicationTransitionIsCurrent(generation) else { return }
+            if policy.maximumBytesPerSecond == nil {
+                await queue.resumePaused(reason: .speedLimitPolicy)
+                guard applicationTransitionIsCurrent(generation) else { return }
+            }
+            await queue.resumeInterrupted()
+            guard applicationTransitionIsCurrent(generation) else { return }
+            await queue.resumePaused(reason: .inactiveProfile)
             guard applicationTransitionIsCurrent(generation) else { return }
             await queue.resumePaused(reason: .directShareBackground)
             guard applicationTransitionIsCurrent(generation) else { return }
@@ -1055,6 +1313,53 @@ final class PlozziOSDownloadsModel {
         !Task.isCancelled && generation == applicationActivityGeneration
     }
 
+    private func mustRemainPausedForSpeedLimit(
+        _ record: DownloadedMediaRecord
+    ) -> Bool {
+        guard policy.maximumBytesPerSecond != nil,
+              record.quality != .original,
+              let provider = record.managedHTTPSource?.provider else {
+            return false
+        }
+        return provider == .jellyfin || provider == .emby
+    }
+
+    private func enforceSpeedLimitPausePolicy() async {
+        guard let queue, policy.maximumBytesPerSecond != nil else { return }
+        for record in await registry?.all() ?? []
+        where mustRemainPausedForSpeedLimit(record)
+            && (record.status.isActive
+                || record.pauseReason == .inactiveProfile
+                || record.pauseReason == .networkPolicy
+                || record.pauseReason == .backgroundPolicy
+                || record.pauseReason == .directShareBackground) {
+            await queue.pause(
+                identityKey: record.identityKey,
+                reason: .speedLimitPolicy
+            )
+        }
+    }
+
+    private func beginEnqueue() throws {
+        guard acceptsNewWork else {
+            throw PlozziOSDownloadError.unavailable(
+                "The active profile changed. Try the download again."
+            )
+        }
+        inFlightEnqueueCount += 1
+    }
+
+    private func finishEnqueue() {
+        precondition(inFlightEnqueueCount > 0)
+        inFlightEnqueueCount -= 1
+        guard inFlightEnqueueCount == 0 else { return }
+        let waiters = enqueueDrainWaiters
+        enqueueDrainWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
     private func reload() async {
         let refreshed = (await registry?.all() ?? [])
             .sorted { $0.updatedAt > $1.updatedAt }
@@ -1072,10 +1377,13 @@ final class PlozziOSDownloadsModel {
             defaults?.set(data, forKey: policyKey)
         }
         Task {
-            if restartActiveManagedDownloads {
-                let active = records.filter {
+            guard acceptsNewWork else { return }
+            let active = restartActiveManagedDownloads
+                ? records.filter {
                     $0.sourceKind == .managedHTTP && $0.status.isActive
                 }
+                : []
+            if restartActiveManagedDownloads {
                 for record in active {
                     await queue.pause(
                         identityKey: record.identityKey,
@@ -1086,8 +1394,24 @@ final class PlozziOSDownloadsModel {
                     )
                 }
             }
+            guard acceptsNewWork else { return }
             await queue.updatePolicy(policy)
+            guard acceptsNewWork else { return }
+            await enforceSpeedLimitPausePolicy()
+            guard acceptsNewWork else { return }
             if restartActiveManagedDownloads {
+                if policy.maximumBytesPerSecond != nil {
+                    for record in active where
+                        record.quality != .original
+                            && record.managedHTTPSource?.provider != .plex {
+                        await queue.pause(
+                            identityKey: record.identityKey,
+                            reason: .speedLimitPolicy
+                        )
+                    }
+                } else {
+                    await queue.resumePaused(reason: .speedLimitPolicy)
+                }
                 await queue.resumePaused(reason: .backgroundPolicy)
                 await reload()
             }
@@ -1280,6 +1604,19 @@ final class PlozziOSDownloadsModel {
             return .default
         }
         return preferences
+    }
+
+    private static func loadRenditionCapabilities(
+        key: String
+    ) -> [String: RenditionCapability] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let capabilities = try? JSONDecoder().decode(
+                  [String: RenditionCapability].self,
+                  from: data
+              ) else {
+            return [:]
+        }
+        return capabilities
     }
 }
 

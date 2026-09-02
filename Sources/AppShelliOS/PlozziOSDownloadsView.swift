@@ -738,7 +738,7 @@ struct PlozziOSDownloadSettingsView: View {
                     isOn: $model.includesAllAudioTracks
                 )
                 Toggle(
-                    "Include Text Subtitles",
+                    "Include Text Subtitles When Supported",
                     isOn: $model.includesTextSubtitleTracks
                 )
                 if case .constrained(let constraint) = model.downloadQuality {
@@ -762,7 +762,7 @@ struct PlozziOSDownloadSettingsView: View {
                     )
                 } else {
                     Text(
-                        "Reduced quality asks Plex, Jellyfin, or Emby to transcode a separate offline copy. Plex keeps one audio track; choose Original to keep every track. Preparation can take time and use significant server CPU. Network shares support Original only."
+                        "Reduced quality asks Plex, Jellyfin, or Emby to transcode a separate offline copy using your profile’s preferred audio language. Plex keeps one audio track and at most one text subtitle; choose Original to keep every embedded track. External subtitle sidecars remain on the server. Preparation can take time and use significant server CPU. Network shares support Original only."
                     )
                 }
             }

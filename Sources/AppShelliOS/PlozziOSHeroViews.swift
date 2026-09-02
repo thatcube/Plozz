@@ -1891,6 +1891,12 @@ private struct PlozziOSDetailHeroForeground: View {
             }
             downloadRecord = await appModel.downloads
                 .record(forSelectedVersionOf: downloadItem)
+            if let provider = appModel.provider(for: downloadItem) {
+                await appModel.downloads.refreshReducedQualitySupport(
+                    for: downloadItem,
+                    provider: provider
+                )
+            }
         }
         .alert(
             "Download Failed",
@@ -1922,8 +1928,8 @@ private struct PlozziOSDetailHeroForeground: View {
             ) {
                 Task { await startDownload(quality: .original) }
             }
-            if let providerKind = selectedSource?.providerKind,
-               [.plex, .jellyfin, .emby].contains(providerKind) {
+            if let downloadItem,
+               appModel.downloads.supportsReducedQuality(for: downloadItem) {
                 Button("Download 1080p • 20 Mbps") {
                     Task { await startDownload(quality: .hd1080) }
                 }
@@ -1932,6 +1938,12 @@ private struct PlozziOSDetailHeroForeground: View {
                 }
                 Button("Download 480p • 1.5 Mbps") {
                     Task { await startDownload(quality: .sd480) }
+                }
+                if let custom = appModel.downloads.customDownloadQuality,
+                   let title = appModel.downloads.customDownloadQualityTitle {
+                    Button(title) {
+                        Task { await startDownload(quality: custom) }
+                    }
                 }
             }
             if currentDownloadRecord?.status == .completed {

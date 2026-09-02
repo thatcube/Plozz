@@ -326,6 +326,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     seasons: detail.children.filter { $0.kind == .season },
                     looseEpisodes: detail.children.filter { $0.kind == .episode },
                     viewModel: viewModel,
+                    onDownloadBatch: downloadBatch,
                     onDownloadSeason: downloadSeason,
                     onDownloadEpisode: downloadEpisode
                 )
@@ -704,6 +705,37 @@ private struct PlozziOSCanonicalItemDetailView: View {
             season: season,
             episodes: playableEpisodes,
             provider: provider,
+            batchID: batchID,
+            batchKind: batchKind,
+            batchTitle: batchTitle,
+            batchExpectedCount: batchExpectedCount,
+            quality: quality
+        )
+        return records.count
+    }
+
+    private func downloadBatch(
+        _ batches: [PlozziOSSeasonDownloadPrompt.Batch],
+        batchID: String,
+        batchKind: DownloadBatchKind,
+        batchTitle: String,
+        batchExpectedCount: Int,
+        quality: DownloadQuality?
+    ) async throws -> Int {
+        let groups = try batches.map { batch in
+            guard let first = batch.episodes.first,
+                  let provider = appModel.provider(for: first)
+                    ?? appModel.provider(for: batch.season) else {
+                throw PlozziOSSeasonDownloadError.serverUnavailable
+            }
+            return PlozziOSDownloadsModel.BatchGroup(
+                season: batch.season,
+                episodes: batch.episodes,
+                provider: provider
+            )
+        }
+        let records = try await appModel.downloads.enqueueBatch(
+            groups: groups,
             batchID: batchID,
             batchKind: batchKind,
             batchTitle: batchTitle,
@@ -1597,6 +1629,14 @@ private struct PlozziOSSeriesDownloadPicker: View {
     let seasons: [MediaItem]
     let looseEpisodes: [MediaItem]
     let viewModel: ItemDetailViewModel
+    let onDownloadBatch: (
+        [PlozziOSSeasonDownloadPrompt.Batch],
+        String,
+        DownloadBatchKind,
+        String,
+        Int,
+        DownloadQuality?
+    ) async throws -> Int
     let onDownloadSeason: (
         MediaItem,
         [MediaItem],
@@ -1704,6 +1744,13 @@ private struct PlozziOSSeriesDownloadPicker: View {
                         self.prompt = nil
                         performDownload(prompt, quality: .sd480)
                     }
+                    if let custom = appModel.downloads.customDownloadQuality,
+                       let title = appModel.downloads.customDownloadQualityTitle {
+                        Button(title) {
+                            self.prompt = nil
+                            performDownload(prompt, quality: custom)
+                        }
+                    }
                 }
                 Button("Cancel", role: .cancel) {
                     self.prompt = nil
@@ -1781,6 +1828,13 @@ private struct PlozziOSSeriesDownloadPicker: View {
                 errorMessage = "This show has no episodes available to download."
                 return
             }
+            if let episode = batches.first?.episodes.first,
+               let provider = appModel.provider(for: episode) {
+                await appModel.downloads.refreshReducedQualitySupport(
+                    for: episode,
+                    provider: provider
+                )
+            }
             prompt = PlozziOSSeasonDownloadPrompt(
                 scope: .show(series.title),
                 batches: batches
@@ -1799,10 +1853,19 @@ private struct PlozziOSSeriesDownloadPicker: View {
                 quality: appModel.downloads.downloadQuality
             )
         } else {
-            prompt = PlozziOSSeasonDownloadPrompt(
-                scope: .season(season.title),
-                batches: [.init(season: season, episodes: episodes)]
-            )
+            Task {
+                if let episode = episodes.first,
+                   let provider = appModel.provider(for: episode) {
+                    await appModel.downloads.refreshReducedQualitySupport(
+                        for: episode,
+                        provider: provider
+                    )
+                }
+                prompt = PlozziOSSeasonDownloadPrompt(
+                    scope: .season(season.title),
+                    batches: [.init(season: season, episodes: episodes)]
+                )
+            }
         }
     }
 
@@ -1827,7 +1890,6 @@ private struct PlozziOSSeriesDownloadPicker: View {
     ) {
         isBusy = true
         Task {
-            var completedBatches = 0
             let batchID = UUID().uuidString
             let batchKind: DownloadBatchKind
             let batchTitle: String
@@ -1840,22 +1902,16 @@ private struct PlozziOSSeriesDownloadPicker: View {
                 batchTitle = title
             }
             do {
-                for batch in prompt.batches {
-                    _ = try await onDownloadSeason(
-                        batch.season,
-                        batch.episodes,
-                        batchID,
-                        batchKind,
-                        batchTitle,
-                        prompt.count,
-                        quality
-                    )
-                    completedBatches += 1
-                }
+                _ = try await onDownloadBatch(
+                    prompt.batches,
+                    batchID,
+                    batchKind,
+                    batchTitle,
+                    prompt.count,
+                    quality
+                )
             } catch {
-                errorMessage = completedBatches > 0
-                    ? "Some seasons were queued, but the remaining download failed: \(error.localizedDescription)"
-                    : error.localizedDescription
+                errorMessage = error.localizedDescription
             }
             isBusy = false
         }
@@ -2185,12 +2241,27 @@ private struct PlozziOSEpisodeDownloadRow: View {
                         Button("480p • 1.5 Mbps") {
                             onDownload(episode, .sd480)
                         }
+                        if let custom = appModel.downloads.customDownloadQuality,
+                           let title = appModel.downloads.customDownloadQualityTitle {
+                            Button(title) {
+                                onDownload(episode, custom)
+                            }
+                        }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
                     Text("Reduced qualities are transcoded by your media server.")
                 }
             }
+        }
+        .task(id: "\(episode.sourceAccountID ?? "")|\(episode.id)") {
+            guard let provider = appModel.provider(for: episode) else {
+                return
+            }
+            await appModel.downloads.refreshReducedQualitySupport(
+                for: episode,
+                provider: provider
+            )
         }
     }
 

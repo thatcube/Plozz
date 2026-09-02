@@ -87,6 +87,8 @@ public struct DownloadRenditionConstraint: Codable, Sendable, Hashable {
 public enum DownloadPauseReason: String, Codable, Sendable, Hashable {
     case manual
     case networkPolicy
+    case speedLimitPolicy
+    case inactiveProfile
     case backgroundPolicy
     case directShareBackground
 }

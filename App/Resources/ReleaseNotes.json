@@ -10,16 +10,16 @@
         {
           "category": "New",
           "items": [
-            {
-              "text": "Offline downloads",
-              "platforms": ["iOS"]
-            }
+            "Watchlist page"
           ]
         },
         {
           "category": "Updated",
           "items": [
-            "Configurable Watchlist navigation"
+            {
+              "text": "Offline download reliability and controls",
+              "platforms": ["iOS"]
+            }
           ]
         },
         {

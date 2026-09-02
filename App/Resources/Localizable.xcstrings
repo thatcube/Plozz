@@ -91928,12 +91928,6 @@
     },
     "Custom • %lldp • %@ Mbps" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Custom • %1$lldp • %2$@ Mbps"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -91974,6 +91968,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Προσαρμοσμένη • %1$lldp • %2$@ Mbps"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Custom • %1$lldp • %2$@ Mbps"
           }
         },
         "es" : {
@@ -155229,6 +155229,7 @@
       }
     },
     "Invalid network-share configuration." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -338893,12 +338894,6 @@
     },
     "The download ended after %lld of %lld bytes." : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "The download ended after %1$lld of %2$lld bytes."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -338939,6 +338934,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Η λήψη σταμάτησε στα %1$lld από %2$lld byte."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The download ended after %1$lld of %2$lld bytes."
           }
         },
         "es" : {
@@ -343302,6 +343303,7 @@
       }
     },
     "The selected second subtitle could not be loaded." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -343742,6 +343744,7 @@
       }
     },
     "The selected track contains no cues." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {

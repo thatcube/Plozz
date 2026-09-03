@@ -1966,8 +1966,6 @@ final class ItemDetailViewModelTests: XCTestCase {
             "showB": [season("b-s1", "Season B")],
             "b-s1": [episode("b-e1", number: 1)]
         ]
-        let alternateItemGate = AsyncGate()
-        alternate.itemGate = ["showB": { await alternateItemGate.wait() }]
         let vm = ItemDetailViewModel(
             provider: primary,
             itemID: "showA",
@@ -1983,10 +1981,19 @@ final class ItemDetailViewModelTests: XCTestCase {
         )
         await vm.load()
 
+        // Remove the initial load's optional speculative fan-out from the
+        // choreography so only the source switch can enter this gate.
+        vm.suspendEnrichment()
+        let alternateItemGate = AsyncGate()
+        let sourceSwitchItemStarted = LockedFlag()
+        alternate.itemGate = ["showB": {
+            sourceSwitchItemStarted.set()
+            await alternateItemGate.wait()
+        }]
         let sourceSwitch = Task { @MainActor in
             await vm.switchToSource(accountID: "plex")
         }
-        await waitUntil { alternate.itemCallCount(for: "showB") >= 2 }
+        await waitUntil { sourceSwitchItemStarted.value }
 
         vm.resumeEnrichmentIfNeeded()
         await vm.loadEpisodes(for: "a-s1")

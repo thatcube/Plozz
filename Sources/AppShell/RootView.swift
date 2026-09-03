@@ -1008,7 +1008,8 @@ private struct OnboardingPageContent: View {
                         share: draft.share,
                         username: draft.username,
                         password: draft.password,
-                        displayName: draft.displayName
+                        displayName: draft.displayName,
+                        subpath: draft.subpath
                     )
                 },
                 onWebDAVShareConfigured: { config in
@@ -1026,6 +1027,7 @@ private struct OnboardingPageContent: View {
                             host: config.host,
                             port: config.port,
                             exportPath: config.exportPath,
+                            subpath: config.subpath,
                             displayName: config.displayName
                         )
                     case let .sftp(config):

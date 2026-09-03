@@ -21,60 +21,126 @@ struct PlozziOSUnifiedAddShareView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
+    let embedsNavigationStack: Bool
     @State private var viewModel = UnifiedAddShareModel()
     @State private var wired = false
+    @State private var saveError: String?
+
+    init(
+        appModel: PlozziOSAppModel,
+        embedsNavigationStack: Bool = true
+    ) {
+        self.appModel = appModel
+        self.embedsNavigationStack = embedsNavigationStack
+    }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch viewModel.step {
-                case .chooseDevice: deviceStep
-                case .connect: connectStep
-                case .verifyTrust(let sha256): verifyStep(sha256)
-                case .pickLocation: locationStep
-                case .comingSoon(let kind): comingSoonStep(kind)
+        Group {
+            if embedsNavigationStack {
+                NavigationStack {
+                    content
                 }
-            }
-            .navigationTitle(stepTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(viewModel.step == .chooseDevice ? "Cancel" : "Back", action: back)
-                }
+            } else {
+                content
             }
         }
         .onAppear {
             if !wired {
                 wired = true
                 viewModel.onSMBConfigured = { draft in
-                    _ = appModel.addSMBShare(host: draft.host, port: draft.port, share: draft.share,
-                                             username: draft.username, password: draft.password,
-                                             displayName: draft.displayName)
-                    dismiss()
+                    saveError = nil
+                    if appModel.addSMBShare(
+                        host: draft.host,
+                        port: draft.port,
+                        share: draft.share,
+                        username: draft.username,
+                        password: draft.password,
+                        displayName: draft.displayName,
+                        subpath: draft.subpath
+                    ) {
+                        dismiss()
+                    } else {
+                        saveError = appModel.accountError
+                            ?? "Couldn’t save this SMB share."
+                    }
                 }
                 viewModel.onWebDAVConfigured = { config in
-                    _ = appModel.addWebDAVShare(baseURL: config.baseURL, auth: config.auth,
-                                                trustPin: config.trustPin, displayName: config.displayName)
-                    dismiss()
+                    saveError = nil
+                    if appModel.addWebDAVShare(
+                        baseURL: config.baseURL,
+                        auth: config.auth,
+                        trustPin: config.trustPin,
+                        displayName: config.displayName
+                    ) {
+                        dismiss()
+                    } else {
+                        saveError = appModel.accountError
+                            ?? "Couldn’t save this WebDAV share."
+                    }
                 }
                 viewModel.onMediaShareConfigured = { result in
+                    saveError = nil
+                    let saved: Bool
                     switch result {
                     case let .nfs(c):
-                        _ = appModel.addNFSShare(host: c.host, port: c.port,
-                                                 exportPath: c.exportPath, displayName: c.displayName)
+                        saved = appModel.addNFSShare(
+                            host: c.host,
+                            port: c.port,
+                            exportPath: c.exportPath,
+                            subpath: c.subpath,
+                            displayName: c.displayName
+                        )
                     case let .sftp(c):
-                        _ = appModel.addSFTPShare(host: c.host, port: c.port, path: c.path,
-                                                  username: c.username, password: c.password,
-                                                  hostKeyPin: c.hostKeyPin, displayName: c.displayName)
+                        saved = appModel.addSFTPShare(
+                            host: c.host,
+                            port: c.port,
+                            path: c.path,
+                            username: c.username,
+                            password: c.password,
+                            hostKeyPin: c.hostKeyPin,
+                            displayName: c.displayName
+                        )
                     case let .ftp(c):
-                        _ = appModel.addFTPShare(baseURL: c.baseURL, auth: c.auth, displayName: c.displayName)
+                        saved = appModel.addFTPShare(
+                            baseURL: c.baseURL,
+                            auth: c.auth,
+                            displayName: c.displayName
+                        )
                     }
-                    dismiss()
+                    if saved {
+                        dismiss()
+                    } else {
+                        saveError = appModel.accountError
+                            ?? "Couldn’t save this network share."
+                    }
                 }
             }
             viewModel.startScan()
         }
         .onDisappear { viewModel.stopScan() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        Group {
+            switch viewModel.step {
+            case .chooseDevice: deviceStep
+            case .connect: connectStep
+            case .verifyTrust(let sha256): verifyStep(sha256)
+            case .pickLocation: locationStep
+            case .comingSoon(let kind): comingSoonStep(kind)
+            }
+        }
+        .navigationTitle(stepTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(
+                    viewModel.step == .chooseDevice ? "Cancel" : "Back",
+                    action: back
+                )
+            }
+        }
     }
 
     private var stepTitle: LocalizedStringResource {
@@ -164,13 +230,16 @@ struct PlozziOSUnifiedAddShareView: View {
     private var connectStep: some View {
         Form {
             Section {
-                Picker("Protocol", selection: $viewModel.selectedTransport) {
+                Picker(
+                    "Protocol",
+                    selection: Binding(
+                        get: { viewModel.selectedTransport },
+                        set: { viewModel.applyTransport($0) }
+                    )
+                ) {
                     ForEach(MediaShareTransportCatalog.preferenceOrder, id: \.self) { kind in
                         protocolLabel(kind).tag(kind)
                     }
-                }
-                .onChange(of: viewModel.selectedTransport) { _, kind in
-                    viewModel.applyTransport(kind)
                 }
                 TextField("Address — e.g. 192.168.1.100 or mynas.local", text: $viewModel.address)
                     .textContentType(.URL).autocorrectionDisabled()
@@ -281,6 +350,9 @@ struct PlozziOSUnifiedAddShareView: View {
     // MARK: - Step 4: pick location
 
     private var locationTitle: LocalizedStringResource {
+        if viewModel.showsCurrentFolder {
+            return "Choose a folder"
+        }
         switch viewModel.selectedTransport {
         case .nfs: return "Choose an export"
         case .smb: return "Choose a share"
@@ -290,63 +362,78 @@ struct PlozziOSUnifiedAddShareView: View {
 
     @ViewBuilder
     private var locationStep: some View {
-        switch viewModel.locationLoad {
-        case .idle, .loading:
-            List { HStack { ProgressView(); Text("Loading…").foregroundStyle(palette.secondaryText) } }
-        case .needsAuth, .badCredentials:
-            List {
-                Section("Sign in") {
-                    Text("This server needs a username and password. Go back and enter them.")
-                        .foregroundStyle(palette.secondaryText)
+        Group {
+            switch viewModel.locationLoad {
+            case .idle, .loading:
+                List { HStack { ProgressView(); Text("Loading…").foregroundStyle(palette.secondaryText) } }
+            case .needsAuth, .badCredentials:
+                List {
+                    Section("Sign in") {
+                        Text("This server needs a username and password. Go back and enter them.")
+                            .foregroundStyle(palette.secondaryText)
+                    }
+                    manualShareSection
                 }
-                manualShareSection
-            }
-        case .unreachable:
-            List {
-                Section("Can’t connect") {
-                    Text("Couldn’t connect. Check the address and network.")
-                        .foregroundStyle(palette.secondaryText)
-                    Button("Try Again") { retryLocation() }
+            case .unreachable:
+                List {
+                    Section("Can’t connect") {
+                        Text("Couldn’t connect. Check the address and network.")
+                            .foregroundStyle(palette.secondaryText)
+                        Button("Try Again") { retryLocation() }
+                    }
+                    if viewModel.selectedTransport == .nfs { manualShareSection }
                 }
-                if viewModel.selectedTransport == .nfs { manualShareSection }
-            }
-        case .failed(let message):
-            List {
-                Section("Something went wrong") {
-                    Text(message).foregroundStyle(palette.secondaryText)
-                    Button("Try Again") { retryLocation() }
+            case .failed(let message):
+                List {
+                    Section("Something went wrong") {
+                        Text(message).foregroundStyle(palette.secondaryText)
+                        Button("Try Again") { retryLocation() }
+                    }
+                    manualShareSection
                 }
-                manualShareSection
+            case .loaded:
+                loadedLocations
             }
-        case .loaded:
-            loadedLocations
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let saveError {
+                Label {
+                    Text(verbatim: saveError)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .foregroundStyle(.red)
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(.regularMaterial)
+            }
         }
     }
 
     private var loadedLocations: some View {
         List {
-            if viewModel.isDrillableTransport {
+            if viewModel.showsCurrentFolder {
                 Section {
-                    if viewModel.currentPath != "/" {
-                        Button { loadFolders(path: parentPath(of: viewModel.currentPath)) } label: {
+                    if viewModel.canNavigateUp {
+                        Button { viewModel.navigateUp() } label: {
                             Label("Up one level", systemImage: "arrow.up.backward")
                         }
                     }
                     Text(viewModel.currentPath)
                         .font(.system(.footnote, design: .monospaced))
                         .foregroundStyle(palette.secondaryText)
-                    Button("Use This Folder") { useCurrentFolder() }
+                    Button("Use This Folder") { viewModel.useCurrentFolder() }
                 } header: {
                     Text("Folder")
                 }
             }
-            Section(viewModel.isDrillableTransport ? "Or open a subfolder" : "Locations") {
+            Section(viewModel.showsCurrentFolder ? "Or open a subfolder" : "Locations") {
                 if viewModel.locations.isEmpty {
-                    Text(viewModel.isDrillableTransport ? "No subfolders here." : "Nothing here.")
+                    Text(viewModel.showsCurrentFolder ? "No subfolders here." : "Nothing here.")
                         .foregroundStyle(palette.secondaryText)
                 } else {
                     ForEach(viewModel.locations) { item in
-                        Button { selectLocation(item) } label: {
+                        Button { viewModel.selectLocation(item) } label: {
                             HStack(spacing: 14) {
                                 Image(systemName: item.isBrowsable ? "folder.fill" : "externaldrive.fill")
                                     .foregroundStyle(palette.secondaryText)
@@ -360,6 +447,9 @@ struct PlozziOSUnifiedAddShareView: View {
                     }
                 }
             }
+            if viewModel.showsManualRootEntry {
+                manualShareSection
+            }
         }
     }
 
@@ -368,58 +458,24 @@ struct PlozziOSUnifiedAddShareView: View {
         if viewModel.selectedTransport == .nfs {
             Section("Enter export path") {
                 TextField("/volume1/Media", text: $viewModel.manualShare).autocorrectionDisabled()
-                Button("Add Share") { viewModel.chooseNFSManualExport() }
+                Button("Browse Export") { viewModel.browseManualLocation() }
+                    .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Use This Export") { viewModel.chooseNFSManualExport() }
                     .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-        } else {
-            Section("Enter share name") {
-                TextField("Share name", text: $viewModel.manualShare).autocorrectionDisabled()
-                Button("Add Share") { viewModel.chooseSMBShare(viewModel.manualShare) }
+        } else if viewModel.selectedTransport == .smb {
+            Section("Enter share or folder path") {
+                TextField("Share/Folder", text: $viewModel.manualShare).autocorrectionDisabled()
+                Button("Browse") { viewModel.browseManualLocation() }
+                    .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Use This Path") { viewModel.chooseSMBShare(viewModel.manualShare) }
                     .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-        }
-    }
-
-    private func selectLocation(_ item: UnifiedAddShareModel.LocationItem) {
-        if item.isBrowsable {
-            loadFolders(path: item.path)
-        } else if viewModel.selectedTransport == .nfs {
-            viewModel.chooseNFSExport(item.path)
-        } else {
-            viewModel.chooseSMBShare(item.path)
-        }
-    }
-
-    private func useCurrentFolder() {
-        switch viewModel.selectedTransport {
-        case .sftp, .ftp: viewModel.chooseFilesystemRoot()
-        default: viewModel.chooseWebDAVFolder(viewModel.currentPath)
-        }
-    }
-
-    private func loadFolders(path: String) {
-        switch viewModel.selectedTransport {
-        case .sftp: Task { await viewModel.loadSFTPFolders(path: path) }
-        case .ftp: Task { await viewModel.loadFTPFolders(path: path) }
-        default: Task { await viewModel.loadWebDAVFolders(path: path) }
         }
     }
 
     private func retryLocation() {
-        switch viewModel.selectedTransport {
-        case .nfs: Task { await viewModel.loadNFSExports() }
-        case .sftp: Task { await viewModel.loadSFTPFolders(path: "/") }
-        case .ftp: Task { await viewModel.loadFTPFolders(path: "/") }
-        case .webDAV: Task { await viewModel.loadWebDAVFolders(path: "/") }
-        case .smb: viewModel.loadSMBShares()
-        }
-    }
-
-    private func parentPath(of path: String) -> String {
-        let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
-        guard let idx = trimmed.lastIndex(of: "/") else { return "/" }
-        let parent = String(trimmed[..<idx])
-        return parent.isEmpty ? "/" : parent
+        viewModel.retryLocations()
     }
 
     private func formatFingerprint(_ data: Data) -> String {

@@ -121,26 +121,38 @@ public struct MediaShareCredentialEnvelope: Equatable, Sendable {
     public let transport: MediaShareTransportKind
     public let authentication: MediaShareAuthentication
     public let trust: MediaShareTrustMaterial
+    /// The protocol-level root that must be connected before applying the
+    /// selected library subpath. NFS needs this distinction because an export
+    /// must be mounted as advertised even when the user selects a folder below it.
+    /// Other transports derive their connection root from the persisted URL.
+    public let transportRootPath: String?
 
     public init(
         transport: MediaShareTransportKind,
         authentication: MediaShareAuthentication,
-        trust: MediaShareTrustMaterial = MediaShareTrustMaterial()
+        trust: MediaShareTrustMaterial = MediaShareTrustMaterial(),
+        transportRootPath: String? = nil
     ) throws {
         try Self.validate(
             transport: transport,
             authentication: authentication,
-            trust: trust
+            trust: trust,
+            transportRootPath: transportRootPath
         )
         self.transport = transport
         self.authentication = authentication
         self.trust = trust
+        self.transportRootPath = try Self.normalizedTransportRootPath(
+            transportRootPath,
+            transport: transport
+        )
     }
 
     private static func validate(
         transport: MediaShareTransportKind,
         authentication: MediaShareAuthentication,
-        trust: MediaShareTrustMaterial
+        trust: MediaShareTrustMaterial,
+        transportRootPath: String?
     ) throws {
         let authenticationAllowed: Bool
         switch (transport, authentication) {
@@ -185,6 +197,31 @@ public struct MediaShareCredentialEnvelope: Equatable, Sendable {
         if transport == .sftp, trust.sshHostKeySHA256 == nil {
             throw MediaCredentialError.incompatibleTrust
         }
+
+        if transportRootPath != nil, transport != .nfs {
+            throw MediaCredentialError.invalidIdentifier
+        }
+    }
+
+    private static func normalizedTransportRootPath(
+        _ path: String?,
+        transport: MediaShareTransportKind
+    ) throws -> String? {
+        guard let path else { return nil }
+        guard transport == .nfs else {
+            throw MediaCredentialError.invalidIdentifier
+        }
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/"),
+              !trimmed.contains("\\"),
+              !trimmed.contains("\0") else {
+            throw MediaCredentialError.invalidIdentifier
+        }
+        let components = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.allSatisfy({ $0 != "." && $0 != ".." }) else {
+            throw MediaCredentialError.invalidIdentifier
+        }
+        return components.isEmpty ? "/" : "/" + components.joined(separator: "/")
     }
 }
 
@@ -199,19 +236,27 @@ extension MediaShareCredentialEnvelope: CustomStringConvertible, CustomDebugStri
 }
 
 public enum MediaShareCredentialCodec {
-    public static let prefix = "plozz-share-v1:"
+    public static let prefix = "plozz-share-v2:"
+    private static let version1Prefix = "plozz-share-v1:"
     public static let maximumPayloadBytes = 32 * 1024
     private static let maximumEncodedPayloadBytes = ((maximumPayloadBytes + 2) / 3) * 4
 
     public static func encode(_ envelope: MediaShareCredentialEnvelope) throws -> String {
-        let serialized = SerializedEnvelope(envelope)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(serialized)
+        let data: Data
+        let encodedPrefix: String
+        if envelope.transportRootPath == nil {
+            data = try encoder.encode(SerializedEnvelopeV1(envelope))
+            encodedPrefix = version1Prefix
+        } else {
+            data = try encoder.encode(SerializedEnvelope(envelope))
+            encodedPrefix = prefix
+        }
         guard data.count <= maximumPayloadBytes else {
             throw MediaCredentialError.payloadTooLarge
         }
-        return prefix + data.base64EncodedString()
+        return encodedPrefix + data.base64EncodedString()
     }
 
     /// Decodes the exact prefixed format, or treats an unprefixed SMB value as
@@ -221,7 +266,8 @@ public enum MediaShareCredentialCodec {
         expectedTransport: MediaShareTransportKind,
         legacyUsername: String = ""
     ) throws -> MediaShareCredentialEnvelope {
-        guard storedValue.hasPrefix(prefix) else {
+        guard storedValue.hasPrefix(prefix)
+                || storedValue.hasPrefix(version1Prefix) else {
             guard expectedTransport == .smb else {
                 throw MediaCredentialError.unversionedCredentialNotSupported
             }
@@ -253,10 +299,17 @@ public enum MediaShareCredentialCodec {
     public static func decodeVersioned(
         _ storedValue: String
     ) throws -> MediaShareCredentialEnvelope {
-        guard storedValue.hasPrefix(prefix) else {
+        let encoded: String
+        let expectedVersion: Int
+        if storedValue.hasPrefix(prefix) {
+            encoded = String(storedValue.dropFirst(prefix.count))
+            expectedVersion = 2
+        } else if storedValue.hasPrefix(version1Prefix) {
+            encoded = String(storedValue.dropFirst(version1Prefix.count))
+            expectedVersion = 1
+        } else {
             throw MediaCredentialError.unversionedCredentialNotSupported
         }
-        let encoded = String(storedValue.dropFirst(prefix.count))
         guard encoded.utf8.count <= maximumEncodedPayloadBytes else {
             throw MediaCredentialError.payloadTooLarge
         }
@@ -271,22 +324,42 @@ public enum MediaShareCredentialCodec {
         guard let version = try? decoder.decode(SerializedEnvelopeVersion.self, from: data) else {
             throw MediaCredentialError.malformedEnvelope
         }
-        guard version.version == 1 else {
+        guard version.version == expectedVersion else {
             throw MediaCredentialError.unsupportedVersion
-        }
-        let serialized: SerializedEnvelope
-        do {
-            serialized = try decoder.decode(SerializedEnvelope.self, from: data)
-        } catch {
-            throw MediaCredentialError.malformedEnvelope
         }
         let canonicalEncoder = JSONEncoder()
         canonicalEncoder.outputFormatting = [.sortedKeys]
-        guard let canonicalData = try? canonicalEncoder.encode(serialized),
-              canonicalData == data else {
-            throw MediaCredentialError.malformedEnvelope
+        switch version.version {
+        case 1:
+            let serialized: SerializedEnvelopeV1
+            do {
+                serialized = try decoder.decode(
+                    SerializedEnvelopeV1.self,
+                    from: data
+                )
+            } catch {
+                throw MediaCredentialError.malformedEnvelope
+            }
+            guard let canonicalData = try? canonicalEncoder.encode(serialized),
+                  canonicalData == data else {
+                throw MediaCredentialError.malformedEnvelope
+            }
+            return try serialized.envelope()
+        case 2:
+            let serialized: SerializedEnvelope
+            do {
+                serialized = try decoder.decode(SerializedEnvelope.self, from: data)
+            } catch {
+                throw MediaCredentialError.malformedEnvelope
+            }
+            guard let canonicalData = try? canonicalEncoder.encode(serialized),
+                  canonicalData == data else {
+                throw MediaCredentialError.malformedEnvelope
+            }
+            return try serialized.envelope()
+        default:
+            throw MediaCredentialError.unsupportedVersion
         }
-        return try serialized.envelope()
     }
 }
 
@@ -516,6 +589,31 @@ private struct SerializedEnvelopeVersion: Decodable {
 }
 
 private struct SerializedEnvelope: Codable {
+    let version: Int
+    let transport: MediaShareTransportKind
+    let authentication: SerializedAuthentication
+    let trust: MediaShareTrustMaterial
+    let transportRootPath: String?
+
+    init(_ envelope: MediaShareCredentialEnvelope) {
+        version = 2
+        transport = envelope.transport
+        authentication = SerializedAuthentication(envelope.authentication)
+        trust = envelope.trust
+        transportRootPath = envelope.transportRootPath
+    }
+
+    func envelope() throws -> MediaShareCredentialEnvelope {
+        try MediaShareCredentialEnvelope(
+            transport: transport,
+            authentication: authentication.authentication(),
+            trust: trust,
+            transportRootPath: transportRootPath
+        )
+    }
+}
+
+private struct SerializedEnvelopeV1: Codable {
     let version: Int
     let transport: MediaShareTransportKind
     let authentication: SerializedAuthentication

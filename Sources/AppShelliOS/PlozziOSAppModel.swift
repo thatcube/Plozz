@@ -2349,6 +2349,7 @@ final class PlozziOSAppModel {
         host: String,
         port: Int?,
         exportPath: String,
+        subpath: String = "",
         displayName: String
     ) -> Bool {
         do {
@@ -2356,6 +2357,7 @@ final class PlozziOSAppModel {
                 host: host,
                 port: port,
                 exportPath: exportPath,
+                subpath: subpath,
                 displayName: displayName
             )
             reloadAccountsAndCrashContext()
@@ -2376,7 +2378,8 @@ final class PlozziOSAppModel {
         share: String,
         username: String,
         password: String,
-        displayName: String
+        displayName: String,
+        subpath: String = ""
     ) -> Bool {
         do {
             let prepared = try mediaShareConfigurationService.saveSMB(
@@ -2385,7 +2388,8 @@ final class PlozziOSAppModel {
                 share: share,
                 username: username,
                 password: password,
-                displayName: displayName
+                displayName: displayName,
+                subpath: subpath
             )
             reloadAccountsAndCrashContext()
             identityIndex.warmIdentityIndex()

@@ -140,17 +140,40 @@ struct MediaShareTransportComposition: Sendable {
             makeWebDAVAdapter(scheme: .http, accountStore: accountStore),
             makeWebDAVAdapter(scheme: .https, accountStore: accountStore),
             makeSFTPAdapter(accountStore: accountStore),
-            makeNFSAdapter(),
+            makeNFSAdapter(accountStore: accountStore),
             makeFTPAdapter(scheme: .ftp, accountStore: accountStore),
             makeFTPAdapter(scheme: .ftps, accountStore: accountStore),
         ]
     }
 
-    /// The NFS adapter is credential-free (`AUTH_UNIX`, no password — the vault
-    /// stores `.noCredentials`), so unlike SMB/WebDAV it needs no per-account
-    /// credential provider.
-    private static func makeNFSAdapter() -> NFSMediaTransportAdapter {
-        NFSMediaTransportAdapter()
+    /// NFS has no password, but its envelope carries the advertised export
+    /// boundary separately from the selected library subfolder. The adapter mounts
+    /// that export and roots all file operations below the selected folder.
+    private static func makeNFSAdapter(
+        accountStore: any AccountPersisting
+    ) -> NFSMediaTransportAdapter {
+        NFSMediaTransportAdapter { accountID, revision in
+            let envelope: MediaShareCredentialEnvelope
+            do {
+                envelope = try accountStore.mediaShareCredential(
+                    for: accountID,
+                    revision: revision
+                )
+            } catch {
+                throw MediaTransportError.authentication(
+                    reason: "NFS configuration unavailable"
+                )
+            }
+            guard envelope.transport == .nfs,
+                  envelope.authentication == .noCredentials else {
+                throw MediaTransportError.unsupportedCapability(
+                    "non-NFS configuration"
+                )
+            }
+            return NFSMediaTransportConfiguration(
+                exportPath: envelope.transportRootPath
+            )
+        }
     }
 
     private static func makeSMBAdapter(

@@ -35,7 +35,7 @@ public struct AccountSecret: Codable, Hashable, Sendable {
     }
 }
 
-/// A media-share account's transferable credential (the opaque `plozz-share-v1:`
+/// A media-share account's transferable credential (the opaque `plozz-share-v2:`
 /// envelope the vault already uses).
 public struct ShareSecret: Codable, Hashable, Sendable {
     public var accountID: String

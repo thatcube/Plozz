@@ -654,6 +654,7 @@ let package = Package(
                 "MediaTransportSFTP",
                 "MediaTransportFTP",
                 "MediaTransportNFS",
+                "MediaTransportSMB",
             ]
         ),
 
@@ -793,7 +794,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppShellTests",
-            dependencies: ["AppRuntime", "AppShell", "CoreModels", "FeatureHomeCore", "FeatureShareOnboarding", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
+            dependencies: ["AppRuntime", "AppShell", "CoreModels", "FeatureHomeCore", "FeatureShareOnboarding", "MediaTransportHTTP", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
         ),
         .testTarget(
             name: "CoreUITests",

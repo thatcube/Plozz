@@ -11,6 +11,7 @@ public struct ShareDraft: Equatable {
     public var host: String
     public var port: Int?
     public var share: String
+    public var subpath: String
     public var username: String
     public var password: String
     public var displayName: String
@@ -21,11 +22,13 @@ public struct ShareDraft: Equatable {
         share: String,
         username: String,
         password: String,
-        displayName: String
+        displayName: String,
+        subpath: String = ""
     ) {
         self.host = host
         self.port = port
         self.share = share
+        self.subpath = subpath
         self.username = username
         self.password = password
         self.displayName = displayName

@@ -8,7 +8,7 @@ import TransportNFS
 public struct NFSDirectoryItem: Sendable, Equatable {
     public let name: String
     /// For an export: the export dirpath. For a subfolder: the export path joined
-    /// with the subfolder — a deeper path the saved share mounts directly.
+    /// with the subfolder. Persistence keeps the export boundary separately.
     public let path: String
 
     public init(name: String, path: String) {
@@ -68,10 +68,9 @@ public struct NFSOnboardingProbe: NFSOnboardingProbing {
             let session = try await client.mount(exportPath: exportPath)
             defer { Task { await session.shutdown() } }
             let entries = try await session.list(relativePath: relativePath)
-            // The persisted share for a subfolder mounts the DEEPER path directly
-            // (export + subpath); consumer NAS allow subtree mounts. Join the
-            // export root with the relative subpath so each item is a mountable
-            // export path.
+            // Return an absolute display/selection path while preserving the
+            // original export separately in the onboarding model. Runtime mounts
+            // the export and roots file operations below the chosen subpath.
             let base = joinedExportBase(exportPath: exportPath, relativePath: relativePath)
             let items = entries
                 .filter { $0.attributes?.isDirectory == true && $0.name != "." && $0.name != ".." }

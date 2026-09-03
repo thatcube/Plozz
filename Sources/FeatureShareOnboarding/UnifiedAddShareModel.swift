@@ -12,12 +12,13 @@ import MediaTransportFTP
 import MediaTransportNFS
 
 /// The finished configuration for an NFS export, handed back to
-/// `AppState.didConfigureNFSShare`. NFS is credential-free; the export path is the
-/// share root.
+/// `AppState.didConfigureNFSShare`. The export remains the mount boundary while
+/// `subpath` scopes the library below it.
 public struct NFSShareConfiguration: Equatable {
     public let host: String
     public let port: Int?
     public let exportPath: String
+    public let subpath: String
     public let displayName: String
 }
 
@@ -65,15 +66,13 @@ public enum MediaShareOnboardingResult: Equatable {
 ///     the `TransportOnboardingDescriptor`.
 ///  3. **Verify** — a generic TOFU fingerprint screen when the descriptor needs a
 ///     pin (WebDAV self-signed TLS today).
-///  4. **Pick location** — SMB shares or WebDAV folders (two `listChildren` impls
-///     behind one step).
+///  4. **Pick location** — choose an SMB share or NFS export, then browse folders
+///     below it; WebDAV/SFTP/FTP browse directly from their entered root.
 ///  5. **Save** — hands back the existing `ShareDraft` / `WebDAVShareConfiguration`
 ///     so `AppState` persistence is unchanged.
 ///
-/// SMB + WebDAV are wired to their real, on-device-validated backends
-/// (`SMBShareEnumerator`, `WebDAVOnboardingProbe`); NFS + SFTP are present in the
-/// catalog and discovery but dummy-wired (a "coming soon" step) until their
-/// transport branches merge.
+/// Every implemented transport uses its production transport semantics through
+/// an injectable onboarding probe, so both platform shells share one state machine.
 @MainActor
 @Observable
 public final class UnifiedAddShareModel {
@@ -89,8 +88,7 @@ public final class UnifiedAddShareModel {
     /// A credential control mode on the Connect form.
     public enum AuthMode: Equatable { case usernamePassword, token }
 
-    /// One selectable location at the pick-location step (an SMB share or a
-    /// WebDAV folder). `path` drills for WebDAV; SMB shares are leaves.
+    /// One selectable root or folder at the pick-location step.
     public struct LocationItem: Identifiable, Equatable {
         public let name: String
         public let path: String
@@ -155,6 +153,7 @@ public final class UnifiedAddShareModel {
     private let discovery: BonjourServiceDiscovery
     private let sweeper = MediaSharePortSweeper()
     private let serviceProbe: any MediaShareServiceProbing
+    private let smbProbe: any SMBOnboardingProbing
     private let webDAVProbe: any WebDAVOnboardingProbing
     private let sftpProbe: any SFTPOnboardingProbing
     private let ftpProbe: any FTPOnboardingProbing
@@ -166,9 +165,37 @@ public final class UnifiedAddShareModel {
     /// specific configured port like WebDAV :8384 is never lost to de-duplication.
     private var fullDoorsByHost: [String: [DiscoveredMediaShareBox.Door]] = [:]
 
-    /// The confirmed root path for a path-entry transport (NFS/SFTP/FTP), shown
-    /// at the pick-location step for review before saving.
-    private(set) var confirmedPath = "/"
+    private struct BrowseContext: Equatable {
+        var confirmedPath = "/"
+        var selectedSMBShare: String?
+        var selectedNFSExport: String?
+        var minimumPath = "/"
+        var canReturnToRootList = false
+    }
+
+    private var browseContext = BrowseContext()
+    private(set) var confirmedPath: String {
+        get { browseContext.confirmedPath }
+        set { browseContext.confirmedPath = newValue }
+    }
+    private var selectedSMBShare: String? {
+        get { browseContext.selectedSMBShare }
+        set { browseContext.selectedSMBShare = newValue }
+    }
+    private var selectedNFSExport: String? {
+        get { browseContext.selectedNFSExport }
+        set { browseContext.selectedNFSExport = newValue }
+    }
+    /// The shallowest folder the user may navigate above. A manually-entered path
+    /// is a boundary, not permission to browse the rest of the server.
+    private var minimumBrowsePath: String {
+        get { browseContext.minimumPath }
+        set { browseContext.minimumPath = newValue }
+    }
+    private var canReturnToRootList: Bool {
+        get { browseContext.canReturnToRootList }
+        set { browseContext.canReturnToRootList = newValue }
+    }
     /// The SFTP host key captured during the connect probe, awaiting the user's
     /// approval on the verify step.
     private var pendingSFTPHostKey: Data?
@@ -176,12 +203,14 @@ public final class UnifiedAddShareModel {
     private var approvedHostKeyPin: Data?
 
     public init(
+        smbProbe: any SMBOnboardingProbing = SMBOnboardingProbe(),
         webDAVProbe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe(),
         serviceProbe: any MediaShareServiceProbing = ProtocolServiceProbe(),
         sftpProbe: any SFTPOnboardingProbing = SFTPOnboardingProbe(),
         ftpProbe: any FTPOnboardingProbing = FTPOnboardingProbe(),
         nfsProbe: any NFSOnboardingProbing = NFSOnboardingProbe()
     ) {
+        self.smbProbe = smbProbe
         self.webDAVProbe = webDAVProbe
         self.serviceProbe = serviceProbe
         self.sftpProbe = sftpProbe
@@ -329,18 +358,44 @@ public final class UnifiedAddShareModel {
         webDAVSchemePort = nil
         trust = .system; approvedPin = nil
         confirmedPath = "/"
+        selectedSMBShare = nil
+        selectedNFSExport = nil
+        minimumBrowsePath = "/"
+        canReturnToRootList = false
         pendingSFTPHostKey = nil
         approvedHostKeyPin = nil
     }
 
-    /// Whether the selected transport drills into nested folders at the
-    /// pick-location step (WebDAV, SFTP, FTP), as opposed to a flat list (SMB
-    /// shares, NFS exports).
-    public var isDrillableTransport: Bool {
+    /// Whether a protocol root has been chosen and the current directory can be
+    /// saved. SMB and NFS first show their share/export lists, so they do not show
+    /// folder controls until one of those roots is open.
+    public var showsCurrentFolder: Bool {
         switch selectedTransport {
-        case .webDAV, .sftp, .ftp: return true
-        case .smb, .nfs: return false
+        case .smb:
+            return selectedSMBShare != nil
+        case .nfs:
+            return selectedNFSExport != nil
+        case .webDAV, .sftp, .ftp:
+            return true
         }
+    }
+
+    public var canNavigateUp: Bool {
+        switch selectedTransport {
+        case .smb:
+            return selectedSMBShare != nil
+                && (currentPath != minimumBrowsePath || canReturnToRootList)
+        case .nfs:
+            return selectedNFSExport != nil
+                && (currentPath != minimumBrowsePath || canReturnToRootList)
+        case .webDAV, .sftp, .ftp:
+            return currentPath != minimumBrowsePath
+        }
+    }
+
+    public var showsManualRootEntry: Bool {
+        !showsCurrentFolder
+            && (selectedTransport == .smb || selectedTransport == .nfs)
     }
 
     /// Set the chosen protocol and prefill the port from what we DETECTED for that
@@ -348,6 +403,14 @@ public final class UnifiedAddShareModel {
     /// WebDAV on :8384 — we use that exact port, because it's the one the user
     /// configured. We never discard a detected port in favour of the default.
     public func applyTransport(_ kind: MediaShareTransportKind, doors: [DiscoveredMediaShareBox.Door]? = nil) {
+        if selectedTransport != kind {
+            workTask?.cancel()
+            workTask = nil
+            detecting = false
+            connectError = nil
+            locations = []
+            locationLoad = .idle
+        }
         selectedTransport = kind
         guard let descriptor = descriptor(kind) else { portText = ""; return }
         if let door = bestDetectedDoor(for: kind, descriptor: descriptor) {
@@ -395,6 +458,17 @@ public final class UnifiedAddShareModel {
 
     public var canConnect: Bool {
         guard !address.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        if let inlinePort = inlinePortComponent(from: address) {
+            guard let port = Int(inlinePort), (1...65_535).contains(port) else {
+                return false
+            }
+        }
+        let trimmedPort = portText.trimmingCharacters(in: .whitespaces)
+        if !trimmedPort.isEmpty {
+            guard let port = Int(trimmedPort), (1...65_535).contains(port) else {
+                return false
+            }
+        }
         guard let descriptor = descriptor(selectedTransport) else { return true }
         if descriptor.authModes.isEmpty { return true } // NFS: no creds
         if !descriptor.allowsBlankGuest, authMode == .usernamePassword {
@@ -427,8 +501,7 @@ public final class UnifiedAddShareModel {
 
     private func portIs(_ p: Int) -> Bool { Int(portText.trimmingCharacters(in: .whitespaces)) == p }
     private var currentPort: Int? {
-        inlinePort(from: address)
-            ?? Int(portText.trimmingCharacters(in: .whitespaces))
+        effectivePort(for: selectedTransport, rawAddress: address)
     }
 
     // MARK: - Connect
@@ -437,11 +510,11 @@ public final class UnifiedAddShareModel {
         workTask?.cancel()
         connectError = nil
         let host = normalizedHost(address)
+        let kind = selectedTransport
         // Port comes from the Port field; if the user pasted host:port into the
         // address, honour that inline port too.
-        let port = inlinePort(from: address) ?? Int(portText.trimmingCharacters(in: .whitespaces))
+        let port = effectivePort(for: kind, rawAddress: address)
 
-        let kind = selectedTransport
         guard let descriptor = descriptor(kind) else { return }
         guard descriptor.isImplemented else {
             step = .comingSoon(kind)
@@ -464,22 +537,79 @@ public final class UnifiedAddShareModel {
     }
 
     private func normalizedHost(_ raw: String) -> String {
-        var s = raw.trimmingCharacters(in: .whitespaces)
-        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
-        if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
-        // Strip an inline :port (not IPv6).
-        if s.filter({ $0 == ":" }).count == 1, let colon = s.firstIndex(of: ":") {
-            s = String(s[..<colon])
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.contains("://")
+            ? trimmed
+            : "smb://\(trimmed)"
+        if let host = URLComponents(string: candidate)?.host {
+            return unbracketedHost(host)
         }
-        return s.trimmingCharacters(in: .whitespaces)
+        return unbracketedHost(trimmed)
     }
 
     private func inlinePort(from raw: String) -> Int? {
-        var s = raw.trimmingCharacters(in: .whitespaces)
-        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
-        if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
-        guard s.filter({ $0 == ":" }).count == 1, let colon = s.firstIndex(of: ":") else { return nil }
-        return Int(s[s.index(after: colon)...])
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.contains("://")
+            ? trimmed
+            : "smb://\(trimmed)"
+        return URLComponents(string: candidate)?.port
+    }
+
+    private func inlinePortComponent(from raw: String) -> String? {
+        var authority = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = authority.range(of: "://") {
+            authority = String(authority[range.upperBound...])
+        }
+        if let slash = authority.firstIndex(of: "/") {
+            authority = String(authority[..<slash])
+        }
+        if authority.hasPrefix("["),
+           let close = authority.firstIndex(of: "]") {
+            let suffix = authority[authority.index(after: close)...]
+            guard suffix.first == ":" else { return nil }
+            return String(suffix.dropFirst())
+        }
+        guard authority.filter({ $0 == ":" }).count == 1,
+              let colon = authority.firstIndex(of: ":") else {
+            return nil
+        }
+        return String(authority[authority.index(after: colon)...])
+    }
+
+    private func unbracketedHost(_ host: String) -> String {
+        guard host.hasPrefix("["), host.hasSuffix("]") else { return host }
+        return String(host.dropFirst().dropLast())
+    }
+
+    private func effectivePort(
+        for kind: MediaShareTransportKind,
+        rawAddress: String
+    ) -> Int? {
+        if let inline = inlinePort(from: rawAddress) {
+            return (1...65_535).contains(inline) ? inline : nil
+        }
+        let trimmed = portText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              let entered = Int(trimmed),
+              (1...65_535).contains(entered) else {
+            return nil
+        }
+        guard entered == descriptor(kind)?.defaultPort else { return entered }
+        let scheme = rawAddress.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).lowercased()
+        switch kind {
+        case .webDAV where scheme.hasPrefix("http://"):
+            return 80
+        case .webDAV where scheme.hasPrefix("https://"):
+            return 443
+        case .ftp where scheme.hasPrefix("ftps://"):
+            return 990
+        case .ftp where scheme.hasPrefix("ftp://"):
+            return 21
+        default:
+            return entered
+        }
     }
 
     private func explicitScheme(from raw: String) -> String? {
@@ -497,14 +627,27 @@ public final class UnifiedAddShareModel {
         ) else {
             return "/"
         }
-        return components.percentEncodedPath.isEmpty
-            ? "/"
-            : components.percentEncodedPath
+        return normalizedWebDAVPath(components.percentEncodedPath)
     }
 
     private func enterSMBLocation() {
         step = .pickLocation
-        loadSMBShares()
+        let entered = filesystemPath(from: address)
+        let components = entered.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        ).map(String.init)
+        guard let share = components.first else {
+            loadSMBShares()
+            return
+        }
+        let subpath = components.dropFirst().joined(separator: "/")
+        selectedSMBShare = share
+        minimumBrowsePath = joinedSMBPath(share: share, subpath: subpath)
+        canReturnToRootList = false
+        workTask = Task {
+            await self.loadSMBFolders(path: self.minimumBrowsePath)
+        }
     }
 
     // MARK: - NFS / SFTP / FTP (path-entry transports)
@@ -514,11 +657,14 @@ public final class UnifiedAddShareModel {
     /// WebDAV path helper this keeps the path literal (filesystem transports
     /// address by decoded names), defaulting to `/` when none is given.
     private func filesystemPath(from raw: String) -> String {
-        var s = raw.trimmingCharacters(in: .whitespaces)
-        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
-        guard let slash = s.firstIndex(of: "/") else { return "/" }
-        let path = String(s[slash...])
-        return path.isEmpty ? "/" : path
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        let candidate = trimmed.contains("://") ? trimmed : "file://\(trimmed)"
+        if let components = URLComponents(string: candidate),
+           !components.path.isEmpty {
+            return normalizedAbsolutePath(components.path)
+        }
+        guard let slash = trimmed.firstIndex(of: "/") else { return "/" }
+        return normalizedAbsolutePath(String(trimmed[slash...]))
     }
 
     /// SFTP first-connect: capture the server's host key with no user credential,
@@ -556,6 +702,10 @@ public final class UnifiedAddShareModel {
     /// the form credentials; reconnects per call (onboarding is low-frequency).
     public func loadSFTPFolders(path: String) async {
         guard let pin = approvedHostKeyPin else { return }
+        let path = normalizedAbsolutePath(path)
+        guard isSameOrDescendant(path, of: minimumBrowsePath) else { return }
+        currentPath = path
+        confirmedPath = path
         locationLoad = .loading
         let host = resolvedHost
         let port = resolvedPort ?? (descriptor(.sftp)?.defaultPort ?? 22)
@@ -572,8 +722,6 @@ public final class UnifiedAddShareModel {
         if Task.isCancelled { return }
         switch result {
         case .success(let dirs):
-            currentPath = path
-            confirmedPath = path
             locations = dirs.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: true) }
             locationLoad = .loaded
         case .authenticationFailed:
@@ -594,7 +742,15 @@ public final class UnifiedAddShareModel {
     private func beginNFSBrowse() {
         step = .pickLocation
         workTask?.cancel()
-        workTask = Task { await self.loadNFSExports() }
+        let entered = filesystemPath(from: address)
+        if entered == "/" {
+            workTask = Task { await self.loadNFSExports() }
+        } else {
+            selectedNFSExport = entered
+            minimumBrowsePath = entered
+            canReturnToRootList = false
+            workTask = Task { await self.loadNFSFolders(path: entered) }
+        }
     }
 
     public func loadNFSExports() async {
@@ -609,7 +765,17 @@ public final class UnifiedAddShareModel {
             if exports.isEmpty {
                 locationLoad = .failed("This server didn’t advertise any exports. Enter the export path, e.g. /volume1/Media.")
             } else {
-                locations = exports.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: false) }
+                selectedNFSExport = nil
+                currentPath = "/"
+                minimumBrowsePath = "/"
+                canReturnToRootList = false
+                locations = exports.map {
+                    LocationItem(
+                        name: $0.name,
+                        path: normalizedAbsolutePath($0.path),
+                        isBrowsable: true
+                    )
+                }
                 locationLoad = .loaded
             }
         case .unreachable:
@@ -621,18 +787,62 @@ public final class UnifiedAddShareModel {
         }
     }
 
-    /// Save a chosen NFS export (from the advertised list) as the share root.
+    /// Open a chosen NFS export so the user can select the export itself or drill
+    /// into a subfolder without assuming the server permits subtree mounts.
     public func chooseNFSExport(_ path: String) {
-        confirmedPath = path.hasPrefix("/") ? path : "/" + path
+        guard hasValidPathComponents(path) else { return }
+        let normalized = normalizedAbsolutePath(path)
+        selectedNFSExport = normalized
+        minimumBrowsePath = normalized
+        canReturnToRootList = true
+        workTask?.cancel()
+        workTask = Task { await self.loadNFSFolders(path: normalized) }
+    }
+
+    /// Save a manually-typed NFS export path when browsing is unavailable.
+    public func chooseNFSManualExport() {
+        let trimmed = manualShare.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, hasValidPathComponents(trimmed) else { return }
+        selectedNFSExport = normalizedAbsolutePath(trimmed)
+        confirmedPath = selectedNFSExport ?? "/"
         chooseFilesystemRoot()
     }
 
-    /// Save a manually-typed NFS export path (fallback when EXPORT is blocked).
-    public func chooseNFSManualExport() {
-        let trimmed = manualShare.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        confirmedPath = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
-        chooseFilesystemRoot()
+    public func loadNFSFolders(path: String) async {
+        guard let exportPath = selectedNFSExport else { return }
+        let normalizedPath = normalizedAbsolutePath(path)
+        guard let relativePath = relativePath(
+            normalizedPath,
+            below: exportPath
+        ) else { return }
+        currentPath = normalizedPath
+        confirmedPath = normalizedPath
+        locationLoad = .loading
+        let result = await nfsProbe.listDirectories(
+            host: resolvedHost,
+            port: resolvedPort,
+            exportPath: exportPath,
+            relativePath: relativePath
+        )
+        if Task.isCancelled { return }
+        switch result {
+        case .success(let directories):
+            locations = directories.map {
+                LocationItem(
+                    name: $0.name,
+                    path: normalizedAbsolutePath($0.path),
+                    isBrowsable: true
+                )
+            }
+            locationLoad = .loaded
+        case .unreachable:
+            locationLoad = .unreachable
+        case .permissionDenied:
+            locationLoad = .failed("This account can’t browse that NFS folder.")
+        case .failed(let message):
+            PlozzLog.networking.error("NFS folder listing failed: \(message)")
+            locationLoad = .failed("Couldn’t browse this NFS folder.")
+        }
     }
 
     /// FTP first-connect: attempt the initial listing WHILE STILL ON THE CONNECT
@@ -662,6 +872,7 @@ public final class UnifiedAddShareModel {
             if Task.isCancelled { return }
             switch result {
             case .success(let dirs):
+                self.minimumBrowsePath = start
                 self.currentPath = start
                 self.confirmedPath = start
                 self.locations = dirs.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: true) }
@@ -684,6 +895,10 @@ public final class UnifiedAddShareModel {
     /// (onboarding is low-frequency), mirroring the WebDAV/SFTP browsers. Used for
     /// drilling AFTER the first connect already validated credentials.
     public func loadFTPFolders(path: String) async {
+        let path = normalizedAbsolutePath(path)
+        guard isSameOrDescendant(path, of: minimumBrowsePath) else { return }
+        currentPath = path
+        confirmedPath = path
         locationLoad = .loading
         let host = resolvedHost
         let scheme = ftpScheme(from: address, port: resolvedPort)
@@ -701,8 +916,6 @@ public final class UnifiedAddShareModel {
         if Task.isCancelled { return }
         switch result {
         case .success(let dirs):
-            currentPath = path
-            confirmedPath = path
             locations = dirs.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: true) }
             locationLoad = .loaded
         case .authenticationFailed:
@@ -742,10 +955,15 @@ public final class UnifiedAddShareModel {
         let path = confirmedPath
         switch selectedTransport {
         case .nfs:
+            guard let exportPath = selectedNFSExport,
+                  let subpath = relativePath(path, below: exportPath) else {
+                return
+            }
             onMediaShareConfigured(.nfs(NFSShareConfiguration(
                 host: resolvedHost,
                 port: resolvedPort,
-                exportPath: path,
+                exportPath: exportPath,
+                subpath: subpath,
                 displayName: name
             )))
         case .sftp:
@@ -787,23 +1005,98 @@ public final class UnifiedAddShareModel {
         workTask?.cancel()
         locationLoad = .loading
         locations = []
+        selectedSMBShare = nil
+        currentPath = "/"
+        minimumBrowsePath = "/"
+        canReturnToRootList = false
         let host = resolvedHost, port = resolvedPort
         let user = username, pass = password
-        workTask = Task {
-            do {
-                let names = try await SMBShareEnumerator.listShares(host: host, port: port, username: user, password: pass)
-                if Task.isCancelled { return }
-                self.locations = names.map { LocationItem(name: $0, path: $0, isBrowsable: false) }
+        workTask = Task { [smbProbe] in
+            let result = await smbProbe.listShares(
+                host: host,
+                port: port,
+                username: user,
+                password: pass
+            )
+            if Task.isCancelled { return }
+            switch result {
+            case .success(let shares):
+                self.locations = shares.map {
+                    LocationItem(
+                        name: $0.name,
+                        path: $0.path,
+                        isBrowsable: true
+                    )
+                }
                 self.locationLoad = .loaded
-            } catch SMBShareEnumerator.ListError.authenticationRequired {
-                if !Task.isCancelled { self.locationLoad = .needsAuth }
-            } catch SMBShareEnumerator.ListError.credentialsRejected {
-                if !Task.isCancelled { self.locationLoad = .badCredentials }
-            } catch SMBShareEnumerator.ListError.unreachable, SMBShareEnumerator.ListError.timedOut {
-                if !Task.isCancelled { self.locationLoad = .unreachable }
-            } catch {
-                if !Task.isCancelled { self.locationLoad = .failed("Something went wrong talking to this server.") }
+            case .authenticationRequired:
+                self.locationLoad = .needsAuth
+            case .credentialsRejected:
+                self.locationLoad = .badCredentials
+            case .unreachable:
+                self.locationLoad = .unreachable
+            case .failed(let reason):
+                PlozzLog.networking.error("SMB share listing failed: \(reason)")
+                self.locationLoad = .failed(
+                    "Something went wrong talking to this server."
+                )
+            case .cancelled:
+                break
             }
+        }
+    }
+
+    public func loadSMBFolders(path: String) async {
+        let normalizedPath = normalizedRelativePath(path)
+        let components = normalizedPath.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        ).map(String.init)
+        guard let share = components.first else { return }
+        if selectedSMBShare == nil {
+            selectedSMBShare = share
+            minimumBrowsePath = share
+        }
+        guard selectedSMBShare == share,
+              isSameOrDescendant(
+                normalizedPath,
+                of: minimumBrowsePath,
+                separator: "/"
+              ) else { return }
+        let relativePath = components.dropFirst().joined(separator: "/")
+        currentPath = normalizedPath
+        confirmedPath = normalizedPath
+        locationLoad = .loading
+        let result = await smbProbe.listDirectories(
+            host: resolvedHost,
+            port: resolvedPort,
+            share: share,
+            username: username,
+            password: password,
+            relativePath: relativePath
+        )
+        if Task.isCancelled { return }
+        switch result {
+        case .success(let directories):
+            locations = directories.map {
+                LocationItem(
+                    name: $0.name,
+                    path: joinedSMBPath(share: share, subpath: $0.path),
+                    isBrowsable: true
+                )
+            }
+            locationLoad = .loaded
+        case .authenticationRequired:
+            locationLoad = .needsAuth
+        case .credentialsRejected:
+            locationLoad = .badCredentials
+        case .unreachable:
+            locationLoad = .unreachable
+        case .failed(let reason):
+            PlozzLog.networking.error("SMB folder listing failed: \(reason)")
+            locationLoad = .failed("Couldn’t browse this SMB folder.")
+        case .cancelled:
+            break
         }
     }
 
@@ -936,7 +1229,9 @@ public final class UnifiedAddShareModel {
             defer { self.detecting = false }
             // Preflight TLS on https so a self-signed cert is approved first.
             if url.scheme?.lowercased() == "https" {
-                switch await self.webDAVProbe.preflightTrust(url: url) {
+                let preflight = await self.webDAVProbe.preflightTrust(url: url)
+                if Task.isCancelled { return }
+                switch preflight {
                 case .systemTrusted:
                     self.trust = .system; self.approvedPin = nil
                 case .needsApproval(let sha256):
@@ -967,6 +1262,7 @@ public final class UnifiedAddShareModel {
             approvedHostKeyPin = hostKey
             step = .pickLocation
             let start = filesystemPath(from: address)
+            minimumBrowsePath = start
             workTask?.cancel()
             workTask = Task { await self.loadSFTPFolders(path: start) }
             return
@@ -991,7 +1287,13 @@ public final class UnifiedAddShareModel {
 
     private func validateAndBrowseWebDAV(url: URL) async {
         let credential = webDAVCredential()
-        switch await webDAVProbe.validate(url: url, credential: credential, trust: trust) {
+        let validation = await webDAVProbe.validate(
+            url: url,
+            credential: credential,
+            trust: trust
+        )
+        if Task.isCancelled { return }
+        switch validation {
         case .success:
             break
         case .failure(let error):
@@ -1000,7 +1302,9 @@ public final class UnifiedAddShareModel {
             return
         }
         webDAVOriginURL = originURL(of: url)
-        await loadWebDAVFolders(path: "/")
+        let start = enteredPath(from: url.absoluteString)
+        minimumBrowsePath = start
+        await loadWebDAVFolders(path: start)
         if connectError == nil { step = .pickLocation }
     }
 
@@ -1008,10 +1312,20 @@ public final class UnifiedAddShareModel {
 
     public func loadWebDAVFolders(path: String) async {
         guard let origin = webDAVOriginURL else { return }
+        let path = normalizedWebDAVPath(path)
+        guard isSameOrDescendant(path, of: minimumBrowsePath) else { return }
+        currentPath = path
+        confirmedPath = path
         locationLoad = .loading
-        switch await webDAVProbe.listFolders(url: origin, path: path, credential: webDAVCredential(), trust: trust) {
+        let result = await webDAVProbe.listFolders(
+            url: origin,
+            path: path,
+            credential: webDAVCredential(),
+            trust: trust
+        )
+        if Task.isCancelled { return }
+        switch result {
         case .success(let folders):
-            currentPath = path
             locations = folders.map { LocationItem(name: $0.name, path: $0.path, isBrowsable: true) }
             locationLoad = .loaded
         case .failure(let error):
@@ -1047,18 +1361,28 @@ public final class UnifiedAddShareModel {
 
     // MARK: - Saving
 
-    /// Confirm an SMB share by name (from the list or typed).
-    public func chooseSMBShare(_ share: String) {
-        let trimmed = share.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
+    /// Confirm an SMB share or nested path. The first component is the SMB tree;
+    /// the remaining exact-case components scope the library below it.
+    public func chooseSMBShare(_ path: String) {
+        guard hasValidPathComponents(path) else { return }
+        let normalized = normalizedRelativePath(path)
+        let components = normalized.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        ).map(String.init)
+        guard let share = components.first else { return }
+        let subpath = components.dropFirst().joined(separator: "/")
         let name = displayName.trimmingCharacters(in: .whitespaces)
         onSMBConfigured(ShareDraft(
             host: resolvedHost,
             port: resolvedPort,
-            share: trimmed,
+            share: share,
             username: username.trimmingCharacters(in: .whitespaces),
             password: password,
-            displayName: name.isEmpty ? (trimmed.isEmpty ? resolvedHost : trimmed) : name
+            displayName: name.isEmpty
+                ? (components.last ?? resolvedHost)
+                : name,
+            subpath: subpath
         ))
     }
 
@@ -1066,6 +1390,7 @@ public final class UnifiedAddShareModel {
     public func chooseWebDAVFolder(_ path: String) {
         guard let origin = webDAVOriginURL,
               var comps = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { return }
+        let path = normalizedWebDAVPath(path)
         comps.percentEncodedPath = path == "/" ? "" : path
         guard let baseURL = comps.url else { return }
         let pin = approvedPin.flatMap { try? SHA256Fingerprint(bytes: $0) }
@@ -1076,6 +1401,148 @@ public final class UnifiedAddShareModel {
             trustPin: pin,
             displayName: name
         ))
+    }
+
+    public func selectLocation(_ item: LocationItem) {
+        guard item.isBrowsable else { return }
+        workTask?.cancel()
+        switch selectedTransport {
+        case .smb:
+            if selectedSMBShare == nil {
+                selectedSMBShare = item.path
+                minimumBrowsePath = item.path
+                canReturnToRootList = true
+            }
+            workTask = Task { await self.loadSMBFolders(path: item.path) }
+        case .nfs:
+            if selectedNFSExport == nil {
+                selectedNFSExport = normalizedAbsolutePath(item.path)
+                minimumBrowsePath = selectedNFSExport ?? "/"
+                canReturnToRootList = true
+            }
+            workTask = Task { await self.loadNFSFolders(path: item.path) }
+        case .webDAV:
+            workTask = Task { await self.loadWebDAVFolders(path: item.path) }
+        case .sftp:
+            workTask = Task { await self.loadSFTPFolders(path: item.path) }
+        case .ftp:
+            workTask = Task { await self.loadFTPFolders(path: item.path) }
+        }
+    }
+
+    public func browseManualLocation() {
+        let entered = manualShare.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entered.isEmpty, hasValidPathComponents(entered) else { return }
+        workTask?.cancel()
+        switch selectedTransport {
+        case .smb:
+            let path = normalizedRelativePath(entered)
+            guard let share = path.split(
+                separator: "/",
+                omittingEmptySubsequences: true
+            ).first.map(String.init) else { return }
+            selectedSMBShare = share
+            minimumBrowsePath = path
+            canReturnToRootList = false
+            workTask = Task { await self.loadSMBFolders(path: path) }
+        case .nfs:
+            let path = normalizedAbsolutePath(entered)
+            selectedNFSExport = path
+            minimumBrowsePath = path
+            canReturnToRootList = false
+            workTask = Task { await self.loadNFSFolders(path: path) }
+        case .webDAV, .sftp, .ftp:
+            break
+        }
+    }
+
+    public func useCurrentFolder() {
+        switch selectedTransport {
+        case .smb:
+            chooseSMBShare(currentPath)
+        case .nfs, .sftp, .ftp:
+            chooseFilesystemRoot()
+        case .webDAV:
+            chooseWebDAVFolder(currentPath)
+        }
+    }
+
+    public func navigateUp() {
+        guard canNavigateUp else { return }
+        workTask?.cancel()
+        switch selectedTransport {
+        case .smb:
+            if currentPath == minimumBrowsePath {
+                loadSMBShares()
+            } else {
+                let parent = parentPath(currentPath, absolute: false)
+                workTask = Task {
+                    await self.loadSMBFolders(path: parent)
+                }
+            }
+        case .nfs:
+            if currentPath == minimumBrowsePath {
+                selectedNFSExport = nil
+                workTask = Task { await self.loadNFSExports() }
+            } else {
+                let parent = parentPath(currentPath, absolute: true)
+                workTask = Task {
+                    await self.loadNFSFolders(path: parent)
+                }
+            }
+        case .webDAV:
+            workTask = Task {
+                await self.loadWebDAVFolders(
+                    path: parentPath(currentPath, absolute: true)
+                )
+            }
+        case .sftp:
+            workTask = Task {
+                await self.loadSFTPFolders(
+                    path: parentPath(currentPath, absolute: true)
+                )
+            }
+        case .ftp:
+            workTask = Task {
+                await self.loadFTPFolders(
+                    path: parentPath(currentPath, absolute: true)
+                )
+            }
+        }
+    }
+
+    public func retryLocations() {
+        workTask?.cancel()
+        switch selectedTransport {
+        case .smb:
+            if selectedSMBShare == nil {
+                loadSMBShares()
+            } else {
+                workTask = Task {
+                    await self.loadSMBFolders(path: currentPath)
+                }
+            }
+        case .nfs:
+            if selectedNFSExport == nil {
+                workTask = Task { await self.loadNFSExports() }
+            } else {
+                workTask = Task {
+                    await self.loadNFSFolders(path: currentPath)
+                }
+            }
+        case .webDAV:
+            workTask = Task {
+                await self.loadWebDAVFolders(path: currentPath)
+            }
+        case .sftp:
+            workTask = Task {
+                await self.loadSFTPFolders(path: currentPath)
+            }
+        case .ftp:
+            workTask = Task {
+                await self.loadFTPFolders(path: currentPath)
+            }
+        }
     }
 
     // MARK: - Back navigation
@@ -1093,6 +1560,89 @@ public final class UnifiedAddShareModel {
         workTask?.cancel()
         step = .connect
         locations = []; locationLoad = .idle
+        currentPath = "/"
+        confirmedPath = "/"
+        selectedSMBShare = nil
+        selectedNFSExport = nil
+        minimumBrowsePath = "/"
+        canReturnToRootList = false
+    }
+
+    private func normalizedAbsolutePath(_ path: String) -> String {
+        let normalized = normalizedRelativePath(path)
+        return normalized.isEmpty ? "/" : "/\(normalized)"
+    }
+
+    private static let webDAVPathSegmentAllowed = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
+    private func normalizedWebDAVPath(_ path: String) -> String {
+        let encodedSegments = path
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+            .map { segment in
+                let decoded = segment.removingPercentEncoding ?? segment
+                return decoded.addingPercentEncoding(
+                    withAllowedCharacters: Self.webDAVPathSegmentAllowed
+                ) ?? segment
+            }
+        return encodedSegments.isEmpty
+            ? "/"
+            : "/" + encodedSegments.joined(separator: "/")
+    }
+
+    private func normalizedRelativePath(_ path: String) -> String {
+        path.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .joined(separator: "/")
+    }
+
+    private func hasValidPathComponents(_ path: String) -> Bool {
+        guard !path.contains("\0") else { return false }
+        return path.replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .allSatisfy { $0 != "." && $0 != ".." }
+    }
+
+    private func joinedSMBPath(share: String, subpath: String) -> String {
+        let normalizedSubpath = normalizedRelativePath(subpath)
+        return normalizedSubpath.isEmpty
+            ? normalizedRelativePath(share)
+            : "\(normalizedRelativePath(share))/\(normalizedSubpath)"
+    }
+
+    private func relativePath(_ path: String, below root: String) -> String? {
+        let path = normalizedAbsolutePath(path)
+        let root = normalizedAbsolutePath(root)
+        guard isSameOrDescendant(path, of: root) else { return nil }
+        guard path != root else { return "" }
+        let prefix = root == "/" ? "/" : root + "/"
+        return String(path.dropFirst(prefix.count))
+    }
+
+    private func isSameOrDescendant(
+        _ path: String,
+        of root: String,
+        separator: Character = "/"
+    ) -> Bool {
+        guard path != root else { return true }
+        let prefix = root == String(separator)
+            ? String(separator)
+            : root + String(separator)
+        return path.hasPrefix(prefix)
+    }
+
+    private func parentPath(_ path: String, absolute: Bool) -> String {
+        let normalized = absolute
+            ? normalizedAbsolutePath(path)
+            : normalizedRelativePath(path)
+        guard let separator = normalized.lastIndex(of: "/") else {
+            return absolute ? "/" : normalized
+        }
+        let parent = String(normalized[..<separator])
+        return parent.isEmpty && absolute ? "/" : parent
     }
 
     // MARK: - Copy

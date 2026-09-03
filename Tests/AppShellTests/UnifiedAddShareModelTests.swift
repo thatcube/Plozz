@@ -2,6 +2,8 @@ import XCTest
 import Foundation
 import CoreModels
 import ProviderShare
+import MediaTransportHTTP
+import MediaTransportWebDAV
 import MediaTransportSFTP
 import MediaTransportFTP
 import MediaTransportNFS
@@ -64,6 +66,97 @@ final class UnifiedAddShareModelTests: XCTestCase {
         XCTAssertNotNil(model.plaintextWarning)
     }
 
+    func testManualWebDAVPathIsTheBrowseBoundary() async {
+        let model = UnifiedAddShareModel(
+            webDAVProbe: StubWebDAVProbe()
+        )
+        model.openManualConnect()
+        model.applyTransport(.webDAV)
+        model.address = "https://nas.local/dav/movies/"
+
+        model.connect()
+        for _ in 0..<50 {
+            if model.step == .pickLocation { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(model.currentPath, "/dav/movies")
+        XCTAssertFalse(model.canNavigateUp)
+    }
+
+    func testBracketedIPv6WebDAVAddressRoundTrips() async {
+        let model = UnifiedAddShareModel(
+            webDAVProbe: StubWebDAVProbe()
+        )
+        var configuration: WebDAVShareConfiguration?
+        model.onWebDAVConfigured = { configuration = $0 }
+        model.openManualConnect()
+        model.applyTransport(.webDAV)
+        model.address = "https://[2001:db8::1]/dav"
+
+        model.connect()
+        for _ in 0..<50 {
+            if model.step == .pickLocation { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.useCurrentFolder()
+
+        XCTAssertEqual(
+            configuration?.baseURL.absoluteString,
+            "https://[2001:db8::1]/dav"
+        )
+    }
+
+    func testExplicitHTTPUsesHTTPDefaultInsteadOfSuggestedHTTPSPort() async {
+        let model = UnifiedAddShareModel(
+            webDAVProbe: StubWebDAVProbe()
+        )
+        var configuration: WebDAVShareConfiguration?
+        model.onWebDAVConfigured = { configuration = $0 }
+        model.openManualConnect()
+        model.applyTransport(.webDAV)
+        XCTAssertEqual(model.portText, "443")
+        model.address = "http://nas.local/dav"
+
+        model.connect()
+        for _ in 0..<50 {
+            if model.step == .pickLocation { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.useCurrentFolder()
+
+        XCTAssertEqual(
+            configuration?.baseURL.absoluteString,
+            "http://nas.local/dav"
+        )
+    }
+
+    func testInvalidPortDisablesConnect() {
+        let model = UnifiedAddShareModel()
+        model.openManualConnect()
+        model.address = "nas.local"
+        model.portText = "70000"
+        XCTAssertFalse(model.canConnect)
+        model.portText = "not-a-port"
+        XCTAssertFalse(model.canConnect)
+    }
+
+    func testChangingProtocolCancelsStaleConnectionResult() async {
+        let model = UnifiedAddShareModel(
+            webDAVProbe: DelayedWebDAVProbe()
+        )
+        model.openManualConnect()
+        model.applyTransport(.webDAV)
+        model.address = "https://nas.local/dav"
+        model.connect()
+
+        model.applyTransport(.smb)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+
+        XCTAssertEqual(model.selectedTransport, .smb)
+        XCTAssertEqual(model.step, .connect)
+    }
+
     private struct HTTPOnlyServiceProbe: MediaShareServiceProbing {
         func confirms(
             host: String,
@@ -71,6 +164,53 @@ final class UnifiedAddShareModelTests: XCTestCase {
             timeout: TimeInterval
         ) async -> Bool {
             target.probe == .webDAVHTTP
+        }
+    }
+
+    private struct StubWebDAVProbe: WebDAVOnboardingProbing {
+        func preflightTrust(url: URL) async -> WebDAVTrustPreflight {
+            .systemTrusted
+        }
+
+        func validate(
+            url: URL,
+            credential: WebDAVCredential,
+            trust: WebDAVOnboardingTrust
+        ) async -> Result<Void, WebDAVOnboardingError> {
+            .success(())
+        }
+
+        func listFolders(
+            url: URL,
+            path: String,
+            credential: WebDAVCredential,
+            trust: WebDAVOnboardingTrust
+        ) async -> Result<[WebDAVOnboardingFolder], WebDAVOnboardingError> {
+            .success([])
+        }
+    }
+
+    private struct DelayedWebDAVProbe: WebDAVOnboardingProbing {
+        func preflightTrust(url: URL) async -> WebDAVTrustPreflight {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            return .systemTrusted
+        }
+
+        func validate(
+            url: URL,
+            credential: WebDAVCredential,
+            trust: WebDAVOnboardingTrust
+        ) async -> Result<Void, WebDAVOnboardingError> {
+            .success(())
+        }
+
+        func listFolders(
+            url: URL,
+            path: String,
+            credential: WebDAVCredential,
+            trust: WebDAVOnboardingTrust
+        ) async -> Result<[WebDAVOnboardingFolder], WebDAVOnboardingError> {
+            .success([])
         }
     }
 
@@ -99,13 +239,63 @@ final class UnifiedAddShareModelTests: XCTestCase {
 
         model.displayName = "Movies"
         model.chooseNFSExport("/volume1/Media")
+        for _ in 0..<50 {
+            if model.currentPath == "/volume1/Media" { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.useCurrentFolder()
 
         guard case let .nfs(config) = result else {
             return XCTFail("expected NFS result, got \(String(describing: result))")
         }
         XCTAssertEqual(config.host, "192.168.1.5")
         XCTAssertEqual(config.exportPath, "/volume1/Media")
+        XCTAssertEqual(config.subpath, "")
         XCTAssertEqual(config.displayName, "Movies")
+    }
+
+    func testNFSExportCanDrillIntoNestedFolderWithoutChangingMountRoot() async {
+        let probe = StubNFSProbe(
+            exports: .success([
+                NFSDirectoryItem(name: "/volume1/Media", path: "/volume1/Media")
+            ]),
+            directories: .success([
+                NFSDirectoryItem(
+                    name: "Movies",
+                    path: "/volume1/Media/Movies"
+                )
+            ])
+        )
+        let model = UnifiedAddShareModel(nfsProbe: probe)
+        var result: MediaShareOnboardingResult?
+        model.onMediaShareConfigured = { result = $0 }
+
+        model.openManualConnect()
+        model.applyTransport(.nfs)
+        model.address = "nas.local"
+        model.connect()
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        model.selectLocation(model.locations[0])
+        for _ in 0..<50 {
+            if model.currentPath == "/volume1/Media" { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.selectLocation(model.locations[0])
+        for _ in 0..<50 {
+            if model.currentPath == "/volume1/Media/Movies" { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.useCurrentFolder()
+
+        guard case let .nfs(config) = result else {
+            return XCTFail("expected NFS result, got \(String(describing: result))")
+        }
+        XCTAssertEqual(config.exportPath, "/volume1/Media")
+        XCTAssertEqual(config.subpath, "Movies")
     }
 
     func testNFSFallsBackToManualExportWhenListingBlocked() async {
@@ -134,6 +324,82 @@ final class UnifiedAddShareModelTests: XCTestCase {
             return XCTFail("expected NFS result, got \(String(describing: result))")
         }
         XCTAssertEqual(config.exportPath, "/volume1/Media")
+        XCTAssertEqual(config.subpath, "")
+    }
+
+    func testSMBShareCanDrillIntoNestedFolderAndPreservesPathCase() async {
+        let probe = StubSMBProbe(
+            shares: .success([
+                SMBOnboardingLocation(name: "Multimedia", path: "Multimedia")
+            ]),
+            directories: .success([
+                SMBOnboardingLocation(name: "Movies", path: "Movies")
+            ])
+        )
+        let model = UnifiedAddShareModel(smbProbe: probe)
+        var draft: ShareDraft?
+        model.onSMBConfigured = { draft = $0 }
+
+        model.openManualConnect()
+        model.address = "nas.local"
+        model.connect()
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        model.selectLocation(model.locations[0])
+        for _ in 0..<50 {
+            if model.currentPath == "Multimedia" { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.selectLocation(model.locations[0])
+        for _ in 0..<50 {
+            if model.currentPath == "Multimedia/Movies" { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        model.useCurrentFolder()
+
+        XCTAssertEqual(draft?.share, "Multimedia")
+        XCTAssertEqual(draft?.subpath, "Movies")
+    }
+
+    func testEmptySMBEnumerationStillOffersManualRootEntry() async {
+        let model = UnifiedAddShareModel(smbProbe: StubSMBProbe())
+        model.openManualConnect()
+        model.address = "nas.local"
+        model.connect()
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertTrue(model.locations.isEmpty)
+        XCTAssertTrue(model.showsManualRootEntry)
+    }
+
+    func testRetryUsesInitiallyEnteredSMBNestedRoot() async {
+        let probe = FlakySMBProbe()
+        let model = UnifiedAddShareModel(smbProbe: probe)
+
+        model.openManualConnect()
+        model.address = "smb://nas.local/Multimedia/Movies"
+        model.connect()
+        for _ in 0..<50 {
+            if model.locationLoad == .unreachable { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(model.currentPath, "Multimedia/Movies")
+        model.retryLocations()
+        for _ in 0..<50 {
+            if model.locationLoad == .loaded { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(model.locationLoad, .loaded)
+        XCTAssertEqual(probe.directoryCallCount, 2)
+        XCTAssertFalse(model.canNavigateUp)
     }
 
     func testFTPAnonymousBuildsPlainFTPURL() async {
@@ -416,6 +682,64 @@ final class UnifiedAddShareModelTests: XCTestCase {
             relativePath: String
         ) async -> NFSDirectoryListing {
             directories
+        }
+    }
+
+    private struct StubSMBProbe: SMBOnboardingProbing {
+        var shares: SMBOnboardingListing = .success([])
+        var directories: SMBOnboardingListing = .success([])
+
+        func listShares(
+            host: String,
+            port: Int?,
+            username: String,
+            password: String
+        ) async -> SMBOnboardingListing {
+            shares
+        }
+
+        func listDirectories(
+            host: String,
+            port: Int?,
+            share: String,
+            username: String,
+            password: String,
+            relativePath: String
+        ) async -> SMBOnboardingListing {
+            directories
+        }
+    }
+
+    private final class FlakySMBProbe: SMBOnboardingProbing, @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0
+
+        var directoryCallCount: Int {
+            lock.withLock { calls }
+        }
+
+        func listShares(
+            host: String,
+            port: Int?,
+            username: String,
+            password: String
+        ) async -> SMBOnboardingListing {
+            .success([])
+        }
+
+        func listDirectories(
+            host: String,
+            port: Int?,
+            share: String,
+            username: String,
+            password: String,
+            relativePath: String
+        ) async -> SMBOnboardingListing {
+            let call = lock.withLock {
+                calls += 1
+                return calls
+            }
+            return call == 1 ? .unreachable : .success([])
         }
     }
 }

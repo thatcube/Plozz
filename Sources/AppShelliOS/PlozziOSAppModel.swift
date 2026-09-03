@@ -28,6 +28,8 @@ import UIKit
 @MainActor
 @Observable
 final class PlozziOSAppModel {
+    static let shared = PlozziOSAppModel()
+
     private struct HeroTrailerCacheEntry {
         let source: HeroTrailerSource?
         let expiresAt: Date
@@ -280,9 +282,16 @@ final class PlozziOSAppModel {
     let crashReportingController: CrashReportingController
     let requiresLaunchProfileSelection: Bool
     private(set) var settings: PlozziOSSettingsModel
+    @ObservationIgnored
     private var backgroundWorkRevision: UInt64 = 0
     @ObservationIgnored
     private var applicationIsActive = true
+    @ObservationIgnored
+    private var activeSceneIDs = Set<UUID>()
+    @ObservationIgnored
+    private var hasObservedSceneActivity = false
+    @ObservationIgnored
+    private var lifecycleTransitionTask: Task<Void, Never>?
     @ObservationIgnored
     private var downloadProfileGeneration = 0
     private(set) var seriesTrackStore: SeriesTrackPreferenceStore
@@ -829,12 +838,50 @@ final class PlozziOSAppModel {
         mediaShareRescanService.rescan(accountID: accountID)
     }
 
-    func setBackgroundWorkAllowed(_ allowed: Bool) {
-        applicationIsActive = allowed
+    func setScene(_ sceneID: UUID, isActive: Bool) {
+        if isActive {
+            activeSceneIDs.insert(sceneID)
+        } else {
+            activeSceneIDs.remove(sceneID)
+        }
+        scheduleApplicationActivity(active: !activeSceneIDs.isEmpty)
+    }
+
+    func removeScene(_ sceneID: UUID) {
+        activeSceneIDs.remove(sceneID)
+        scheduleApplicationActivity(active: !activeSceneIDs.isEmpty)
+    }
+
+    private func scheduleApplicationActivity(active: Bool) {
+        guard !hasObservedSceneActivity || applicationIsActive != active else {
+            return
+        }
+        hasObservedSceneActivity = true
+        applicationIsActive = active
         backgroundWorkRevision &+= 1
         let revision = backgroundWorkRevision
-        Task { [mediaShareRuntime] in
-            await mediaShareRuntime.setBackgroundWorkAllowed(allowed, revision: revision)
+        let previousTransition = lifecycleTransitionTask
+        previousTransition?.cancel()
+
+        let suspensionLease = active ? nil : PlozziOSBackgroundTaskLease(
+            name: "Plozz suspension drain"
+        ) { [weak self] in
+            guard let self, self.backgroundWorkRevision == revision else { return }
+            PlozzLog.boot("ios.lifecycle suspension drain expired revision=\(revision)")
+            self.lifecycleTransitionTask?.cancel()
+        }
+        let mediaShareRuntime = mediaShareRuntime
+        let downloads = downloads
+        lifecycleTransitionTask = Task { @MainActor [weak self] in
+            defer { suspensionLease?.end() }
+            await previousTransition?.value
+            guard let self, self.backgroundWorkRevision == revision else { return }
+
+            async let mediaShareTransition: Void =
+                mediaShareRuntime.setBackgroundWorkAllowed(active, revision: revision)
+            async let downloadTransition: Void =
+                downloads.setApplicationActive(active)
+            _ = await (mediaShareTransition, downloadTransition)
         }
     }
 
@@ -2584,12 +2631,48 @@ final class PlozziOSAppModel {
     }
 }
 
+@MainActor
+private final class PlozziOSBackgroundTaskLease {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+    private let expiration: @MainActor @Sendable () -> Void
+
+    init(
+        name: String,
+        expiration: @escaping @MainActor @Sendable () -> Void
+    ) {
+        self.expiration = expiration
+        identifier = UIApplication.shared.beginBackgroundTask(
+            withName: name
+        ) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.expiration()
+                self.end()
+            }
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        let ending = identifier
+        identifier = .invalid
+        UIApplication.shared.endBackgroundTask(ending)
+    }
+}
+
 private struct PlozziOSMediaShareArtworkCacheLifecycle:
     ShareLocalArtworkCacheLifecycle
 {
     func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
         await ArtworkImageCache.shared.setPreferredNetworkArtworkAccounts(
             accountKeys,
+            revision: revision
+        )
+    }
+
+    func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {
+        await ArtworkImageCache.shared.setBackgroundWorkAllowed(
+            allowed,
             revision: revision
         )
     }

@@ -159,11 +159,32 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     public func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {
         guard revision > backgroundWorkRevision else { return }
         backgroundWorkRevision = revision
-        guard backgroundWorkAllowed != allowed else { return }
         backgroundWorkAllowed = allowed
 
         if allowed {
+            for (accountKey, runtime) in runtimes {
+                await runtime.store.resumeAfterSuspension(revision: revision)
+                guard revision == backgroundWorkRevision, backgroundWorkAllowed else {
+                    return
+                }
+                if let credentialRevision = runtime.scannerRevision {
+                    await runtime.store.configureArtworkReferenceContext(
+                        accountID: accountKey,
+                        credentialRevision: credentialRevision
+                    )
+                    guard revision == backgroundWorkRevision, backgroundWorkAllowed else {
+                        return
+                    }
+                }
+            }
+            await artworkCacheLifecycle.setBackgroundWorkAllowed(true, revision: revision)
+            guard revision == backgroundWorkRevision, backgroundWorkAllowed else {
+                return
+            }
             await metadataScheduler.setBackgroundWorkAllowed(true, revision: revision)
+            guard revision == backgroundWorkRevision, backgroundWorkAllowed else {
+                return
+            }
             await resumePendingForegroundScans()
             return
         }
@@ -194,10 +215,22 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             }
         }
 
-        async let metadataPause: Void = metadataScheduler.setBackgroundWorkAllowed(
+        // Cancel and drain metadata before the catalog gate. Otherwise a worker can
+        // observe the gated store as an empty backlog and incorrectly mark its
+        // durable pass complete instead of preserving it for foreground resume.
+        await metadataScheduler.setBackgroundWorkAllowed(
             false,
             revision: revision
         )
+
+        // Fence SQLite before waiting on network shutdown. Closing an SMB/NFS lister
+        // can stall, but once the stores and derived-artwork manifest are suspended,
+        // that stall cannot leave a local database lock held when the process sleeps.
+        for runtime in runtimes.values {
+            await runtime.store.prepareForSuspension(revision: revision)
+        }
+        await artworkCacheLifecycle.setBackgroundWorkAllowed(false, revision: revision)
+
         await withTaskGroup(of: Void.self) { group in
             for scanner in scanners {
                 group.addTask {
@@ -208,7 +241,6 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 }
             }
         }
-        await metadataPause
         for task in tasks {
             await task.value
         }
@@ -285,6 +317,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 return created
             }()
             let store = runtime.store
+            if backgroundWorkAllowed {
+                await store.resumeAfterSuspension(revision: backgroundWorkRevision)
+            } else {
+                await store.prepareForSuspension(revision: backgroundWorkRevision)
+            }
             await store.configureArtworkReferenceContext(
                 accountID: accountKey,
                 credentialRevision: credentialRevision

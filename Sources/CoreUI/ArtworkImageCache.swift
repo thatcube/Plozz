@@ -376,6 +376,13 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         await derivedCache.setPreferredAccounts(accounts, revision: revision)
     }
 
+    public func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {
+        if !allowed {
+            cancelBackgroundPrefetches()
+        }
+        await derivedCache.setBackgroundWorkAllowed(allowed, revision: revision)
+    }
+
     /// Current size in bytes of the derived-artwork cache (Step 6 diagnostics).
     public func derivedArtworkCacheByteSize() async -> Int {
         await derivedCache.currentByteSize()

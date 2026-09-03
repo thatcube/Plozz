@@ -23,6 +23,8 @@ public actor LocalArtworkDerivedCache {
     private var db: OpaquePointer?
     private var preferredAccounts = Set<String>()
     private var preferenceRevision: UInt64 = 0
+    private var lifecycleRevision: UInt64 = 0
+    private var backgroundWorkAllowed = true
 
     public init(directory: URL? = nil) {
         let base = directory ?? FileManager.default.urls(
@@ -53,7 +55,7 @@ public actor LocalArtworkDerivedCache {
     }
 
     deinit {
-        if let db { sqlite3_close(db) }
+        if let db { sqlite3_close_v2(db) }
     }
 
     /// A stale profile update cannot reverse a newer eviction preference.
@@ -65,6 +67,32 @@ public actor LocalArtworkDerivedCache {
 
     func preferredAccountsForTesting() -> Set<String> {
         preferredAccounts
+    }
+
+    /// Closes the manifest database while inactive so an image decode finishing
+    /// late cannot leave SQLite holding a lock when the process is suspended.
+    public func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) {
+        guard revision >= lifecycleRevision else { return }
+        lifecycleRevision = revision
+        backgroundWorkAllowed = allowed
+        guard !allowed, let db else { return }
+        if sqlite3_get_autocommit(db) == 0 {
+            _ = sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+        }
+        var closeResult = sqlite3_close(db)
+        if closeResult == SQLITE_BUSY {
+            while let statement = sqlite3_next_stmt(db, nil) {
+                sqlite3_finalize(statement)
+            }
+            closeResult = sqlite3_close(db)
+        }
+        if closeResult == SQLITE_OK {
+            self.db = nil
+        }
+    }
+
+    func backgroundWorkAllowedForTesting() -> Bool {
+        backgroundWorkAllowed
     }
 
     public func data(
@@ -200,6 +228,7 @@ public actor LocalArtworkDerivedCache {
     }
 
     private func open() -> Bool {
+        guard backgroundWorkAllowed else { return false }
         if db != nil { return true }
         do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
         catch { return false }

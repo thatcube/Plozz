@@ -10,6 +10,13 @@ import CoreNetworking
 /// it keeps the raw SQLite mechanics out of `ShareCatalogStore`'s query/orchestration
 /// responsibilities without introducing a second connection or actor.
 final class CatalogConnection {
+    enum ImmediateTransactionResult {
+        case committed
+        case couldNotBegin
+        case cancelled
+        case rolledBack
+    }
+
     private let url: URL
     private(set) var db: OpaquePointer?
     private var didOpen = false
@@ -23,7 +30,7 @@ final class CatalogConnection {
     }
 
     deinit {
-        if let db { sqlite3_close(db) }
+        if let db { sqlite3_close_v2(db) }
     }
 
     // MARK: - Open / schema
@@ -48,17 +55,12 @@ final class CatalogConnection {
         db = handle
         _ = exec("PRAGMA journal_mode=WAL;")
         _ = exec("PRAGMA synchronous=NORMAL;")
-        guard exec("BEGIN IMMEDIATE;") else {
-            sqlite3_close(handle)
-            db = nil
-            didOpen = false
-            return false
-        }
         var migrationSucceeded = true
-        func apply(_ sql: String) {
-            if !exec(sql) { migrationSucceeded = false }
-        }
-        apply("""
+        let transactionResult = immediateTransaction {
+            func apply(_ sql: String) {
+                if !exec(sql) { migrationSucceeded = false }
+            }
+            apply("""
         CREATE TABLE IF NOT EXISTS assets(
             rel_path    TEXT PRIMARY KEY,
             basename    TEXT NOT NULL,
@@ -390,16 +392,93 @@ final class CatalogConnection {
             INSERT OR REPLACE INTO meta(key, value)
             VALUES('enrichment_attempts_repaired_v1', '1');
             """)
+            }
+            return migrationSucceeded
         }
-        if migrationSucceeded, exec("COMMIT;") {
+        if transactionResult == .committed {
             return true
         }
-        _ = exec("ROLLBACK;")
         PlozzLog.boot("share.catalog MIGRATION FAILED file=\(url.lastPathComponent)")
+        if transactionResult == .couldNotBegin || transactionResult == .cancelled {
+            _ = closeForSuspension()
+        }
         return false
     }
 
     // MARK: - Small SQLite helpers
+
+    var isInTransaction: Bool {
+        guard let db else { return false }
+        return sqlite3_get_autocommit(db) == 0
+    }
+
+    /// Runs one synchronous write transaction and guarantees that every exit other
+    /// than a successful commit rolls back. Callers remain actor-confined by the
+    /// owning `ShareCatalogStore`, so the body cannot interleave with another writer.
+    @discardableResult
+    func withImmediateTransaction(_ body: () -> Bool) -> Bool {
+        immediateTransaction(body) == .committed
+    }
+
+    @discardableResult
+    func immediateTransaction(_ body: () -> Bool) -> ImmediateTransactionResult {
+        guard !Task.isCancelled, !isInTransaction, exec("BEGIN IMMEDIATE;") else {
+            return .couldNotBegin
+        }
+        if let db {
+            sqlite3_progress_handler(db, 1_000, { _ in
+                withUnsafeCurrentTask { task in
+                    task?.isCancelled == true
+                } ? 1 : 0
+            }, nil)
+        }
+        var committed = false
+        defer {
+            if let db {
+                sqlite3_progress_handler(db, 0, nil, nil)
+            }
+            if !committed {
+                _ = exec("ROLLBACK;")
+            }
+        }
+        guard body() else {
+            return Task.isCancelled ? .cancelled : .rolledBack
+        }
+        guard !Task.isCancelled else { return .cancelled }
+        committed = exec("COMMIT;")
+        if committed { return .committed }
+        return Task.isCancelled ? .cancelled : .rolledBack
+    }
+
+    /// Relinquishes every SQLite lock before application suspension. A failed write
+    /// may leave SQLite inside its transaction after `COMMIT` returns an error, so
+    /// rollback is based on SQLite's autocommit state rather than caller bookkeeping.
+    @discardableResult
+    func closeForSuspension() -> Bool {
+        guard let db else {
+            didOpen = false
+            return true
+        }
+        if isInTransaction, !exec("ROLLBACK;") {
+            PlozzLog.boot("share.catalog SUSPEND ROLLBACK FAILED file=\(url.lastPathComponent)")
+        }
+        var result = sqlite3_close(db)
+        if result == SQLITE_BUSY {
+            while let statement = sqlite3_next_stmt(db, nil) {
+                sqlite3_finalize(statement)
+            }
+            result = sqlite3_close(db)
+        }
+        guard result == SQLITE_OK else {
+            PlozzLog.boot(
+                "share.catalog SUSPEND CLOSE FAILED file=\(url.lastPathComponent) code=\(result)"
+            )
+            return false
+        }
+        self.db = nil
+        didOpen = false
+        return true
+    }
 
     @discardableResult
     func exec(_ sql: String) -> Bool {

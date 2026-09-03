@@ -29,6 +29,13 @@ private struct MediaShareLocalArtworkCacheLifecycle: ShareLocalArtworkCacheLifec
         )
     }
 
+    func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {
+        await ArtworkImageCache.shared.setBackgroundWorkAllowed(
+            allowed,
+            revision: revision
+        )
+    }
+
     func purge(accountID: String) async {
         await ArtworkImageCache.shared.purgeNetworkArtwork(accountID: accountID)
     }

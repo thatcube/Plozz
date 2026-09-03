@@ -17,7 +17,8 @@ public struct PlozziOSRootView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency)
     private var systemReduceTransparency
-    @State private var appModel = PlozziOSAppModel()
+    @State private var appModel = PlozziOSAppModel.shared
+    @State private var sceneID = UUID()
     @State private var heroTrailerController = HeroTrailerController()
     @State private var sidebarGeometry = PlozziOSSidebarGeometryModel()
     @State private var showingAddServer = false
@@ -166,17 +167,15 @@ public struct PlozziOSRootView: View {
             )
             .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         }
-        .task(id: scenePhase) {
-            appModel.setBackgroundWorkAllowed(scenePhase == .active)
-            await appModel.downloads.setApplicationActive(
-                scenePhase == .active
-            )
-        }
-        .onChange(of: scenePhase) { _, newPhase in
+        .onChange(of: scenePhase, initial: true) { _, newPhase in
+            appModel.setScene(sceneID, isActive: newPhase == .active)
             if newPhase == .active {
                 appModel.accountsProviders.retryUnconfirmedCredentials()
                 appModel.syncCloudOnForeground()
             }
+        }
+        .onDisappear {
+            appModel.removeScene(sceneID)
         }
         .alert(
             syncSetupOfferTitle,

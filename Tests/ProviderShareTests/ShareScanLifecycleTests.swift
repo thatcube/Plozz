@@ -317,13 +317,18 @@ final class ShareScanLifecycleTests: XCTestCase {
             accountID: accountID, revision: revision, controller: controller
         )
 
-        _ = await coordinator.store(
+        let store = await coordinator.store(
             accountKey: accountID, displayName: "NAS",
             credentialRevision: revision, sessionFactory: factory
         )
         await controller.waitUntilListing()
 
         await coordinator.setBackgroundWorkAllowed(false)
+        let suspended = await store.isSuspendedForTesting()
+        XCTAssertTrue(
+            suspended,
+            "inactive transition must close and gate the catalog before returning"
+        )
         let stopped = await poll {
             diagnostics.records.contains { $0.owner == .applicationInactive }
         }
@@ -342,12 +347,46 @@ final class ShareScanLifecycleTests: XCTestCase {
         )
 
         await coordinator.setBackgroundWorkAllowed(true)
+        let resumedStore = await store.isSuspendedForTesting()
+        XCTAssertFalse(
+            resumedStore,
+            "foreground transition must reopen catalog admission before resuming scans"
+        )
         let resumed = await poll { controller.rootLists > rootListsWhileInactive }
         XCTAssertTrue(
             resumed,
             "returning active must resume the interrupted durable scan"
         )
 
+        await coordinator.invalidate(accountKey: accountID)
+    }
+
+    func testRuntimeCreatedWhileInactiveStartsSuspended() async throws {
+        let accountID = "created-inactive-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let controller = LifecycleListController(blocksRoot: false)
+        let coordinator = makeCoordinator(diagnostics: ScanDiagnosticsSpy())
+        let factory = makeSessionFactory(
+            accountID: accountID, revision: revision, controller: controller
+        )
+
+        await coordinator.setBackgroundWorkAllowed(false, revision: 1)
+        let store = await coordinator.store(
+            accountKey: accountID,
+            displayName: "NAS",
+            credentialRevision: revision,
+            sessionFactory: factory
+        )
+
+        let initiallySuspended = await store.isSuspendedForTesting()
+        XCTAssertTrue(initiallySuspended)
+        XCTAssertEqual(controller.rootLists, 0)
+
+        await coordinator.setBackgroundWorkAllowed(true, revision: 2)
+        let resumed = await store.isSuspendedForTesting()
+        XCTAssertFalse(resumed)
+        let scanned = await poll { controller.rootLists == 1 }
+        XCTAssertTrue(scanned)
         await coordinator.invalidate(accountKey: accountID)
     }
 

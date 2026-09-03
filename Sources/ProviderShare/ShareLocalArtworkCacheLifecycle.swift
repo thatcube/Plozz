@@ -5,6 +5,7 @@ import CoreModels
 /// dependency on AppShell or CoreUI.
 public protocol ShareLocalArtworkCacheLifecycle: Sendable {
     func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async
+    func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async
     func purge(accountID: String) async
     func purge(accountID: String, credentialRevision: CredentialRevision) async
 }
@@ -13,6 +14,7 @@ public struct NoopShareLocalArtworkCacheLifecycle: ShareLocalArtworkCacheLifecyc
     public init() {}
 
     public func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {}
+    public func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {}
     public func purge(accountID: String) async {}
     public func purge(accountID: String, credentialRevision: CredentialRevision) async {}
 }

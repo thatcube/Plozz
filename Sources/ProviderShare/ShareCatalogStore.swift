@@ -64,6 +64,8 @@ actor ShareCatalogStore {
         )
     }
     private var normalizedMetadataReady = false
+    private var lifecycleRevision: UInt64 = 0
+    private var isSuspended = false
     private var didEmitCatalogDiagnostics = false
     /// Cached "does ANY local (NFO/filename) metadata_values row exist" check —
     /// avoids a real query on every read-path call (`withLocalOverlay`/grid sort
@@ -123,6 +125,7 @@ actor ShareCatalogStore {
     /// metadata-values migration (a store-owned data concern) runs inside that same
     /// transaction via the supplied closure at its original point.
     private func ensureOpen() {
+        guard !isSuspended else { return }
         let becameReady = connection.ensureOpen(legacyMetadataMigration: { conn in
             guard !self.enrichmentRepo.metadataMigrationComplete() else { return true }
             guard self.enrichmentRepo.migrateLegacyEnrichmentMetadata(),
@@ -140,6 +143,27 @@ actor ShareCatalogStore {
         }
         emitCatalogDiagnosticsOnce()
     }
+
+    /// Prevents any late foreground worker from reopening the catalog, then closes
+    /// the actor-confined handle so suspension cannot catch SQLite holding a lock.
+    func prepareForSuspension(revision: UInt64) {
+        guard revision >= lifecycleRevision else { return }
+        lifecycleRevision = revision
+        isSuspended = true
+        pendingMergedSeriesLocalRepairs.removeAll()
+        localMetadataPresence.cached = nil
+        normalizedMetadataReady = false
+        _ = connection.closeForSuspension()
+    }
+
+    /// Re-enables lazy opening after the process has an active scene again.
+    func resumeAfterSuspension(revision: UInt64) {
+        guard revision >= lifecycleRevision else { return }
+        lifecycleRevision = revision
+        isSuspended = false
+    }
+
+    func isSuspendedForTesting() -> Bool { isSuspended }
 
     /// One-shot catalog telemetry, emitted the first time anything opens this
     /// store. Off unless the process was launched with `PLZXFAN_STDOUT=1`, so a
@@ -228,32 +252,48 @@ actor ShareCatalogStore {
             guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, assets.count)
             let chunkStarted = Date()
-            exec("BEGIN IMMEDIATE;")
-            for a in assets[index..<end] {
-                sqlite3_reset(stmt)
-                bindText(stmt, 1, a.relPath)
-                bindText(stmt, 2, a.basename)
-                sqlite3_bind_int64(stmt, 3, a.size)
-                sqlite3_bind_double(stmt, 4, a.modifiedAt.timeIntervalSince1970)
-                sqlite3_bind_double(stmt, 5, now.timeIntervalSince1970)
-                sqlite3_bind_int64(stmt, 6, scanID)
-                bindText(stmt, 7, a.kind.rawValue)
-                bindText(stmt, 8, a.library.rawValue)
-                bindText(stmt, 9, a.title)
-                let libraryTitle = a.kind == .episode ? (a.seriesTitle ?? a.title) : a.title
-                bindText(stmt, 10, ShareCatalogID.sortTitle(from: libraryTitle))
-                bindOptInt(stmt, 11, a.year)
-                bindOptText(stmt, 12, a.seriesTitle)
-                bindOptText(stmt, 13, a.seriesKey.map { ShareSeriesReconciler.resolveAlias($0, in: seriesAliases) })
-                bindOptInt(stmt, 14, a.season)
-                bindOptInt(stmt, 15, a.episode)
-                bindOptText(stmt, 16, a.movieKey)
-                bindOptText(stmt, 17, a.movieTitleKey)
-                bindOptText(stmt, 18, a.metadataRoot)
-                bindOptText(stmt, 19, a.explicitProviderIDs.isEmpty ? nil : encodeJSON(a.explicitProviderIDs))
-                _ = sqlite3_step(stmt)
+            let committed = connection.withImmediateTransaction {
+                for a in assets[index..<end] {
+                    guard !Task.isCancelled else { return false }
+                    sqlite3_reset(stmt)
+                    bindText(stmt, 1, a.relPath)
+                    bindText(stmt, 2, a.basename)
+                    sqlite3_bind_int64(stmt, 3, a.size)
+                    sqlite3_bind_double(stmt, 4, a.modifiedAt.timeIntervalSince1970)
+                    sqlite3_bind_double(stmt, 5, now.timeIntervalSince1970)
+                    sqlite3_bind_int64(stmt, 6, scanID)
+                    bindText(stmt, 7, a.kind.rawValue)
+                    bindText(stmt, 8, a.library.rawValue)
+                    bindText(stmt, 9, a.title)
+                    let libraryTitle = a.kind == .episode ? (a.seriesTitle ?? a.title) : a.title
+                    bindText(stmt, 10, ShareCatalogID.sortTitle(from: libraryTitle))
+                    bindOptInt(stmt, 11, a.year)
+                    bindOptText(stmt, 12, a.seriesTitle)
+                    bindOptText(
+                        stmt,
+                        13,
+                        a.seriesKey.map {
+                            ShareSeriesReconciler.resolveAlias($0, in: seriesAliases)
+                        }
+                    )
+                    bindOptInt(stmt, 14, a.season)
+                    bindOptInt(stmt, 15, a.episode)
+                    bindOptText(stmt, 16, a.movieKey)
+                    bindOptText(stmt, 17, a.movieTitleKey)
+                    bindOptText(stmt, 18, a.metadataRoot)
+                    bindOptText(
+                        stmt,
+                        19,
+                        a.explicitProviderIDs.isEmpty ? nil : encodeJSON(a.explicitProviderIDs)
+                    )
+                    guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+                }
+                return true
             }
-            exec("COMMIT;")
+            guard committed else {
+                PlozzLog.boot("share.catalog asset upsert rolled back count=\(end - index)")
+                return
+            }
             slowestChunkMs = max(slowestChunkMs, Int(Date().timeIntervalSince(chunkStarted) * 1_000))
             index = end
             if index < assets.count { await Task.yield() }
@@ -353,14 +393,22 @@ actor ShareCatalogStore {
             guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, plan.assignments.count)
             let chunkStarted = Date()
-            exec("BEGIN IMMEDIATE;")
-            for assignment in plan.assignments[index..<end] {
-                sqlite3_reset(stmt)
-                bindText(stmt, 1, assignment.group)
-                bindText(stmt, 2, assignment.relPath)
-                _ = sqlite3_step(stmt)
+            let committed = connection.withImmediateTransaction {
+                for assignment in plan.assignments[index..<end] {
+                    guard !Task.isCancelled else { return false }
+                    sqlite3_reset(stmt)
+                    bindText(stmt, 1, assignment.group)
+                    bindText(stmt, 2, assignment.relPath)
+                    guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+                }
+                return true
             }
-            exec("COMMIT;")
+            guard committed else {
+                PlozzLog.boot(
+                    "share.catalog movie regroup rolled back count=\(end - index)"
+                )
+                return
+            }
             slowestChunkMs = max(slowestChunkMs, Int(Date().timeIntervalSince(chunkStarted) * 1_000))
             index = end
             if index < plan.assignments.count { await Task.yield() }
@@ -375,22 +423,22 @@ actor ShareCatalogStore {
     func preserveMovieAliasesBeforePrune(scanGeneration: UUID? = nil) {
         ensureOpen()
         guard admits(scanGeneration), db != nil else { return }
-        exec("BEGIN IMMEDIATE;")
-        exec("""
-        INSERT INTO movie_alias(alias_id, group_key)
-        SELECT movie_key, COALESCE(movie_group_key, movie_key)
-        FROM assets
-        WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
-        ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
-        """)
-        exec("""
-        INSERT INTO movie_alias(alias_id, group_key)
-        SELECT 'f:' || rel_path, COALESCE(movie_group_key, movie_key)
-        FROM assets
-        WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
-        ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
-        """)
-        exec("COMMIT;")
+        _ = connection.withImmediateTransaction {
+            exec("""
+            INSERT INTO movie_alias(alias_id, group_key)
+            SELECT movie_key, COALESCE(movie_group_key, movie_key)
+            FROM assets
+            WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
+            ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+            """)
+                && exec("""
+                INSERT INTO movie_alias(alias_id, group_key)
+                SELECT 'f:' || rel_path, COALESCE(movie_group_key, movie_key)
+                FROM assets
+                WHERE library='movies' AND kind='movie' AND movie_key IS NOT NULL
+                ON CONFLICT(alias_id) DO UPDATE SET group_key=excluded.group_key;
+                """)
+        }
     }
 
     private func persistMovieAliases(
@@ -409,14 +457,17 @@ actor ShareCatalogStore {
         while index < aliases.count {
             guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, aliases.count)
-            exec("BEGIN IMMEDIATE;")
-            for alias in aliases[index..<end] {
-                sqlite3_reset(stmt)
-                bindText(stmt, 1, alias.id)
-                bindText(stmt, 2, alias.group)
-                _ = sqlite3_step(stmt)
+            let committed = connection.withImmediateTransaction {
+                for alias in aliases[index..<end] {
+                    guard !Task.isCancelled else { return false }
+                    sqlite3_reset(stmt)
+                    bindText(stmt, 1, alias.id)
+                    bindText(stmt, 2, alias.group)
+                    guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+                }
+                return true
             }
-            exec("COMMIT;")
+            guard committed else { return }
             index = end
             if index < aliases.count { await Task.yield() }
         }
@@ -465,9 +516,9 @@ actor ShareCatalogStore {
     /// Internal coordinator handoff. The public catalog reader contract stays frozen;
     /// this is available exactly where the account credential revision already exists.
     func configureArtworkReferenceContext(accountID: String, credentialRevision: CredentialRevision) {
+        artworkReferenceContext = (accountID, credentialRevision)
         ensureOpen()
         guard db != nil else { return }
-        artworkReferenceContext = (accountID, credentialRevision)
         let marker = opaqueArtworkRevision(
             accountID: accountID,
             path: Self.artworkReferenceContextMetaKey,
@@ -476,23 +527,18 @@ actor ShareCatalogStore {
         let markerIsCurrent = meta(Self.artworkReferenceContextMetaKey) == marker
 
         let itemIDs = allArtworkAssociatedItemIDs().sorted()
-        guard exec("BEGIN IMMEDIATE;"),
-              artworkRepo.ensureCatalogArtworkIDs() else {
-            _ = exec("ROLLBACK;")
-            return
-        }
-        if markerIsCurrent {
-            if !exec("COMMIT;") { _ = exec("ROLLBACK;") }
-            return
-        }
-        for itemID in itemIDs {
-            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
-                _ = exec("ROLLBACK;")
-                return
+        _ = connection.withImmediateTransaction {
+            guard artworkRepo.ensureCatalogArtworkIDs() else { return false }
+            if markerIsCurrent { return true }
+            for itemID in itemIDs {
+                guard !Task.isCancelled,
+                      materializeArtworkSelectionsInTransaction(
+                        itemID: itemID
+                      ) else { return false }
             }
+            setMeta(Self.artworkReferenceContextMetaKey, marker)
+            return true
         }
-        setMeta(Self.artworkReferenceContextMetaKey, marker)
-        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
     }
 
     func artworkLocator(for reference: NetworkArtworkReference) -> NetworkFileLocator? {
@@ -541,37 +587,46 @@ actor ShareCatalogStore {
         ensureOpen()
         guard db != nil else { return }
         let terminal = file.attempts + 1 >= Self.maxArtworkProbeAttempts
-        if terminal {
-            guard exec("BEGIN IMMEDIATE;") else { return }
-        }
-        let affected = terminal ? artworkAssociatedItemIDs(paths: [file.relPath]) : []
-        guard artworkRepo.updateProbe(
-            relPath: file.relPath,
-            fingerprint: file.fingerprint,
-            status: terminal ? "transientExhausted" : "pending",
-            probeVersion: nil,
-            width: nil,
-            height: nil,
-            contentType: nil,
-            incrementAttempts: true,
-            now: Date()
-        ) else {
-            if terminal { _ = exec("ROLLBACK;") }
+        guard terminal else {
+            _ = artworkRepo.updateProbe(
+                relPath: file.relPath,
+                fingerprint: file.fingerprint,
+                status: "pending",
+                probeVersion: nil,
+                width: nil,
+                height: nil,
+                contentType: nil,
+                incrementAttempts: true,
+                now: Date()
+            )
             return
         }
-        guard terminal else { return }
-        for itemID in affected.sorted() {
-            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
-                _ = exec("ROLLBACK;")
-                return
+        let affected = artworkAssociatedItemIDs(paths: [file.relPath])
+        _ = connection.withImmediateTransaction {
+            guard artworkRepo.updateProbe(
+                relPath: file.relPath,
+                fingerprint: file.fingerprint,
+                status: "transientExhausted",
+                probeVersion: nil,
+                width: nil,
+                height: nil,
+                contentType: nil,
+                incrementAttempts: true,
+                now: Date()
+            ) else { return false }
+            for itemID in affected.sorted() {
+                guard !Task.isCancelled,
+                      materializeArtworkSelectionsInTransaction(
+                        itemID: itemID
+                      ) else { return false }
             }
+            return true
         }
-        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
     }
 
     func resetArtworkProbeTransientFailures() {
         ensureOpen()
-        guard db != nil, exec("BEGIN IMMEDIATE;") else { return }
+        guard db != nil else { return }
         var affected = Set<String>()
         query("""
         SELECT DISTINCT a.item_id
@@ -581,17 +636,16 @@ actor ShareCatalogStore {
         """) { stmt in
             if let itemID = self.columnText(stmt, 0) { affected.insert(itemID) }
         }
-        guard artworkRepo.resetTransientProbeFailures() else {
-            _ = exec("ROLLBACK;")
-            return
-        }
-        for itemID in affected.sorted() {
-            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
-                _ = exec("ROLLBACK;")
-                return
+        _ = connection.withImmediateTransaction {
+            guard artworkRepo.resetTransientProbeFailures() else { return false }
+            for itemID in affected.sorted() {
+                guard !Task.isCancelled,
+                      materializeArtworkSelectionsInTransaction(
+                        itemID: itemID
+                      ) else { return false }
             }
+            return true
         }
-        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
     }
 
     /// Persist an inspected header only when the exact scanned fingerprint remains
@@ -601,7 +655,7 @@ actor ShareCatalogStore {
         result: ShareArtworkHeaderInspection
     ) {
         ensureOpen()
-        guard db != nil, exec("BEGIN IMMEDIATE;") else { return }
+        guard db != nil else { return }
         let affected = artworkAssociatedItemIDs(paths: [file.relPath])
         let update: (status: String, version: Int?, width: Int?, height: Int?, type: String?)
         switch result {
@@ -618,27 +672,26 @@ actor ShareCatalogStore {
         case .tooLarge:
             update = ("rejected", ShareLocalArtworkProbeWorker.version, nil, nil, nil)
         }
-        guard artworkRepo.updateProbe(
-            relPath: file.relPath,
-            fingerprint: file.fingerprint,
-            status: update.status,
-            probeVersion: update.version,
-            width: update.width,
-            height: update.height,
-            contentType: update.type,
-            incrementAttempts: false,
-            now: Date()
-        ) else {
-            _ = exec("ROLLBACK;")
-            return
-        }
-        for itemID in affected.sorted() {
-            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
-                _ = exec("ROLLBACK;")
-                return
+        _ = connection.withImmediateTransaction {
+            guard artworkRepo.updateProbe(
+                relPath: file.relPath,
+                fingerprint: file.fingerprint,
+                status: update.status,
+                probeVersion: update.version,
+                width: update.width,
+                height: update.height,
+                contentType: update.type,
+                incrementAttempts: false,
+                now: Date()
+            ) else { return false }
+            for itemID in affected.sorted() {
+                guard !Task.isCancelled,
+                      materializeArtworkSelectionsInTransaction(
+                        itemID: itemID
+                      ) else { return false }
             }
+            return true
         }
-        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
     }
 
     func upsertArtwork(
@@ -648,26 +701,24 @@ actor ShareCatalogStore {
         scanGeneration: UUID? = nil
     ) async {
         ensureOpen()
-        guard admits(scanGeneration), db != nil, !artwork.isEmpty,
-              exec("BEGIN IMMEDIATE;") else { return }
+        guard admits(scanGeneration), db != nil, !artwork.isEmpty else { return }
         let priorItems = artworkAssociatedItemIDs(paths: artwork.map(\.relPath))
-        guard artworkRepo.upsert(
+        _ = connection.withImmediateTransaction {
+            guard artworkRepo.upsert(
                 artwork,
                 scanID: scanID,
                 now: now
               ),
-              associateArtworkInTransaction(artwork) else {
-            _ = exec("ROLLBACK;")
-            return
-        }
-        let currentItems = artworkAssociatedItemIDs(paths: artwork.map(\.relPath))
-        for itemID in priorItems.union(currentItems).sorted() {
-            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
-                _ = exec("ROLLBACK;")
-                return
+                  associateArtworkInTransaction(artwork) else { return false }
+            let currentItems = artworkAssociatedItemIDs(paths: artwork.map(\.relPath))
+            for itemID in priorItems.union(currentItems).sorted() {
+                guard !Task.isCancelled,
+                      materializeArtworkSelectionsInTransaction(
+                        itemID: itemID
+                      ) else { return false }
             }
+            return true
         }
-        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
     }
 
     /// Clean scans rebuild only the local-artwork lane after pruning stale inventory.
@@ -705,20 +756,19 @@ actor ShareCatalogStore {
                 : [$0, "\($0)/backdrops", "\($0)/extrafanart"]
         }
         let candidates = storedArtworkCandidates(inDirectories: Set(directArtworkDirectories))
-        guard !candidates.isEmpty, exec("BEGIN IMMEDIATE;") else { return }
+        guard !candidates.isEmpty else { return }
         let prior = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
-        guard associateArtworkInTransaction(candidates) else {
-            _ = exec("ROLLBACK;")
-            return
-        }
-        let current = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
-        for itemID in prior.union(current).sorted() {
-            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
-                _ = exec("ROLLBACK;")
-                return
+        _ = connection.withImmediateTransaction {
+            guard associateArtworkInTransaction(candidates) else { return false }
+            let current = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
+            for itemID in prior.union(current).sorted() {
+                guard !Task.isCancelled,
+                      materializeArtworkSelectionsInTransaction(
+                        itemID: itemID
+                      ) else { return false }
             }
+            return true
         }
-        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
     }
 
     private func reassociateAllArtworkInTransaction() -> Bool {
@@ -952,43 +1002,36 @@ actor ShareCatalogStore {
                     scanGenerationBound: resolved.scanGenerationBound,
                     lastScan: resolved.lastScan
                 )
-              ),
-              exec("BEGIN IMMEDIATE;")
-        else { return }
+              ) else { return }
         let affected = artworkAssociatedItemIDs(paths: [resolved.relPath])
-        guard connection.runUpdate("""
-        UPDATE local_artwork_files
-        SET probe_status='rejected',
-            processed_fingerprint=fingerprint,
-            probe_attempts=probe_attempts+1,
-            updated_at=?
-        WHERE rel_path=? AND fingerprint=?;
-        """, bind: {
-            sqlite3_bind_double($0, 1, Date().timeIntervalSince1970)
-            self.bindText($0, 2, resolved.relPath)
-            self.bindText($0, 3, resolved.fingerprint)
-        }) else {
-            _ = exec("ROLLBACK;")
-            return
-        }
-        for itemID in affected.sorted() {
-            guard materializeArtworkSelectionsInTransaction(itemID: itemID) else {
-                _ = exec("ROLLBACK;")
-                return
+        _ = connection.withImmediateTransaction {
+            guard connection.runUpdate("""
+            UPDATE local_artwork_files
+            SET probe_status='rejected',
+                processed_fingerprint=fingerprint,
+                probe_attempts=probe_attempts+1,
+                updated_at=?
+            WHERE rel_path=? AND fingerprint=?;
+            """, bind: {
+                sqlite3_bind_double($0, 1, Date().timeIntervalSince1970)
+                self.bindText($0, 2, resolved.relPath)
+                self.bindText($0, 3, resolved.fingerprint)
+            }) else { return false }
+            for itemID in affected.sorted() {
+                guard !Task.isCancelled,
+                      materializeArtworkSelectionsInTransaction(
+                        itemID: itemID
+                      ) else { return false }
             }
+            return true
         }
-        guard exec("COMMIT;") else { _ = exec("ROLLBACK;"); return }
     }
 
     @discardableResult
     private func materializeArtworkSelections(itemID: String) -> Bool {
-        guard exec("BEGIN IMMEDIATE;"),
-              materializeArtworkSelectionsInTransaction(itemID: itemID),
-              exec("COMMIT;") else {
-            _ = exec("ROLLBACK;")
-            return false
+        connection.withImmediateTransaction {
+            materializeArtworkSelectionsInTransaction(itemID: itemID)
         }
-        return true
     }
 
     @discardableResult
@@ -1194,45 +1237,56 @@ actor ShareCatalogStore {
             guard admits(scanGeneration) else { return }
             let end = min(index + Self.writeChunkSize, sidecars.count)
             var affectedItemIDs = Set<String>()
-            exec("BEGIN IMMEDIATE;")
-            for sidecar in sidecars[index..<end] {
-                let fingerprintEvaluation = ShareSidecarFingerprintPolicy.evaluate(
-                    strongETag: sidecar.strongETag, changeToken: sidecar.changeToken,
-                    stableFileID: sidecar.stableFileID, modifiedAt: sidecar.modifiedAt,
-                    size: sidecar.size
-                )
-                let fingerprint = fingerprintEvaluation.fingerprint
-                let weakTransport = fingerprintEvaluation.scanGenerationBound
-                var hadPriorRow = false
-                var priorFingerprint: String?
-                var priorItemID: String?
-                query("SELECT fingerprint, associated_item_id FROM local_metadata_files WHERE rel_path=?;",
-                      bind: { self.bindText($0, 1, sidecar.relPath) }) { existing in
-                    hadPriorRow = true
-                    priorFingerprint = self.columnText(existing, 0)
-                    priorItemID = self.columnText(existing, 1)
+            let committed = connection.withImmediateTransaction {
+                for sidecar in sidecars[index..<end] {
+                    guard !Task.isCancelled else { return false }
+                    let fingerprintEvaluation = ShareSidecarFingerprintPolicy.evaluate(
+                        strongETag: sidecar.strongETag, changeToken: sidecar.changeToken,
+                        stableFileID: sidecar.stableFileID, modifiedAt: sidecar.modifiedAt,
+                        size: sidecar.size
+                    )
+                    let fingerprint = fingerprintEvaluation.fingerprint
+                    let weakTransport = fingerprintEvaluation.scanGenerationBound
+                    var hadPriorRow = false
+                    var priorFingerprint: String?
+                    var priorItemID: String?
+                    query(
+                        """
+                        SELECT fingerprint, associated_item_id
+                        FROM local_metadata_files WHERE rel_path=?;
+                        """,
+                        bind: { self.bindText($0, 1, sidecar.relPath) }
+                    ) { existing in
+                        hadPriorRow = true
+                        priorFingerprint = self.columnText(existing, 0)
+                        priorItemID = self.columnText(existing, 1)
+                    }
+                    if hadPriorRow, weakTransport || priorFingerprint != fingerprint {
+                        if let priorItemID { affectedItemIDs.insert(priorItemID) }
+                    }
+                    sqlite3_reset(stmt)
+                    bindText(stmt, 1, sidecar.relPath)
+                    bindText(stmt, 2, sidecar.parentDir)
+                    bindText(stmt, 3, sidecar.basename)
+                    bindText(stmt, 4, sidecar.kind.rawValue)
+                    sqlite3_bind_int64(stmt, 5, sidecar.size)
+                    sqlite3_bind_double(stmt, 6, sidecar.modifiedAt.timeIntervalSince1970)
+                    bindOptText(stmt, 7, sidecar.stableFileID)
+                    bindOptText(stmt, 8, sidecar.strongETag)
+                    bindOptText(stmt, 9, sidecar.changeToken)
+                    bindOptText(stmt, 10, sidecar.associatedVideoRelPath)
+                    sqlite3_bind_int64(stmt, 11, scanID)
+                    bindOptText(stmt, 12, fingerprint)
+                    sqlite3_bind_int64(stmt, 13, weakTransport ? 1 : 0)
+                    sqlite3_bind_double(stmt, 14, now.timeIntervalSince1970)
+                    guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
                 }
-                if hadPriorRow, weakTransport || priorFingerprint != fingerprint {
-                    if let priorItemID { affectedItemIDs.insert(priorItemID) }
-                }
-                sqlite3_reset(stmt)
-                bindText(stmt, 1, sidecar.relPath)
-                bindText(stmt, 2, sidecar.parentDir)
-                bindText(stmt, 3, sidecar.basename)
-                bindText(stmt, 4, sidecar.kind.rawValue)
-                sqlite3_bind_int64(stmt, 5, sidecar.size)
-                sqlite3_bind_double(stmt, 6, sidecar.modifiedAt.timeIntervalSince1970)
-                bindOptText(stmt, 7, sidecar.stableFileID)
-                bindOptText(stmt, 8, sidecar.strongETag)
-                bindOptText(stmt, 9, sidecar.changeToken)
-                bindOptText(stmt, 10, sidecar.associatedVideoRelPath)
-                sqlite3_bind_int64(stmt, 11, scanID)
-                bindOptText(stmt, 12, fingerprint)
-                sqlite3_bind_int64(stmt, 13, weakTransport ? 1 : 0)
-                sqlite3_bind_double(stmt, 14, now.timeIntervalSince1970)
-                _ = sqlite3_step(stmt)
+                return true
             }
-            exec("COMMIT;")
+            guard committed else {
+                PlozzLog.boot("share.catalog sidecar upsert rolled back count=\(end - index)")
+                return
+            }
             for itemID in affectedItemIDs {
                 _ = materializeCachedLocalMetadata(itemID: itemID)
             }
@@ -1257,21 +1311,43 @@ actor ShareCatalogStore {
             if let itemID = self.columnText(stmt, 1) { affectedItemIDs.insert(itemID) }
         }
         guard !stalePaths.isEmpty else { return }
-        guard exec("BEGIN IMMEDIATE;") else { return }
-        var del: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM local_metadata_files WHERE last_scan <> ?;", -1, &del, nil) == SQLITE_OK {
+        let committed = connection.withImmediateTransaction {
+            var del: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "DELETE FROM local_metadata_files WHERE last_scan <> ?;",
+                -1,
+                &del,
+                nil
+            ) == SQLITE_OK else { return false }
             sqlite3_bind_int64(del, 1, scanID)
-            _ = sqlite3_step(del)
+            let inventoryDeleted = sqlite3_step(del) == SQLITE_DONE
             sqlite3_finalize(del)
-        }
-        let placeholders = Array(repeating: "?", count: stalePaths.count).joined(separator: ",")
-        var delValues: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM local_metadata_file_values WHERE rel_path IN (\(placeholders));", -1, &delValues, nil) == SQLITE_OK {
-            for (offset, path) in stalePaths.enumerated() { bindText(delValues, Int32(offset + 1), path) }
-            _ = sqlite3_step(delValues)
+            guard inventoryDeleted else { return false }
+
+            let placeholders = Array(
+                repeating: "?",
+                count: stalePaths.count
+            ).joined(separator: ",")
+            var delValues: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                DELETE FROM local_metadata_file_values
+                WHERE rel_path IN (\(placeholders));
+                """,
+                -1,
+                &delValues,
+                nil
+            ) == SQLITE_OK else { return false }
+            for (offset, path) in stalePaths.enumerated() {
+                bindText(delValues, Int32(offset + 1), path)
+            }
+            let valuesDeleted = sqlite3_step(delValues) == SQLITE_DONE
             sqlite3_finalize(delValues)
+            return valuesDeleted
         }
-        exec("COMMIT;")
+        guard committed else { return }
         for itemID in affectedItemIDs {
             _ = materializeCachedLocalMetadata(itemID: itemID)
         }
@@ -1357,78 +1433,82 @@ actor ShareCatalogStore {
     ) -> Bool {
         ensureOpen()
         guard admits(scanGeneration), db != nil, normalizedMetadataReady else { return false }
-        guard exec("BEGIN IMMEDIATE;") else { return false }
-        func rollback() -> Bool { _ = exec("ROLLBACK;"); return false }
+        return connection.withImmediateTransaction {
+            func stillCurrent() -> Bool {
+                !Task.isCancelled
+            }
 
-        // P0 — Preserve a soon-to-be-removed movie version's aliases (captured from
-        // the pre-delete catalog) so its legacy file id still resolves to the
-        // surviving logical group.
-        guard scanWriter.preserveMovieAliasesInTransaction() else { return rollback() }
+            // P0 — Preserve a soon-to-be-removed movie version's aliases (captured
+            // from the pre-delete catalog) so its legacy file id still resolves.
+            guard stillCurrent(),
+                  scanWriter.preserveMovieAliasesInTransaction() else { return false }
 
-        // P1 — Drop assets no longer present on the share.
-        guard scanWriter.deleteWhereStale(table: "assets", scanID: scanID),
-              failurePoint != .afterAssetDelete else { return rollback() }
+            // P1 — Drop assets no longer present on the share.
+            guard stillCurrent(),
+                  scanWriter.deleteWhereStale(table: "assets", scanID: scanID),
+                  failurePoint != .afterAssetDelete else { return false }
 
-        // P2 — Recompute movie group keys on the surviving assets. Association
-        // resolution below reads the group representative, so this must precede it.
-        guard scanWriter.regroupMoviesInTransaction(),
-              failurePoint != .afterMovieRegroup else { return rollback() }
+            // P2 — Recompute movie group keys on the surviving assets.
+            guard stillCurrent(),
+                  scanWriter.regroupMoviesInTransaction(),
+                  failurePoint != .afterMovieRegroup else { return false }
 
-        // Extras are scan-scoped but never assets. Resolve them only after movie
-        // grouping is stable so owner ids use the same canonical movie key as detail
-        // and playback; unresolved candidates are discarded rather than guessed.
-        guard extraRepo.finalizeCleanScan(scanID: scanID) else { return rollback() }
+            // Extras are scan-scoped but never assets.
+            guard stillCurrent(),
+                  extraRepo.finalizeCleanScan(scanID: scanID) else { return false }
 
-        // P3 — Delete orphan enrichment/metadata rows for every item id whose
-        // backing asset just vanished (derived live ids via NOT EXISTS).
-        guard enrichmentRepo.deleteOrphanMetadataInTransaction(),
-              failurePoint != .afterOrphanMetadataCleanup else { return rollback() }
+            // P3 — Delete orphan enrichment/metadata rows.
+            guard stillCurrent(),
+                  enrichmentRepo.deleteOrphanMetadataInTransaction(),
+                  failurePoint != .afterOrphanMetadataCleanup else { return false }
 
-        // P4 — Delete vanished sidecar inventory and any value-cache row whose
-        // parent inventory row no longer exists (NOT EXISTS, never a bound IN list,
-        // so it holds above the SQLite variable limit). Capture the item ids whose
-        // sidecar is about to vanish FIRST: an item whose winning sidecar was
-        // deleted must be rematerialized from its surviving sidecars in P7 even
-        // when no surviving sidecar's association changed.
-        let orphanedSidecarItemIDs = scanWriter.staleSidecarAssociatedItemIDs(scanID: scanID)
-        guard scanWriter.deleteWhereStale(table: "local_metadata_files", scanID: scanID) else { return rollback() }
-        guard exec("""
-            DELETE FROM local_metadata_file_values
-            WHERE NOT EXISTS(
-              SELECT 1 FROM local_metadata_files f
-              WHERE f.rel_path = local_metadata_file_values.rel_path
-            );
-            """), failurePoint != .afterSidecarCleanup else { return rollback() }
+            // P4 — Delete vanished sidecar inventory and value-cache rows.
+            let orphanedSidecarItemIDs =
+                scanWriter.staleSidecarAssociatedItemIDs(scanID: scanID)
+            guard stillCurrent(),
+                  scanWriter.deleteWhereStale(
+                    table: "local_metadata_files",
+                    scanID: scanID
+                  ),
+                  exec("""
+                      DELETE FROM local_metadata_file_values
+                      WHERE NOT EXISTS(
+                        SELECT 1 FROM local_metadata_files f
+                        WHERE f.rel_path = local_metadata_file_values.rel_path
+                      );
+                      """),
+                  failurePoint != .afterSidecarCleanup else { return false }
 
-        // Local artwork is a separate source lane. Its inventory and associations
-        // obey the same clean-only delete invariant, but it never touches external
-        // enrichment rows or their retry state.
-        guard finalizeArtworkInTransaction(scanID: scanID) else { return rollback() }
+            // Local artwork is a separate source lane.
+            guard stillCurrent(),
+                  finalizeArtworkInTransaction(scanID: scanID) else { return false }
 
-        // P5 — Clean only alias/reconciliation rows proven to have no live logical
-        // asset; aliases still backing a surviving version/group are preserved.
-        guard scanWriter.cleanDeadAliasesInTransaction(),
-              failurePoint != .afterAliasCleanup else { return rollback() }
+            // P5 — Clean only dead alias/reconciliation rows.
+            guard stillCurrent(),
+                  scanWriter.cleanDeadAliasesInTransaction(),
+                  failurePoint != .afterAliasCleanup else { return false }
 
-        // P6 — Recompute surviving sidecar associations from persisted assets.
-        let association = recomputeSidecarAssociationsInTransaction()
-        guard association.ok,
-              failurePoint != .afterAssociationRecompute else { return rollback() }
+            // P6 — Recompute surviving sidecar associations.
+            let association = recomputeSidecarAssociationsInTransaction()
+            guard stillCurrent(), association.ok,
+                  failurePoint != .afterAssociationRecompute else { return false }
 
-        // P7 — Rematerialize local NFO winners for every affected item from the
-        // surviving persisted per-sidecar value cache. Union of items whose
-        // surviving association changed and items whose winning sidecar vanished.
-        for itemID in association.affectedItemIDs.union(orphanedSidecarItemIDs).sorted() {
-            guard materializeCachedLocalMetadataInTransaction(itemID: itemID) else { return rollback() }
+            // P7 — Rematerialize local NFO winners for every affected item.
+            for itemID in association.affectedItemIDs
+                .union(orphanedSidecarItemIDs)
+                .sorted() {
+                guard stillCurrent(),
+                      materializeCachedLocalMetadataInTransaction(
+                        itemID: itemID
+                      ) else { return false }
+            }
+            guard failurePoint != .afterWinnerRematerialize else { return false }
+
+            // P8 — Rematerialize the filename/explicit-id projection.
+            return stillCurrent()
+                && repairFilenameProviderIDsInTransaction()
+                && failurePoint != .afterFilenameProjection
         }
-        guard failurePoint != .afterWinnerRematerialize else { return rollback() }
-
-        // P8 — Rematerialize the flat filename/explicit-id projection from the
-        // surviving assets (idempotent, whole-catalog).
-        guard repairFilenameProviderIDsInTransaction(),
-              failurePoint != .afterFilenameProjection else { return rollback() }
-
-        return exec("COMMIT;")
     }
 
     /// P6 helper: the association recompute of `reconcileSidecarAssociations` with
@@ -1735,12 +1815,12 @@ actor ShareCatalogStore {
     func writeSidecarValueCache(relPath: String, fields: [MetadataField: String]) -> Bool {
         ensureOpen()
         guard db != nil else { return false }
-        guard exec("BEGIN IMMEDIATE;") else { return false }
-        guard localRepo.replaceSidecarValueCache(relPath: relPath, fields: fields), exec("COMMIT;") else {
-            _ = exec("ROLLBACK;")
-            return false
+        return connection.withImmediateTransaction {
+            localRepo.replaceSidecarValueCache(
+                relPath: relPath,
+                fields: fields
+            )
         }
-        return true
     }
 
     @discardableResult
@@ -1892,13 +1972,13 @@ actor ShareCatalogStore {
         now: Date = Date()
     ) -> Bool {
         guard db != nil, normalizedMetadataReady else { return false }
-        guard exec("BEGIN IMMEDIATE;") else { return false }
-        guard replaceLocalNFOMetadataInTransaction(itemID: itemID, candidates: candidates, now: now),
-              exec("COMMIT;") else {
-            _ = exec("ROLLBACK;")
-            return false
+        return connection.withImmediateTransaction {
+            replaceLocalNFOMetadataInTransaction(
+                itemID: itemID,
+                candidates: candidates,
+                now: now
+            )
         }
-        return true
     }
 
     /// Transaction-bound core of `replaceLocalNFOMetadata` — assumes an ambient
@@ -2018,10 +2098,8 @@ actor ShareCatalogStore {
 
     private func repairFilenameProviderIDs() {
         guard db != nil, normalizedMetadataReady else { return }
-        guard exec("BEGIN IMMEDIATE;") else { return }
-        guard repairFilenameProviderIDsInTransaction(), exec("COMMIT;") else {
-            _ = exec("ROLLBACK;")
-            return
+        _ = connection.withImmediateTransaction {
+            repairFilenameProviderIDsInTransaction()
         }
     }
 
@@ -2232,8 +2310,6 @@ actor ShareCatalogStore {
             attempts = priorAttempts
         }
 
-        guard exec("BEGIN IMMEDIATE;") else { return false }
-        var stmt: OpaquePointer?
         // A catalog whose migration failed never gained `cast_json`; naming it would
         // fail the whole write, so such a catalog keeps persisting everything else.
         let hasCastColumn = connection.hasColumn(table: "enrichment", column: "cast_json")
@@ -2252,66 +2328,88 @@ actor ShareCatalogStore {
           enrich_version=excluded.enrich_version, attempts=excluded.attempts,
           title=excluded.title\(castAssignment);
         """
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            _ = exec("ROLLBACK;")
-            return false
-        }
-        bindText(stmt, 1, itemID)
-        bindOptText(stmt, 2, encodeJSON(merged.providerIDs.isEmpty ? nil : merged.providerIDs))
-        bindOptText(stmt, 3, merged.overview)
-        bindOptText(stmt, 4, encodeJSON(merged.genres.isEmpty ? nil : merged.genres))
-        if let rt = merged.runtime { sqlite3_bind_double(stmt, 5, rt) } else { sqlite3_bind_null(stmt, 5) }
-        bindOptText(stmt, 6, merged.posterURL?.absoluteString)
-        bindOptText(stmt, 7, merged.backdropURL?.absoluteString)
-        bindOptText(stmt, 8, merged.logoURL?.absoluteString)
-        sqlite3_bind_double(stmt, 9, now.timeIntervalSince1970)
-        sqlite3_bind_int64(stmt, 10, Int64(version))
-        sqlite3_bind_int64(stmt, 11, Int64(attempts))
-        bindOptText(stmt, 12, merged.title)
-        if hasCastColumn {
-            bindOptText(stmt, 13, encodeJSON(merged.cast.isEmpty ? nil : merged.cast))
-        }
-        let projectionWritten = sqlite3_step(stmt) == SQLITE_DONE
-        sqlite3_finalize(stmt)
-        let normalizedWritten = projectionWritten && enrichmentRepo.writeMetadataValues(
-            itemID: itemID,
-            record: merged,
-            refreshedAt: now,
-            replaceExisting: true
-        )
-        let stateWritten = normalizedWritten && enrichmentRepo.writeEnrichmentState(
-            itemID: itemID,
-            version: version,
-            attempts: attempts,
-            replaceExisting: true
-        )
-        var derivedCatalogWritten = stateWritten
-        if derivedCatalogWritten,
-           ShareCatalogID.isSeries(itemID),
-           let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
-            if merged.providerIDs.keys.contains(where: {
-                ["anilist", "mal", "myanimelist"].contains($0.lowercased())
-            }) {
-                derivedCatalogWritten = reclassifySeriesToAnime(seriesKey: key)
+        let ok = connection.withImmediateTransaction {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                return false
             }
-            if derivedCatalogWritten {
-                let outcome = reconciler.reconcileSeriesByStrongID(
-                    key: key,
-                    ids: merged.providerIDs,
-                    resolvedTitle: merged.title
+            bindText(stmt, 1, itemID)
+            bindOptText(
+                stmt,
+                2,
+                encodeJSON(merged.providerIDs.isEmpty ? nil : merged.providerIDs)
+            )
+            bindOptText(stmt, 3, merged.overview)
+            bindOptText(
+                stmt,
+                4,
+                encodeJSON(merged.genres.isEmpty ? nil : merged.genres)
+            )
+            if let runtime = merged.runtime {
+                sqlite3_bind_double(stmt, 5, runtime)
+            } else {
+                sqlite3_bind_null(stmt, 5)
+            }
+            bindOptText(stmt, 6, merged.posterURL?.absoluteString)
+            bindOptText(stmt, 7, merged.backdropURL?.absoluteString)
+            bindOptText(stmt, 8, merged.logoURL?.absoluteString)
+            sqlite3_bind_double(stmt, 9, now.timeIntervalSince1970)
+            sqlite3_bind_int64(stmt, 10, Int64(version))
+            sqlite3_bind_int64(stmt, 11, Int64(attempts))
+            bindOptText(stmt, 12, merged.title)
+            if hasCastColumn {
+                bindOptText(
+                    stmt,
+                    13,
+                    encodeJSON(merged.cast.isEmpty ? nil : merged.cast)
                 )
-                derivedCatalogWritten = outcome.ok
-                pendingMergedSeriesLocalRepairs.formUnion(outcome.mergedCanonicalIDs)
             }
+            let projectionWritten = sqlite3_step(stmt) == SQLITE_DONE
+            sqlite3_finalize(stmt)
+            let normalizedWritten = projectionWritten
+                && enrichmentRepo.writeMetadataValues(
+                    itemID: itemID,
+                    record: merged,
+                    refreshedAt: now,
+                    replaceExisting: true
+                )
+            let stateWritten = normalizedWritten
+                && enrichmentRepo.writeEnrichmentState(
+                    itemID: itemID,
+                    version: version,
+                    attempts: attempts,
+                    replaceExisting: true
+                )
+            var derivedCatalogWritten = stateWritten
             if derivedCatalogWritten,
-               enrichmentSaveFailurePoint == .afterDerivedCatalogMutations {
-                derivedCatalogWritten = false
+               ShareCatalogID.isSeries(itemID),
+               let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
+                if merged.providerIDs.keys.contains(where: {
+                    ["anilist", "mal", "myanimelist"].contains($0.lowercased())
+                }) {
+                    derivedCatalogWritten = reclassifySeriesToAnime(seriesKey: key)
+                }
+                if derivedCatalogWritten {
+                    let outcome = reconciler.reconcileSeriesByStrongID(
+                        key: key,
+                        ids: merged.providerIDs,
+                        resolvedTitle: merged.title
+                    )
+                    derivedCatalogWritten = outcome.ok
+                    pendingMergedSeriesLocalRepairs.formUnion(
+                        outcome.mergedCanonicalIDs
+                    )
+                }
+                if derivedCatalogWritten,
+                   enrichmentSaveFailurePoint == .afterDerivedCatalogMutations {
+                    derivedCatalogWritten = false
+                }
             }
+            if derivedCatalogWritten, !pendingMergedSeriesLocalRepairs.isEmpty {
+                derivedCatalogWritten = reassociateAllArtworkInTransaction()
+            }
+            return derivedCatalogWritten
         }
-        if derivedCatalogWritten, !pendingMergedSeriesLocalRepairs.isEmpty {
-            derivedCatalogWritten = reassociateAllArtworkInTransaction()
-        }
-        let ok = derivedCatalogWritten && exec("COMMIT;")
         if ok {
             let repairItemIDs = pendingMergedSeriesLocalRepairs
             pendingMergedSeriesLocalRepairs.removeAll()
@@ -2322,7 +2420,6 @@ actor ShareCatalogStore {
                 repairFilenameProviderIDs()
             }
         } else {
-            _ = exec("ROLLBACK;")
             pendingMergedSeriesLocalRepairs.removeAll()
         }
         return ok
@@ -2771,41 +2868,57 @@ extension ShareCatalogStore {
 
         _ = exec("CREATE TEMP TABLE IF NOT EXISTS skipped_dirs(rel_path TEXT PRIMARY KEY);")
         _ = exec("DELETE FROM skipped_dirs;")
-        // Guarded, and the COMMIT is conditional on it: an unguarded BEGIN that
-        // fails because a transaction is already open would leave the later
-        // COMMIT to close *that* one early, ending someone else's write halfway.
-        let owningTransaction = exec("BEGIN IMMEDIATE;")
-
-        var insert: OpaquePointer?
-        if sqlite3_prepare_v2(
-            db, "INSERT OR IGNORE INTO skipped_dirs(rel_path) VALUES(?);", -1, &insert, nil
-        ) == SQLITE_OK {
+        _ = connection.withImmediateTransaction {
+            var insert: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "INSERT OR IGNORE INTO skipped_dirs(rel_path) VALUES(?);",
+                -1,
+                &insert,
+                nil
+            ) == SQLITE_OK else { return false }
             for path in relPaths {
+                guard !Task.isCancelled else {
+                    sqlite3_finalize(insert)
+                    return false
+                }
                 sqlite3_reset(insert)
                 bindText(insert, 1, path)
-                _ = sqlite3_step(insert)
+                guard sqlite3_step(insert) == SQLITE_DONE else {
+                    sqlite3_finalize(insert)
+                    return false
+                }
             }
-        }
-        sqlite3_finalize(insert)
+            sqlite3_finalize(insert)
 
-        // Files directly inside a skipped directory. `basename` makes the parent
-        // exactly computable, so this is one pass rather than a pattern match per
-        // directory.
-        stampScan(
-            "UPDATE assets SET last_scan=? WHERE substr(rel_path, 1, length(rel_path) - length(basename) - 1) IN (SELECT rel_path FROM skipped_dirs);",
-            scanID: scanID
-        )
-        for table in ["extras", "local_metadata_files", "local_artwork_files"] {
-            stampScan(
-                "UPDATE \(table) SET last_scan=? WHERE parent_dir IN (SELECT rel_path FROM skipped_dirs);",
+            // Files directly inside a skipped directory. `basename` makes the
+            // parent exactly computable.
+            guard stampScan(
+                """
+                UPDATE assets SET last_scan=?
+                WHERE substr(
+                  rel_path, 1, length(rel_path) - length(basename) - 1
+                ) IN (SELECT rel_path FROM skipped_dirs);
+                """,
+                scanID: scanID
+            ) else { return false }
+            for table in ["extras", "local_metadata_files", "local_artwork_files"] {
+                guard stampScan(
+                    """
+                    UPDATE \(table) SET last_scan=?
+                    WHERE parent_dir IN (SELECT rel_path FROM skipped_dirs);
+                    """,
+                    scanID: scanID
+                ) else { return false }
+            }
+            return stampScan(
+                """
+                UPDATE dir_state SET last_scan=?
+                WHERE rel_path IN (SELECT rel_path FROM skipped_dirs);
+                """,
                 scanID: scanID
             )
         }
-        stampScan(
-            "UPDATE dir_state SET last_scan=? WHERE rel_path IN (SELECT rel_path FROM skipped_dirs);",
-            scanID: scanID
-        )
-        if owningTransaction, !exec("COMMIT;") { _ = exec("ROLLBACK;") }
         _ = exec("DELETE FROM skipped_dirs;")
     }
 
@@ -2834,12 +2947,14 @@ extension ShareCatalogStore {
         return (total, recent)
     }
 
-    private func stampScan(_ sql: String, scanID: Int64) {
+    private func stampScan(_ sql: String, scanID: Int64) -> Bool {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, scanID)
-        _ = sqlite3_step(stmt)
+        return sqlite3_step(stmt) == SQLITE_DONE
     }
 
     func touchDirectoryContents(

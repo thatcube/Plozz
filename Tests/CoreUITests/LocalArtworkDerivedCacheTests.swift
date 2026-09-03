@@ -105,6 +105,53 @@ final class LocalArtworkDerivedCacheTests: XCTestCase {
         XCTAssertEqual(preferred, ["new"])
     }
 
+    func testSuspensionClosesManifestAndRejectsWorkUntilNewerResume() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let cache = LocalArtworkDerivedCache(directory: fixture.directory)
+        let image = try Self.image(color: .orange)
+        await cache.store(
+            image,
+            key: "before",
+            accountID: "account",
+            credentialRevision: "revision",
+            sourceFingerprint: "before",
+            variant: .posterCard
+        )
+        let storedBytes = await cache.usageBytes()
+        XCTAssertGreaterThan(storedBytes, 0)
+
+        await cache.setBackgroundWorkAllowed(false, revision: 2)
+        let suspended = await cache.backgroundWorkAllowedForTesting()
+        let suspendedUsage = await cache.usageBytes()
+        XCTAssertFalse(suspended)
+        XCTAssertEqual(suspendedUsage, 0)
+        await cache.store(
+            image,
+            key: "blocked",
+            accountID: "account",
+            credentialRevision: "revision",
+            sourceFingerprint: "blocked",
+            variant: .posterCard
+        )
+
+        await cache.setBackgroundWorkAllowed(true, revision: 1)
+        let staleResumeAllowed = await cache.backgroundWorkAllowedForTesting()
+        XCTAssertFalse(staleResumeAllowed)
+        await cache.setBackgroundWorkAllowed(true, revision: 3)
+        let resumed = await cache.backgroundWorkAllowedForTesting()
+        let resumedUsage = await cache.usageBytes()
+        XCTAssertTrue(resumed)
+        XCTAssertEqual(resumedUsage, storedBytes)
+        let blocked = await cache.data(
+            for: "blocked",
+            accountID: "account",
+            credentialRevision: "revision",
+            sourceFingerprint: "blocked"
+        )
+        XCTAssertNil(blocked)
+    }
+
     func testAccountAndCredentialRevisionPurgesAreScoped() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

@@ -30,6 +30,89 @@ final class ShareCatalogStoreTests: XCTestCase {
                      season: season, episode: episode)
     }
 
+    func testImmediateTransactionRollsBackWhenDeferredCommitFails() throws {
+        let directory = tempDir()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let connection = CatalogConnection(
+            url: directory.appendingPathComponent("commit-failure.sqlite")
+        )
+        XCTAssertTrue(connection.ensureOpen { _ in true })
+        XCTAssertTrue(connection.exec("PRAGMA foreign_keys=ON;"))
+        XCTAssertTrue(connection.exec("CREATE TABLE parent(id INTEGER PRIMARY KEY);"))
+        XCTAssertTrue(connection.exec("""
+            CREATE TABLE child(
+              parent_id INTEGER,
+              FOREIGN KEY(parent_id) REFERENCES parent(id)
+                DEFERRABLE INITIALLY DEFERRED
+            );
+            """))
+
+        let committed = connection.withImmediateTransaction {
+            connection.exec("INSERT INTO child(parent_id) VALUES(42);")
+        }
+
+        XCTAssertFalse(committed)
+        XCTAssertFalse(connection.isInTransaction)
+        var childCount = -1
+        connection.query("SELECT COUNT(*) FROM child;") {
+            childCount = Int(sqlite3_column_int64($0, 0))
+        }
+        XCTAssertEqual(childCount, 0)
+        XCTAssertTrue(connection.withImmediateTransaction {
+            connection.exec("INSERT INTO parent(id) VALUES(42);")
+        })
+    }
+
+    @MainActor
+    func testCancelledInitialMigrationClosesAndRetries() async {
+        let directory = tempDir()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let connection = CatalogConnection(
+            url: directory.appendingPathComponent("cancelled-migration.sqlite")
+        )
+
+        let firstAttempt = await Task { @MainActor in
+            connection.ensureOpen { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return true
+            }
+        }.value
+
+        XCTAssertFalse(firstAttempt)
+        XCTAssertNil(connection.db)
+        XCTAssertTrue(connection.ensureOpen { _ in true })
+    }
+
+    func testSuspensionClosesCatalogAndStaleResumeCannotReopenIt() async throws {
+        let directory = tempDir()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let accountKey = "suspension-\(UUID().uuidString)"
+        let store = ShareCatalogStore(accountKey: accountKey, directory: directory)
+        await store.upsert(
+            [movie("Movies/Film.mkv", title: "Film", year: 2026)],
+            scanID: 1
+        )
+
+        await store.prepareForSuspension(revision: 2)
+        let suspended = await store.isSuspendedForTesting()
+        XCTAssertTrue(suspended)
+        XCTAssertTrue(
+            tryCanAcquireImmediateWriteLock(at: catalogURL(accountKey: accountKey, in: directory))
+        )
+
+        await store.resumeAfterSuspension(revision: 1)
+        let staleResumeSuspended = await store.isSuspendedForTesting()
+        let suspendedMovies = await store.movies(offset: 0, limit: 10)
+        XCTAssertTrue(staleResumeSuspended)
+        XCTAssertEqual(suspendedMovies, [])
+
+        await store.resumeAfterSuspension(revision: 3)
+        let resumed = await store.isSuspendedForTesting()
+        let resumedMovies = await store.movies(offset: 0, limit: 10)
+        XCTAssertFalse(resumed)
+        XCTAssertEqual(resumedMovies.map(\.title), ["Film"])
+    }
+
     private func catalogURL(accountKey: String, in directory: URL) -> URL {
         let allowed = CharacterSet.alphanumerics
         let mapped = String(accountKey.unicodeScalars.map {
@@ -77,6 +160,16 @@ final class ShareCatalogStoreTests: XCTestCase {
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         guard let text = sqlite3_column_text(stmt, 0) else { return nil }
         return String(cString: text)
+    }
+
+    private func tryCanAcquireImmediateWriteLock(at url: URL) -> Bool {
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK, let db else { return false }
+        defer { sqlite3_close(db) }
+        guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            return false
+        }
+        return sqlite3_exec(db, "ROLLBACK;", nil, nil, nil) == SQLITE_OK
     }
 
     private func createLegacyCatalog(

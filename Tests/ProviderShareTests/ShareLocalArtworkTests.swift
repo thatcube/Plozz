@@ -17,6 +17,7 @@ final class ShareLocalArtworkTests: XCTestCase {
             preferences.append(.init(accountKeys: accountKeys, revision: revision))
         }
 
+        func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) {}
         func purge(accountID: String) {}
         func purge(accountID: String, credentialRevision: CredentialRevision) {}
         func recordedPreferences() -> [Preference] { preferences }

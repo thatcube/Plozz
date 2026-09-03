@@ -971,64 +971,68 @@ struct MainTabView: View {
 
     /// Native tvOS sidebar. Uses the same ordered/hidden library plan as custom
     /// rail, but lets SwiftUI own presentation, focus and expansion.
+    ///
+    /// Keep every tab's content and label erased at this boundary. Adding the
+    /// Watchlist destination made the nested `TabContentBuilder` type large enough
+    /// to exhaust the tvOS runtime's stack while decoding generic metadata.
     private var nativeSidebarShell: some View {
         TabView(selection: nativeSidebarSelection) {
             Tab(value: NativeSidebarDestination.profile) {
                 // Selection immediately raises RootView's existing profile page.
-                Color.clear
+                AnyView(Color.clear)
             } label: {
-                Label {
+                AnyView(Label {
                     Text(verbatim: activeProfile.name)
                         .font(.system(size: 26, weight: .regular))
                 } icon: {
                     ProfileAvatarView(profile: activeProfile, size: 32)
-                }
+                })
             }
 
             Tab(value: NativeSidebarDestination.content(.home)) {
-                homeTabContent(isActive: activeLibraryNavigationDestination == .home)
+                AnyView(homeTabContent(isActive: activeLibraryNavigationDestination == .home))
             } label: {
-                homeTabLabel
+                AnyView(homeTabLabel)
             }
 
             if showsWatchlistDestination {
                 Tab(value: NativeSidebarDestination.content(.watchlist)) {
-                    watchlistTabContent(
+                    AnyView(watchlistTabContent(
                         isActive: activeLibraryNavigationDestination == .watchlist
-                    )
+                    ))
                 } label: {
-                    watchlistTabLabel
+                    AnyView(watchlistTabLabel)
                 }
             }
 
             Tab(value: NativeSidebarDestination.content(.search)) {
-                searchTabContent
+                AnyView(searchTabContent)
             } label: {
-                searchTabLabel
+                AnyView(searchTabLabel)
             }
 
             if showsMusicDestination {
                 Tab(value: NativeSidebarDestination.content(.music)) {
-                    musicTabContent
+                    AnyView(musicTabContent)
                 } label: {
-                    musicTabLabel
+                    AnyView(musicTabLabel)
                 }
             }
 
             TabSection("Libraries") {
                 ForEach(railEntries) { entry in
                     Tab(value: NativeSidebarDestination.content(entry.destination)) {
-                        libraryDestination(entry)
+                        AnyView(libraryDestination(entry))
                     } label: {
-                        navigationLibraryLabel(entry)
+                        AnyView(navigationLibraryLabel(entry))
                     }
                 }
             }
 
             Tab(value: NativeSidebarDestination.content(.settings)) {
-                settingsTabContent
+                AnyView(settingsTabContent)
             } label: {
-                settingsTabLabel
+                AnyView(settingsTabLabel)
             }
         }
         .tabViewStyle(.sidebarAdaptable)

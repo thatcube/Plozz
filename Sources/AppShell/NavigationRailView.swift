@@ -31,16 +31,35 @@ enum NavigationRailMetrics {
     static let contentInset: CGFloat = 64
 
     /// Width the rail grows to once focus enters it.
-    static let expandedWidth: CGFloat = 400
-    /// Floating-menu geometry. Row pills sit exactly 14 points inside every panel
-    /// edge. The outer radius adds that same inset to the pill radius, keeping their
-    /// corner centres concentric.
+    static let expandedWidth: CGFloat = 426
+    /// Floating-menu geometry. The open panel sits 32 points from each physical
+    /// screen edge. Row pills sit exactly 14 points inside every panel edge. The
+    /// outer radius adds that same inset to the pill radius, keeping their corner
+    /// centres concentric.
+    static let expandedPanelOuterMargin: CGFloat = 32
+    /// Device-calibrated correction between the panel's layout boundary and its
+    /// visible glass edge.
+    static let expandedPanelEdgeCompensation: CGFloat = 4
+    static let expandedPanelLayoutInset: CGFloat =
+        expandedPanelOuterMargin + expandedPanelEdgeCompensation
     static let expandedRowBackgroundOutset: CGFloat = 4
     static let expandedPanelContentInset: CGFloat = 14
-    static let expandedPanelHorizontalInset: CGFloat =
-        leadingInset - expandedRowBackgroundOutset - expandedPanelContentInset
-    static let expandedPanelVerticalInset: CGFloat =
-        verticalPadding + bumperHeight + itemVerticalPadding - expandedPanelContentInset
+    static let expandedContentHorizontalPadding: CGFloat =
+        expandedPanelLayoutInset + expandedPanelContentInset + expandedRowBackgroundOutset
+    static let expandedContentHorizontalOffset: CGFloat =
+        expandedContentHorizontalPadding - leadingInset
+    static let expandedTrailingPadding: CGFloat =
+        expandedContentHorizontalPadding + expandedContentHorizontalOffset
+    static func expandedPanelVerticalPadding(safeAreaInset: CGFloat) -> CGFloat {
+        expandedPanelLayoutInset - safeAreaInset
+    }
+    static func expandedContentVerticalPadding(safeAreaInset: CGFloat) -> CGFloat {
+        expandedPanelLayoutInset
+            + expandedPanelContentInset
+            - bumperHeight
+            - itemVerticalPadding
+            - safeAreaInset
+    }
     static let rowInnerPadding: CGFloat = 10
     static let expandedRowHeight: CGFloat =
         rowContentHeight + (rowInnerPadding * 2)
@@ -49,9 +68,17 @@ enum NavigationRailMetrics {
     /// Aligns the icon centre with the centre of the capsule's leading arc.
     static let rowHorizontalPadding: CGFloat =
         expandedRowCornerRadius - (iconColumnWidth / 2)
+    static let expandedRowContentWidth: CGFloat =
+        expandedWidth
+            - leadingInset
+            - expandedTrailingPadding
+            - (rowHorizontalPadding * 2)
+    static let expandedLabelOffset: CGFloat = iconColumnWidth + PlozzTheme.Spacing.medium
+    static let expandedLabelWidth: CGFloat =
+        expandedRowContentWidth - expandedLabelOffset
     static let expandedPanelCornerRadius: CGFloat =
         expandedRowCornerRadius + expandedPanelContentInset
-    static let itemIconSize: CGFloat = 26
+    static let itemIconSize: CGFloat = 24
     static let labelFont: Font = .system(size: 25, weight: .semibold)
     static let itemSpacing: CGFloat = 10
     /// Two points on each row edge creates four points between adjacent items.
@@ -68,7 +95,7 @@ enum NavigationRailMetrics {
     /// drift). Pinning the height to the taller of the two states means rows are
     /// already the right size before focus arrives, and expanding changes width
     /// only.
-    static let rowContentHeight: CGFloat = 42
+    static let rowContentHeight: CGFloat = 44
     /// The profile is a navigation row too: avatar + one label, matching every
     /// destination's vertical rhythm.
     static let profileRowHeight: CGFloat = rowContentHeight
@@ -91,7 +118,8 @@ enum NavigationRailMetrics {
     /// pill and its shadow are not clipped by the mask that feathers the ends.
     static let listFadeHorizontalOverhang: CGFloat = 40
     static let dividerHorizontalInset: CGFloat = 20
-    static let expandAnimation = Animation.easeOut(duration: 0.22)
+    static let expandAnimationDuration: Double = 0.22
+    static let expandAnimation = Animation.easeOut(duration: expandAnimationDuration)
 }
 
 /// Plozz's own top-level navigation: a slim rail down the leading edge that shows
@@ -139,6 +167,14 @@ struct NavigationRailView: View {
     /// Continuously tracks how much content has moved past each edge, so the mask
     /// follows the scroll instead of flashing on at a threshold.
     @State private var libraryListFade = ListEdgeFade()
+    /// Physical offset of the safe-area-constrained rail from the screen edge.
+    /// Expanded geometry subtracts this instead of changing safe-area participation,
+    /// which keeps every movement inside one smooth layout animation.
+    @State private var physicalVerticalInset: CGFloat = 0
+    /// One numeric clock drives every animated dimension. A focus change is
+    /// discrete; using that Boolean directly let newly revealed labels jump to
+    /// their final layout before the icons completed their movement.
+    @State private var expansionProgress: CGFloat = 0
 
     /// The rail is expanded exactly while it holds focus — "move focus into it to
     /// open it", with no timers and no separate toggle to get out of sync.
@@ -148,6 +184,38 @@ struct NavigationRailView: View {
     ///
     /// Drives which rows are focusable at all: see ``isRowFocusable(_:)``.
     private var hasFocus: Bool { focusedTarget != nil }
+
+    private var animatedRailWidth: CGFloat {
+        NavigationRailMetrics.collapsedWidth
+            + (
+                NavigationRailMetrics.expandedWidth - NavigationRailMetrics.collapsedWidth
+            ) * expansionProgress
+    }
+
+    private var animatedVerticalPadding: CGFloat {
+        NavigationRailMetrics.verticalPadding
+            + (
+                NavigationRailMetrics.expandedContentVerticalPadding(
+                    safeAreaInset: physicalVerticalInset
+                ) - NavigationRailMetrics.verticalPadding
+            ) * expansionProgress
+    }
+
+    private var animatedRowContentWidth: CGFloat {
+        NavigationRailMetrics.iconColumnWidth
+            + (
+                NavigationRailMetrics.expandedRowContentWidth
+                    - NavigationRailMetrics.iconColumnWidth
+            ) * expansionProgress
+    }
+
+    private var animatedContentOffset: CGFloat {
+        NavigationRailMetrics.expandedContentHorizontalOffset * expansionProgress
+    }
+
+    private var animatedLabelOpacity: Double {
+        Double(min(max(expansionProgress * 6, 0), 1))
+    }
 
     /// Whether a row may hold focus right now.
     ///
@@ -204,18 +272,22 @@ struct NavigationRailView: View {
 
             edgeBumper(.bottomBumper)
         }
-        .padding(.vertical, NavigationRailMetrics.verticalPadding)
+        .padding(.vertical, animatedVerticalPadding)
         .padding(.leading, NavigationRailMetrics.leadingInset)
-        .padding(.trailing, isExpanded ? NavigationRailMetrics.leadingInset : 0)
-        .frame(
-            width: isExpanded ? NavigationRailMetrics.expandedWidth : NavigationRailMetrics.collapsedWidth,
-            alignment: .leading
+        .padding(
+            .trailing,
+            NavigationRailMetrics.expandedTrailingPadding * expansionProgress
         )
+        .frame(width: animatedRailWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            max(proxy.frame(in: .global).minY, 0)
+        } action: { inset in
+            physicalVerticalInset = inset
+        }
         // The panel itself never carries a shadow: blurring a full-height surface
         // forces the whole rail subtree through an offscreen render on every frame.
         .background(alignment: .leading) { backdrop }
-        .animation(NavigationRailMetrics.expandAnimation, value: isExpanded)
         // One focus section, so a Left press from the content lands in the rail as
         // a unit instead of picking whichever row happens to be geometrically
         // nearest, and a Right press returns to the content rather than walking
@@ -224,6 +296,9 @@ struct NavigationRailView: View {
         .accessibilityLabel(Text(Self.accessibilityTitle))
         .onChange(of: isExpanded) { _, expanded in
             isExpandedOutward = expanded
+            withAnimation(NavigationRailMetrics.expandAnimation) {
+                expansionProgress = expanded ? 1 : 0
+            }
         }
         .onDisappear { isExpandedOutward = false }
         // The shell's edge catcher took a Left press from the page. Claim focus for
@@ -387,37 +462,34 @@ struct NavigationRailView: View {
 
     private var profileButton: some View {
         Button(action: onOpenProfileSwitcher) {
-            HStack(spacing: PlozzTheme.Spacing.medium) {
+            HStack(spacing: 0) {
                 ProfileAvatarView(profile: profile, size: NavigationRailMetrics.avatarSize)
                     .frame(width: NavigationRailMetrics.iconColumnWidth)
-                if isExpanded {
-                    PlozzMarqueeText(
-                        text: Text(verbatim: profile.name),
-                        font: NavigationRailMetrics.labelFont,
-                        color: foregroundColor(for: .profile, isSelected: false),
-                        inset: 0,
-                        fadeWidth: 16,
-                        isFocused: focusedTarget == .profile
-                    )
-                }
-                if isExpanded { Spacer(minLength: 0) }
+                Spacer(minLength: 0)
             }
-            // Text appears at once rather than fading in. The rail is a small,
-            // frequently-used control; crossfading its labels reads as sluggish
-            // where an instant swap reads as responsive. Only the WIDTH animates.
-            .animation(nil, value: isExpanded)
             .frame(height: NavigationRailMetrics.profileRowHeight)
-            .frame(maxWidth: isExpanded ? .infinity : nil, alignment: .leading)
+            .frame(width: animatedRowContentWidth, alignment: .leading)
+            .overlay(alignment: .leading) {
+                railLabel(
+                    Text(verbatim: profile.name),
+                    color: foregroundColor(for: .profile, isSelected: false),
+                    isFocused: focusedTarget == .profile
+                )
+                .frame(width: NavigationRailMetrics.expandedLabelWidth, alignment: .leading)
+                .offset(x: NavigationRailMetrics.expandedLabelOffset)
+                .opacity(animatedLabelOpacity)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(
             NavigationRailItemStyle(
-                isExpanded: isExpanded,
+                expansionProgress: expansionProgress,
                 isSelected: false,
                 accent: palette.accent
             )
         )
         .padding(.vertical, NavigationRailMetrics.itemVerticalPadding)
+        .offset(x: animatedContentOffset)
         .focused($focusedTarget, equals: .profile)
         .disabled(!isRowFocusable(.profile))
         .accessibilityLabel(Text(Self.switchProfileSubtitle))
@@ -435,50 +507,57 @@ struct NavigationRailView: View {
             // pressing Right: close the menu and enter the page immediately.
             releaseFocusToPage()
         } label: {
-            HStack(spacing: PlozzTheme.Spacing.medium) {
+            HStack(spacing: 0) {
                 Image(systemName: symbol)
                     .font(.system(size: NavigationRailMetrics.itemIconSize, weight: .semibold))
                     .frame(width: NavigationRailMetrics.iconColumnWidth)
                     .accessibilityHidden(true)
-                if isExpanded {
-                    PlozzMarqueeText(
-                        text: label,
-                        font: NavigationRailMetrics.labelFont,
-                        color: foregroundColor(
-                            for: .destination(destination),
-                            isSelected: selection == destination
-                        ),
-                        inset: 0,
-                        fadeWidth: 16,
-                        isFocused: focusedTarget == .destination(destination)
-                    )
-                }
-                if isExpanded { Spacer(minLength: 0) }
+                Spacer(minLength: 0)
             }
-            // Labels appear at once instead of fading — see `profileButton`.
-            .animation(nil, value: isExpanded)
             // The row is the SAME height in both states, so expanding does not
             // reflow the rail vertically. See `rowContentHeight`.
             .frame(height: NavigationRailMetrics.rowContentHeight)
-            // Collapsed, the row hugs its icon: stretching it to the rail's full
-            // width made the selected/focused pill wider than the glyph, so the
-            // icon read as sitting left of centre inside it.
-            .frame(maxWidth: isExpanded ? .infinity : nil, alignment: .leading)
+            .frame(width: animatedRowContentWidth, alignment: .leading)
+            .overlay(alignment: .leading) {
+                railLabel(
+                    label,
+                    color: foregroundColor(
+                        for: .destination(destination),
+                        isSelected: selection == destination
+                    ),
+                    isFocused: focusedTarget == .destination(destination)
+                )
+                .frame(width: NavigationRailMetrics.expandedLabelWidth, alignment: .leading)
+                .offset(x: NavigationRailMetrics.expandedLabelOffset)
+                .opacity(animatedLabelOpacity)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(
             NavigationRailItemStyle(
-                isExpanded: isExpanded,
+                expansionProgress: expansionProgress,
                 isSelected: selection == destination,
                 accent: palette.accent,
                 holdsFocusStyling: isBouncingOffBumper(.destination(destination))
             )
         )
         .padding(.vertical, NavigationRailMetrics.itemVerticalPadding)
+        .offset(x: animatedContentOffset)
         .focused($focusedTarget, equals: .destination(destination))
         .disabled(!isRowFocusable(.destination(destination)))
         .accessibilityLabel(label)
         .accessibilityAddTraits(selection == destination ? [.isSelected] : [])
+    }
+
+    private func railLabel(_ text: Text, color: Color, isFocused: Bool) -> some View {
+        PlozzMarqueeText(
+            text: text,
+            font: NavigationRailMetrics.labelFont,
+            color: color,
+            inset: 0,
+            fadeWidth: 16,
+            isFocused: isFocused
+        )
     }
 
     private func foregroundColor(
@@ -495,28 +574,22 @@ struct NavigationRailView: View {
     /// A quiet separator between fixed destinations and the viewer's libraries.
     /// It stays identical in both rail states so expansion changes no content.
     private var sectionDivider: some View {
-        Capsule(style: .continuous)
+        let collapsedDividerWidth = NavigationRailMetrics.iconColumnWidth * 0.6
+        let expandedDividerWidth = NavigationRailMetrics.expandedWidth
+            - (NavigationRailMetrics.expandedContentHorizontalPadding * 2)
+            + (NavigationRailMetrics.expandedRowBackgroundOutset * 2)
+            - (NavigationRailMetrics.dividerHorizontalInset * 2)
+        let dividerWidth = collapsedDividerWidth
+            + (expandedDividerWidth - collapsedDividerWidth) * expansionProgress
+
+        return Capsule(style: .continuous)
             .fill(.white.opacity(0.22))
-            .frame(
-                width: isExpanded
-                    ? NavigationRailMetrics.expandedWidth
-                        - (NavigationRailMetrics.leadingInset * 2)
-                        + (NavigationRailMetrics.expandedRowBackgroundOutset * 2)
-                        - (NavigationRailMetrics.dividerHorizontalInset * 2)
-                    : NavigationRailMetrics.iconColumnWidth * 0.6,
-                height: 2
-            )
-            .frame(
-                width: isExpanded ? nil : NavigationRailMetrics.iconColumnWidth,
-                alignment: .center
-            )
-            .frame(
-                maxWidth: isExpanded ? .infinity : nil,
-                alignment: .center
-            )
-            // Collapsed, match the icon's own offset inside its focus pill.
-            .padding(.leading, isExpanded ? 0 : NavigationRailMetrics.rowHorizontalPadding)
+            .frame(width: dividerWidth, height: 2)
+            .frame(width: animatedRowContentWidth, alignment: .center)
+            // Match the icon's inset inside its focus pill in both states.
+            .padding(.leading, NavigationRailMetrics.rowHorizontalPadding)
             .padding(.vertical, PlozzTheme.Spacing.medium)
+            .offset(x: animatedContentOffset)
             .accessibilityHidden(true)
     }
 
@@ -525,13 +598,9 @@ struct NavigationRailView: View {
     /// The open rail uses the same floating glass surface as playback and source
     /// menus. Collapsed, there is no panel at all: the compact icon column remains
     /// directly over the page artwork.
-    @ViewBuilder
     private var backdrop: some View {
-        if isExpanded {
-            // Instant, like the labels: fading a full-height panel in behind text
-            // that has already appeared reads as the rail lagging its own contents.
-            expandedBackdrop.animation(nil, value: isExpanded)
-        }
+        expandedBackdrop
+            .opacity(Double(expansionProgress))
     }
 
     private var expandedBackdrop: some View {
@@ -540,8 +609,13 @@ struct NavigationRailView: View {
                 cornerRadius: NavigationRailMetrics.expandedPanelCornerRadius,
                 scrimOpacity: 0.08
             )
-            .padding(.horizontal, NavigationRailMetrics.expandedPanelHorizontalInset)
-            .padding(.vertical, NavigationRailMetrics.expandedPanelVerticalInset)
+            .padding(.horizontal, NavigationRailMetrics.expandedPanelLayoutInset)
+            .padding(
+                .vertical,
+                NavigationRailMetrics.expandedPanelVerticalPadding(
+                    safeAreaInset: physicalVerticalInset
+                )
+            )
             .allowsHitTesting(false)
     }
 
@@ -614,7 +688,7 @@ private enum RailFocusTarget: Hashable {
 /// destination keeps a quieter accent wash so you can still see where you are
 /// while focus is out in the content.
 private struct NavigationRailItemStyle: ButtonStyle {
-    let isExpanded: Bool
+    let expansionProgress: CGFloat
     let isSelected: Bool
     let accent: Color
     /// Keeps the row drawn as focused while an edge bumper briefly holds focus.
@@ -653,7 +727,9 @@ private struct NavigationRailItemStyle: ButtonStyle {
             // The rail sits over artwork, so an unfocused glyph carries its own
             // contrast while collapsed. The open menu panel supplies that contrast.
             .shadow(
-                color: .black.opacity(isExpanded || isFocused ? 0 : 0.85),
+                color: .black.opacity(
+                    isFocused ? 0 : 0.85 * Double(1 - expansionProgress)
+                ),
                 radius: 5,
                 y: 1
             )
@@ -662,7 +738,8 @@ private struct NavigationRailItemStyle: ButtonStyle {
                     .fill(fill)
                     .padding(
                         .horizontal,
-                        isExpanded ? -NavigationRailMetrics.expandedRowBackgroundOutset : 0
+                        -NavigationRailMetrics.expandedRowBackgroundOutset
+                            * expansionProgress
                     )
             )
     }

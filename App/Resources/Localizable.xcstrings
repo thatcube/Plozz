@@ -155229,7 +155229,6 @@
       }
     },
     "Invalid network-share configuration." : {
-      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -343303,7 +343302,6 @@
       }
     },
     "The selected second subtitle could not be loaded." : {
-      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -343744,7 +343742,6 @@
       }
     },
     "The selected track contains no cues." : {
-      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {

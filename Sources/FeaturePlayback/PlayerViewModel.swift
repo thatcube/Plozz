@@ -1591,6 +1591,11 @@ public final class PlayerViewModel {
         let finalDuration = progressReporter.knownPlaybackDuration()
         let percent = progressReporter.watchedPercent(at: finalPosition)
         engine.stop(preserveDisplayMode: preserveDisplayMode)
+        // Network-file engines retain their resolved source so teardown can await
+        // every SMB cursor/session close. Without this, leaving playback releases
+        // the source only when the engine deinitializes; a quick second playback
+        // can race that asynchronous cleanup and fail until the app restarts.
+        await engine.drainTransport()
         // Release any prefetched next-episode session that was never adopted, and
         // an adopted-but-never-committed session (a hand-off torn down before the
         // incoming player took ownership), so a Jellyfin session isn't orphaned.

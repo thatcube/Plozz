@@ -121,10 +121,11 @@ public protocol VideoEngine: AnyObject {
     /// (e.g. a leased SMB session + source cursor) and **awaits** its full
     /// shutdown before returning. `stop()` only halts decode; the transport it
     /// held is otherwise released asynchronously on deinit, which lets a fresh
-    /// engine's re-open race the draining cursor. The stall-recovery retry awaits
-    /// this first so the new session opens against a clean slate. Defaulted to a
-    /// no-op (see the protocol extension) — only engines that lease their own
-    /// transport (Plozzigen's network-file path) do real work here.
+    /// engine's re-open race the draining cursor. Normal player teardown and
+    /// stall-recovery retries await this so the next source opens against a clean
+    /// slate. Defaulted to a no-op (see the protocol extension) — only engines
+    /// that lease their own transport (Plozzigen's network-file path) do real work
+    /// here.
     func drainTransport() async
 
     // MARK: Live tunables

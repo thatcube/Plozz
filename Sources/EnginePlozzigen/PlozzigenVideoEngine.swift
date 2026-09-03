@@ -190,8 +190,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
     private var suppressFailureCallbackForForegroundReload = false
     /// The leased network source backing the current load (SMB/network-file path
     /// only). Retained so ``drainTransport()`` can await its full shutdown before a
-    /// stall-recovery retry re-opens, instead of letting deinit release it
-    /// asynchronously and racing the fresh open. `nil` for URL-backed loads.
+    /// later playback or a stall-recovery retry re-opens, instead of letting deinit
+    /// release it asynchronously and racing the fresh open. `nil` for URL-backed
+    /// loads.
     private var activeResolvedSource: MediaTransportResolvedSource?
     #if canImport(UIKit)
     private let videoView: UIView
@@ -510,9 +511,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
     }
 
     /// Awaits the full shutdown of the leased network source (if any) before
-    /// returning, so a stall-recovery retry re-opens against a fully drained
-    /// session/cursor rather than racing the old one's asynchronous deinit
-    /// release. No-op for URL-backed loads (nothing leased). Call after `stop()`.
+    /// returning, so later playback and stall-recovery retries re-open against a
+    /// fully drained session/cursor rather than racing the old one's asynchronous
+    /// deinit release. No-op for URL-backed loads (nothing leased). Call after
+    /// `stop()`.
     public func drainTransport() async {
         let source = activeResolvedSource
         activeResolvedSource = nil

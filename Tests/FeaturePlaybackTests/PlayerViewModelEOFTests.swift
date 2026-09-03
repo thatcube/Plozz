@@ -144,6 +144,37 @@ final class PlayerViewModelEOFTests: XCTestCase {
         XCTAssertEqual(reports.last?.progress.positionSeconds, 120)
     }
 
+    func testStopAwaitsNetworkTransportDrainBeforeFinalReport() async throws {
+        let request = try makeNetworkFileRequest()
+        let provider = RecordingPlaybackProvider(request: request, kind: .mediaShare)
+        let engine = SpyVideoEngine()
+        let drainGate = PreCommitYieldGate()
+        engine.drainGate = drainGate
+        let viewModel = PlayerViewModel(
+            provider: provider,
+            itemID: request.item.id,
+            engineFactory: EngineFactory(
+                makeNative: { _ in SpyVideoEngine() },
+                makePlozzigen: { engine }
+            )
+        )
+        await viewModel.load()
+
+        let stopTask = Task { await viewModel.stop() }
+        await waitForGate(drainGate, entries: 1)
+
+        XCTAssertEqual(engine.stopCount, 1)
+        XCTAssertEqual(engine.drainTransportCount, 1)
+        let reportsWhileDraining = await provider.reports
+        XCTAssertEqual(reportsWhileDraining.map(\.event.rawValue), ["start"])
+
+        drainGate.releaseNext()
+        await stopTask.value
+
+        let completedReports = await provider.reports
+        XCTAssertEqual(completedReports.map(\.event.rawValue), ["start", "stop"])
+    }
+
     func testNetworkFileFailureReplacesPlozzigenOnceAndIgnoresOldCallback() async throws {
         let item = MediaItem(id: "movie", title: "Movie", kind: .movie, runtime: 120)
         let identity = try RemoteFileIdentity(
@@ -1095,7 +1126,9 @@ private final class SpyVideoEngine: VideoEngine {
     var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
     var loadCount = 0
     var stopCount = 0
+    var drainTransportCount = 0
     var reloadAfterForegroundCount = 0
+    var drainGate: PreCommitYieldGate?
 
     func load(request: PlaybackRequest, startPosition: TimeInterval) async {
         loadCount += 1
@@ -1117,6 +1150,10 @@ private final class SpyVideoEngine: VideoEngine {
         stopCount += 1
         status = .idle
         duration = 0
+    }
+    func drainTransport() async {
+        drainTransportCount += 1
+        await drainGate?.suspend()
     }
     func selectAudioTrack(_ track: MediaTrack?) {}
     func selectSubtitleTrack(_ track: MediaTrack?) {}

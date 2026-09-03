@@ -2,6 +2,42 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "id": "release/033",
+      "version": "2026.9.3",
+      "build": 33,
+      "releasedAt": "2026-09-03",
+      "sections": [
+        {
+          "category": "New",
+          "items": [
+            "Watchlist page"
+          ]
+        },
+        {
+          "category": "Updated",
+          "items": [
+            "Choose a specific folder inside a network share",
+            {
+              "text": "Pinned Sidebar layout and animation",
+              "platforms": ["tvOS"]
+            }
+          ]
+        },
+        {
+          "category": "Fixed",
+          "items": [
+            {
+              "text": "Sidebar launch crash",
+              "platforms": ["tvOS"]
+            },
+            "Watchlist syncing and performance",
+            "Native playback stability",
+            "SMB playback after quickly reopening videos"
+          ]
+        }
+      ]
+    },
+    {
       "id": "release/032",
       "version": "2026.9.2",
       "build": 32,

@@ -129,7 +129,7 @@ private struct NFSConnectionTarget: Sendable {
         nfsPort = endpoint.port.flatMap { UInt16(exactly: $0) }
     }
 
-    private static func normalizedAbsolutePath(_ path: String) throws -> String {
+    private static func normalizedAbsolutePath(_ path: String) throws -> String {  // l10n:content — transport validation diagnostics never reach UI.
         guard path.hasPrefix("/"),
               !path.contains("\\"),
               !path.contains("\0") else {

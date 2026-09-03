@@ -16,6 +16,7 @@
         {
           "category": "Updated",
           "items": [
+            "Choose a specific folder inside a network share",
             {
               "text": "Offline download reliability and controls",
               "platforms": ["iOS"]

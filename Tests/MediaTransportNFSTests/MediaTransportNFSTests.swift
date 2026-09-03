@@ -19,6 +19,7 @@ final class FakeNFSBackend: NFSTransportBackend, @unchecked Sendable {
     private(set) var connectedHost: String?
     private(set) var connectedExport: String?
     private(set) var connectedPort: UInt16?
+    private(set) var listedPaths: [String] = []
 
     func connect(host: String, exportPath: String, nfsPort: UInt16?) async throws {
         if let connectError { throw connectError }
@@ -32,7 +33,8 @@ final class FakeNFSBackend: NFSTransportBackend, @unchecked Sendable {
     }
 
     func list(relativePath: String) async throws -> [NFSBackendEntry] {
-        listEntries
+        listedPaths.append(relativePath)
+        return listEntries
     }
 
     func stat(relativePath: String) async throws -> NFSBackendEntry {
@@ -135,6 +137,33 @@ final class MediaTransportNFSTests: XCTestCase {
         let session = try await adapter.connect(for: makeKey())
         let entries = try await session.fileSystem.list(relativePath: "Movies")
         XCTAssertEqual(entries.first?.relativePath, "Movies/clip.mkv")
+    }
+
+    func testSelectedSubfolderMountsExportAndRootsFileOperationsBelowIt() async throws {
+        let backend = FakeNFSBackend()
+        backend.listEntries = [
+            NFSBackendEntry(
+                name: "Arrival.mkv",
+                kind: .file,
+                size: 10,
+                modifiedAt: Date(timeIntervalSince1970: 1)
+            ),
+        ]
+        let adapter = NFSMediaTransportAdapter(
+            configurationProvider: { _, _ in
+                NFSMediaTransportConfiguration(exportPath: "/volume1/media")
+            },
+            backendFactory: { backend }
+        )
+        let session = try await adapter.connect(
+            for: makeKey(rootPath: "/volume1/media/Movies")
+        )
+
+        _ = try await session.fileSystem.list(relativePath: "")
+        _ = try await session.fileSystem.list(relativePath: "Drama")
+
+        XCTAssertEqual(backend.connectedExport, "/volume1/media")
+        XCTAssertEqual(backend.listedPaths, ["Movies", "Movies/Drama"])
     }
 
     func testProbeAdvertisesRandomAccessChangeDetecting() async throws {

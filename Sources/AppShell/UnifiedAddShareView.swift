@@ -394,6 +394,9 @@ struct UnifiedAddShareView: View {
     }
 
     private var locationTitle: LocalizedStringResource {
+        if viewModel.showsCurrentFolder {
+            return "Choose a folder"
+        }
         switch viewModel.selectedTransport {
         case .nfs: return "Choose an export"
         case .smb: return "Choose a share"
@@ -408,11 +411,11 @@ struct UnifiedAddShareView: View {
 
     @ViewBuilder
     private var browsableLocations: some View {
-        let isDrillable = viewModel.isDrillableTransport
-        if isDrillable {
-            if viewModel.currentPath != "/" {
+        let showsCurrentFolder = viewModel.showsCurrentFolder
+        if showsCurrentFolder {
+            if viewModel.canNavigateUp {
                 Button {
-                    loadFolders(path: parentPath(of: viewModel.currentPath))
+                    viewModel.navigateUp()
                 } label: { Label("Up one level", systemImage: "arrow.up.backward") }
                 .buttonStyle(.bordered)
             }
@@ -427,20 +430,20 @@ struct UnifiedAddShareView: View {
                         .plozzForeground(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button("Use This Folder") { useCurrentFolder() }
+                    Button("Use This Folder") { viewModel.useCurrentFolder() }
                         .buttonStyle(.borderedProminent)
                         .focused($focus, equals: .useFolder)
                 }
             }
         }
-        Panel(title: isDrillable ? Text("Or open a subfolder") : Text("Locations")) {
+        Panel(title: showsCurrentFolder ? Text("Or open a subfolder") : Text("Locations")) {
             if viewModel.locations.isEmpty {
-                placeholder(isDrillable ? "No subfolders here." : "Nothing here.")
+                placeholder(showsCurrentFolder ? "No subfolders here." : "Nothing here.")
             } else {
                 FadingScrollView(maxHeight: 620) {
                     VStack(spacing: 12) {
                         ForEach(viewModel.locations) { item in
-                            Button { selectLocation(item) } label: {
+                            Button { viewModel.selectLocation(item) } label: {
                                 HStack(spacing: 16) {
                                     Image(systemName: item.isBrowsable ? "folder.fill" : "externaldrive.fill")
                                         .plozzForeground(.secondary)
@@ -457,25 +460,8 @@ struct UnifiedAddShareView: View {
                 }
             }
         }
-    }
-
-    private func loadFolders(path: String) {
-        switch viewModel.selectedTransport {
-        case .sftp:
-            Task { await viewModel.loadSFTPFolders(path: path) }
-        case .ftp:
-            Task { await viewModel.loadFTPFolders(path: path) }
-        default:
-            Task { await viewModel.loadWebDAVFolders(path: path) }
-        }
-    }
-
-    private func useCurrentFolder() {
-        switch viewModel.selectedTransport {
-        case .sftp, .ftp:
-            viewModel.chooseFilesystemRoot()
-        default:
-            viewModel.chooseWebDAVFolder(viewModel.currentPath)
+        if viewModel.showsManualRootEntry {
+            manualSharePanel
         }
     }
 
@@ -486,51 +472,37 @@ struct UnifiedAddShareView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         TextField("/volume1/Media", text: $viewModel.manualShare)
                             .autocorrectionDisabled().focused($focus, equals: .manualShare)
-                        Button("Add Share") { viewModel.chooseNFSManualExport() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
+                        HStack(spacing: 16) {
+                            Button("Browse Export") { viewModel.browseManualLocation() }
+                                .buttonStyle(.borderedProminent)
+                            Button("Use This Export") { viewModel.chooseNFSManualExport() }
+                                .buttonStyle(.bordered)
+                        }
+                        .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
-            } else {
-                Panel(title: Text("Enter share name")) {
+            } else if viewModel.selectedTransport == .smb {
+                Panel(title: Text("Enter share or folder path")) {
                     VStack(alignment: .leading, spacing: 16) {
-                        TextField("Share name", text: $viewModel.manualShare)
+                        TextField("Share/Folder", text: $viewModel.manualShare)
                             .autocorrectionDisabled().focused($focus, equals: .manualShare)
-                        Button("Add Share") { viewModel.chooseSMBShare(viewModel.manualShare) }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
+                        HStack(spacing: 16) {
+                            Button("Browse") { viewModel.browseManualLocation() }
+                                .buttonStyle(.borderedProminent)
+                            Button("Use This Path") {
+                                viewModel.chooseSMBShare(viewModel.manualShare)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .disabled(viewModel.manualShare.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
-            }
-        }
-    }
-
-    private func selectLocation(_ item: UnifiedAddShareModel.LocationItem) {
-        if item.isBrowsable {
-            loadFolders(path: item.path)
-        } else {
-            switch viewModel.selectedTransport {
-            case .nfs:
-                viewModel.chooseNFSExport(item.path)
-            default:
-                viewModel.chooseSMBShare(item.path)
             }
         }
     }
 
     private func retryLocation() {
-        switch viewModel.selectedTransport {
-        case .webDAV:
-            Task { await viewModel.loadWebDAVFolders(path: viewModel.currentPath) }
-        case .sftp:
-            Task { await viewModel.loadSFTPFolders(path: viewModel.currentPath) }
-        case .ftp:
-            Task { await viewModel.loadFTPFolders(path: viewModel.currentPath) }
-        case .nfs:
-            Task { await viewModel.loadNFSExports() }
-        default:
-            viewModel.loadSMBShares()
-        }
+        viewModel.retryLocations()
     }
 
     // MARK: - Coming soon (dummy transports)
@@ -575,13 +547,6 @@ struct UnifiedAddShareView: View {
         Text(text).plozzForeground(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8).padding(.horizontal, 12)
-    }
-
-    private func parentPath(of path: String) -> String {
-        var trimmed = path
-        if trimmed.count > 1, trimmed.hasSuffix("/") { trimmed.removeLast() }
-        guard let slash = trimmed.lastIndex(of: "/"), slash != trimmed.startIndex else { return "/" }
-        return String(trimmed[..<slash])
     }
 
     private func formatFingerprint(_ data: Data) -> String {

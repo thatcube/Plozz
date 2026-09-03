@@ -3,6 +3,19 @@ import Foundation
 import MediaTransportCore
 import TransportNFS
 
+public struct NFSMediaTransportConfiguration: Sendable, Equatable {
+    /// The advertised export to mount. `nil` preserves legacy accounts, whose
+    /// persisted endpoint path was itself the export root.
+    public let exportPath: String?
+
+    public init(exportPath: String? = nil) {
+        self.exportPath = exportPath
+    }
+}
+
+public typealias NFSMediaTransportConfigurationProvider =
+    @Sendable (String, CredentialRevision) throws -> NFSMediaTransportConfiguration
+
 /// NFSv3 `MediaTransportAdapter`. Mirrors `SMBMediaTransportAdapter`: a stateless
 /// struct whose `connect` mounts the export and produces a session that owns its
 /// backend, so shutting one session down never disturbs another account/role.
@@ -14,15 +27,29 @@ import TransportNFS
 public struct NFSMediaTransportAdapter: MediaTransportAdapter, Sendable {
     public let transportIdentifier = MediaShareTransportKind.nfs.rawValue
 
+    private let configurationProvider: NFSMediaTransportConfigurationProvider
     private let backendFactory: @Sendable () -> any NFSTransportBackend
 
-    public init() {
-        self.init(backendFactory: { NFSClientBackend() })
+    public init(
+        configurationProvider: @escaping NFSMediaTransportConfigurationProvider = {
+            _, _ in NFSMediaTransportConfiguration()
+        }
+    ) {
+        self.init(
+            configurationProvider: configurationProvider,
+            backendFactory: { NFSClientBackend() }
+        )
     }
 
     /// DI seam: tests inject a `backendFactory` returning a stubbed backend so
     /// the full connect/validate/list/stat/read/openSource path runs offline.
-    init(backendFactory: @escaping @Sendable () -> any NFSTransportBackend) {
+    init(
+        configurationProvider: @escaping NFSMediaTransportConfigurationProvider = {
+            _, _ in NFSMediaTransportConfiguration()
+        },
+        backendFactory: @escaping @Sendable () -> any NFSTransportBackend
+    ) {
+        self.configurationProvider = configurationProvider
         self.backendFactory = backendFactory
     }
 
@@ -30,7 +57,14 @@ public struct NFSMediaTransportAdapter: MediaTransportAdapter, Sendable {
         guard key.endpoint.transportIdentifier == transportIdentifier else {
             throw MediaTransportError.unsupportedCapability("transport")
         }
-        let target = try NFSConnectionTarget(endpoint: key.endpoint)
+        let configuration = try configurationProvider(
+            key.accountID,
+            key.credentialRevision
+        )
+        let target = try NFSConnectionTarget(
+            endpoint: key.endpoint,
+            exportPath: configuration.exportPath
+        )
 
         let backend = backendFactory()
         do {
@@ -46,6 +80,7 @@ public struct NFSMediaTransportAdapter: MediaTransportAdapter, Sendable {
 
         let fileSystem = NFSMediaTransportFileSystem(
             backend: backend,
+            rootPath: target.rootPath,
             accountID: key.accountID,
             credentialRevision: key.credentialRevision
         )
@@ -54,17 +89,21 @@ public struct NFSMediaTransportAdapter: MediaTransportAdapter, Sendable {
 }
 
 /// The credential-free connection target parsed from the endpoint identity. NFS
-/// mounts the whole endpoint root path as the export (there is no SMB-style
-/// share/path split — the server decides the export boundary), so relative paths
-/// resolve under the mounted root handle.
+/// mounts the advertised export while keeping the user-selected subfolder as a
+/// filesystem root below that mount. Legacy accounts have no separate export
+/// metadata, so their endpoint path remains both values.
 private struct NFSConnectionTarget: Sendable {
     let host: String
     let exportPath: String
+    let rootPath: String
     /// Explicit nfsd port from `nfs://host:port`, if any (nil → resolve via
     /// portmap, falling back to 2049).
     let nfsPort: UInt16?
 
-    init(endpoint: MediaTransportEndpointIdentity) throws {
+    init(
+        endpoint: MediaTransportEndpointIdentity,
+        exportPath configuredExportPath: String?
+    ) throws {
         guard !endpoint.host.isEmpty else {
             throw MediaTransportError.invalidInput(reason: "invalid NFS endpoint")
         }
@@ -72,8 +111,35 @@ private struct NFSConnectionTarget: Sendable {
             throw MediaTransportError.invalidInput(reason: "invalid NFS export path")
         }
         host = endpoint.host
-        exportPath = endpoint.rootPath
+        exportPath = try Self.normalizedAbsolutePath(
+            configuredExportPath ?? endpoint.rootPath
+        )
+        let selectedPath = try Self.normalizedAbsolutePath(endpoint.rootPath)
+        if selectedPath == exportPath {
+            rootPath = ""
+        } else {
+            let prefix = exportPath == "/" ? "/" : exportPath + "/"
+            guard selectedPath.hasPrefix(prefix) else {
+                throw MediaTransportError.invalidInput(
+                    reason: "NFS selected root is outside its export"
+                )
+            }
+            rootPath = String(selectedPath.dropFirst(prefix.count))
+        }
         nfsPort = endpoint.port.flatMap { UInt16(exactly: $0) }
+    }
+
+    private static func normalizedAbsolutePath(_ path: String) throws -> String {  // l10n:content — transport validation diagnostics never reach UI.
+        guard path.hasPrefix("/"),
+              !path.contains("\\"),
+              !path.contains("\0") else {
+            throw MediaTransportError.invalidInput(reason: "invalid NFS export path")
+        }
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.allSatisfy({ $0 != "." && $0 != ".." }) else {
+            throw MediaTransportError.invalidInput(reason: "invalid NFS export path")
+        }
+        return components.isEmpty ? "/" : "/" + components.joined(separator: "/")
     }
 }
 
@@ -118,15 +184,18 @@ final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
     static let maximumSmallFileSize = 16 * 1_024 * 1_024
 
     private let backend: any NFSTransportBackend
+    private let rootPath: String
     private let accountID: String
     private let credentialRevision: CredentialRevision
 
     init(
         backend: any NFSTransportBackend,
+        rootPath: String,
         accountID: String,
         credentialRevision: CredentialRevision
     ) {
         self.backend = backend
+        self.rootPath = rootPath
         self.accountID = accountID
         self.credentialRevision = credentialRevision
     }
@@ -158,7 +227,9 @@ final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
     func list(relativePath: String) async throws -> [RemoteFileEntry] {
         let normalizedPath = try Self.normalizedRelativePath(relativePath, allowEmpty: true)
         do {
-            return try await backend.list(relativePath: normalizedPath).compactMap { entry in
+            return try await backend.list(
+                relativePath: joinedRootPath(normalizedPath)
+            ).compactMap { entry in
                 let childPath = normalizedPath.isEmpty
                     ? entry.name
                     : "\(normalizedPath)/\(entry.name)"
@@ -177,7 +248,9 @@ final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
     func stat(relativePath: String) async throws -> RemoteFileEntry {
         let normalizedPath = try Self.normalizedRelativePath(relativePath)
         do {
-            let entry = try await backend.stat(relativePath: normalizedPath)
+            let entry = try await backend.stat(
+                relativePath: joinedRootPath(normalizedPath)
+            )
             return try RemoteFileEntry(
                 relativePath: normalizedPath,
                 kind: entry.kind,
@@ -196,7 +269,7 @@ final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
         let normalizedPath = try Self.normalizedRelativePath(relativePath)
         do {
             return try await backend.readSmallFile(
-                relativePath: normalizedPath,
+                relativePath: joinedRootPath(normalizedPath),
                 maximumBytes: maximumBytes
             )
         } catch {
@@ -211,10 +284,11 @@ final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
         }
         let normalizedPath = try Self.normalizedRelativePath(locator.relativePath)
         do {
-            let current = try await backend.stat(relativePath: normalizedPath)
+            let rootedPath = joinedRootPath(normalizedPath)
+            let current = try await backend.stat(relativePath: rootedPath)
             try Self.validateNFSRepresentation(current, against: locator.representation)
             let source = try await backend.openSource(
-                relativePath: normalizedPath,
+                relativePath: rootedPath,
                 representation: locator.representation
             )
             return MediaTransportSourceLease(source: source)
@@ -224,6 +298,12 @@ final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Se
     }
 
     // MARK: - Helpers
+
+    private func joinedRootPath(_ relativePath: String) -> String {
+        guard !rootPath.isEmpty else { return relativePath }
+        guard !relativePath.isEmpty else { return rootPath }
+        return "\(rootPath)/\(relativePath)"
+    }
 
     /// NFSv3 has no ETag; the representation identity is the modification time
     /// (see `ShareProvider.networkFileLocator`). This asserts the file still

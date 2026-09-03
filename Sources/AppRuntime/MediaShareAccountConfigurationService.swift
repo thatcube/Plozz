@@ -99,20 +99,43 @@ public struct MediaShareAccountConfigurationService: Sendable {
         share: String,
         username: String,
         password: String,
-        displayName: String
+        displayName: String,
+        subpath: String = ""
     ) throws -> PreparedMediaShareAccount {
         let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        let trimmedShare = share.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         let trimmedUsername = username.trimmingCharacters(in: .whitespaces)
-        guard !trimmedHost.isEmpty, !trimmedShare.isEmpty else {
+        guard port.map({ (1...65_535).contains($0) }) ?? true else {
             throw MediaShareAccountConfigurationError.invalidAddress
         }
+        let canonicalPort = port == 445 ? nil : port
+        let enteredShare = try Self.normalizedRelativeFilesystemPath(
+            share,
+            allowEmpty: false
+        )
+        let shareComponents = enteredShare.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        )
+        guard !trimmedHost.isEmpty, let shareName = shareComponents.first else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+        let embeddedSubpath = shareComponents.dropFirst().joined(separator: "/")
+        let explicitSubpath = try Self.normalizedRelativeFilesystemPath(
+            subpath,
+            allowEmpty: true
+        )
+        let selectedSubpath = [embeddedSubpath, explicitSubpath]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/")
+        let selectedRoot = ([String(shareName)] + (selectedSubpath.isEmpty
+            ? []
+            : [selectedSubpath])).joined(separator: "/")
 
         var components = URLComponents()
         components.scheme = "smb"
         components.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
-        components.port = port
-        components.path = "/" + trimmedShare
+        components.port = canonicalPort
+        components.path = "/" + selectedRoot
         guard let baseURL = components.url else {
             throw MediaShareAccountConfigurationError.invalidAddress
         }
@@ -125,18 +148,47 @@ public struct MediaShareAccountConfigurationService: Sendable {
             transport: .smb,
             authentication: authentication
         )
-        let serverID = Self.smbID(
+        let canonicalServerID = Self.smbID(
             host: trimmedHost,
-            port: port,
-            share: trimmedShare,
+            port: canonicalPort,
+            share: String(shareName),
+            subpath: selectedSubpath,
             username: trimmedUsername
         )
+        var legacyServerIDs: Set<String> = [
+            Self.legacySMBID(
+                host: trimmedHost,
+                port: canonicalPort,
+                path: selectedRoot,
+                username: trimmedUsername
+            ),
+        ]
+        if port == nil || port == 445 {
+            legacyServerIDs.insert(Self.legacySMBID(
+                host: trimmedHost,
+                port: 445,
+                path: selectedRoot,
+                username: trimmedUsername
+            ))
+        }
+        let existingAccount = accountStore.loadAccounts().first {
+            if $0.id == canonicalServerID { return true }
+            return legacyServerIDs.contains($0.id)
+                && Self.smbURL(
+                    $0.server.baseURL,
+                    matchesHost: trimmedHost,
+                    port: canonicalPort,
+                    share: String(shareName),
+                    subpath: selectedSubpath
+                )
+        }
+        let serverID = existingAccount?.id ?? canonicalServerID
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
         let server = MediaServer(
             id: serverID,
             name: trimmedName.isEmpty
                 ? Self.defaultShareName(
-                    path: trimmedShare,
+                    path: selectedRoot,
                     host: trimmedHost,
                     transport: .smb
                 )
@@ -155,7 +207,7 @@ public struct MediaShareAccountConfigurationService: Sendable {
         return PreparedMediaShareAccount(
             session: session,
             account: account,
-            previousAccount: accountStore.loadAccounts().first { $0.id == account.id },
+            previousAccount: existingAccount,
             credential: credential
         )
     }
@@ -166,7 +218,8 @@ public struct MediaShareAccountConfigurationService: Sendable {
         share: String,
         username: String,
         password: String,
-        displayName: String
+        displayName: String,
+        subpath: String = ""
     ) throws -> PreparedMediaShareAccount {
         let prepared = try prepareSMB(
             host: host,
@@ -174,7 +227,8 @@ public struct MediaShareAccountConfigurationService: Sendable {
             share: share,
             username: username,
             password: password,
-            displayName: displayName
+            displayName: displayName,
+            subpath: subpath
         )
         try persist(prepared)
         return prepared
@@ -285,7 +339,7 @@ public struct MediaShareAccountConfigurationService: Sendable {
             throw MediaShareAccountConfigurationError.invalidAddress
         }
 
-        let normalizedPath = Self.normalizedFilesystemPath(path)
+        let normalizedPath = try Self.validatedFilesystemPath(path)
         var components = URLComponents()
         components.scheme = "sftp"
         components.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
@@ -414,7 +468,7 @@ public struct MediaShareAccountConfigurationService: Sendable {
             throw MediaShareAccountConfigurationError.invalidShare
         }
 
-        let normalizedPath = Self.normalizedFilesystemPath(components.path)
+        let normalizedPath = try Self.validatedFilesystemPath(components.path)
         components.path = normalizedPath == "/" ? "" : normalizedPath
         guard let normalizedURL = components.url else {
             throw MediaShareAccountConfigurationError.invalidAddress
@@ -475,18 +529,29 @@ public struct MediaShareAccountConfigurationService: Sendable {
         host: String,
         port: Int?,
         exportPath: String,
+        subpath: String = "",
         displayName: String
     ) throws -> PreparedMediaShareAccount {
         let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        guard !trimmedHost.isEmpty else {
+        guard !trimmedHost.isEmpty,
+              port.map({ (1...65_535).contains($0) }) ?? true else {
             throw MediaShareAccountConfigurationError.invalidAddress
         }
+        let canonicalPort = port == 2_049 ? nil : port
 
-        let normalizedPath = Self.normalizedFilesystemPath(exportPath)
+        let normalizedExportPath = try Self.validatedFilesystemPath(exportPath)
+        let normalizedSubpath = try Self.normalizedRelativeFilesystemPath(
+            subpath,
+            allowEmpty: true
+        )
+        let normalizedPath = Self.joinedFilesystemPath(
+            root: normalizedExportPath,
+            subpath: normalizedSubpath
+        )
         var components = URLComponents()
         components.scheme = "nfs"
         components.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
-        components.port = port
+        components.port = canonicalPort
         components.path = normalizedPath
         guard let baseURL = components.url else {
             throw MediaShareAccountConfigurationError.invalidAddress
@@ -496,19 +561,36 @@ public struct MediaShareAccountConfigurationService: Sendable {
         do {
             credential = try MediaShareCredentialEnvelope(
                 transport: .nfs,
-                authentication: .noCredentials
+                authentication: .noCredentials,
+                transportRootPath: normalizedSubpath.isEmpty
+                    ? nil
+                    : normalizedExportPath
             )
         } catch {
             throw MediaShareAccountConfigurationError.invalidShare
         }
 
-        let serverID = Self.filesystemID(
+        let canonicalServerID = Self.filesystemID(
             scheme: "nfs",
             host: trimmedHost,
-            port: port,
+            port: canonicalPort,
             path: normalizedPath,
             principal: "anon"
         )
+        let legacyDefaultPortID = Self.filesystemID(
+            scheme: "nfs",
+            host: trimmedHost,
+            port: 2_049,
+            path: normalizedPath,
+            principal: "anon"
+        )
+        let equivalentServerIDs: Set<String> = port == nil || port == 2_049
+            ? [canonicalServerID, legacyDefaultPortID]
+            : [canonicalServerID]
+        let existingAccount = accountStore.loadAccounts().first {
+            equivalentServerIDs.contains($0.id)
+        }
+        let serverID = existingAccount?.id ?? canonicalServerID
         let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
         let server = MediaServer(
             id: serverID,
@@ -533,7 +615,7 @@ public struct MediaShareAccountConfigurationService: Sendable {
         return PreparedMediaShareAccount(
             session: session,
             account: account,
-            previousAccount: accountStore.loadAccounts().first { $0.id == account.id },
+            previousAccount: existingAccount,
             credential: credential
         )
     }
@@ -550,12 +632,14 @@ public struct MediaShareAccountConfigurationService: Sendable {
         host: String,
         port: Int?,
         exportPath: String,
+        subpath: String = "",
         displayName: String
     ) throws -> PreparedMediaShareAccount {
         let prepared = try prepareNFS(
             host: host,
             port: port,
             exportPath: exportPath,
+            subpath: subpath,
             displayName: displayName
         )
         try persist(prepared)
@@ -583,12 +667,68 @@ public struct MediaShareAccountConfigurationService: Sendable {
         host: String,
         port: Int?,
         share: String,
+        subpath: String = "",
+        username: String
+    ) -> String {
+        let canonicalPort = port == 445 ? nil : port
+        let normalizedSubpath = (try? normalizedRelativeFilesystemPath(
+            subpath,
+            allowEmpty: true
+        )) ?? ""
+        guard !normalizedSubpath.isEmpty else {
+            return legacySMBID(
+                host: host,
+                port: canonicalPort,
+                path: share,
+                username: username
+            )
+        }
+        let portKey = canonicalPort.map { ":\($0)" } ?? ""
+        let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
+        let user = normalizedUser.isEmpty ? "guest" : normalizedUser
+        return "share:smb://\(host.lowercased())\(portKey)/\(share.lowercased())/\(normalizedSubpath)#\(user)"
+    }
+
+    private static func legacySMBID(
+        host: String,
+        port: Int?,
+        path: String,
         username: String
     ) -> String {
         let portKey = port.map { ":\($0)" } ?? ""
         let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
         let user = normalizedUser.isEmpty ? "guest" : normalizedUser
-        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
+        return "share:\(host.lowercased())\(portKey)/\(path.lowercased())#\(user)"
+    }
+
+    private static func smbURL(
+        _ url: URL,
+        matchesHost host: String,
+        port: Int?,
+        share: String,
+        subpath: String
+    ) -> Bool {
+        guard let components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        ), components.scheme?.lowercased() == "smb",
+           ShareProvider.unbracketedHost(components.host ?? "")
+            .caseInsensitiveCompare(
+                ShareProvider.unbracketedHost(host)
+            ) == .orderedSame else {
+            return false
+        }
+        let existingPort = components.port == 445 ? nil : components.port
+        guard existingPort == port else { return false }
+        let pathComponents = components.path.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        ).map(String.init)
+        guard let existingShare = pathComponents.first,
+              existingShare.caseInsensitiveCompare(share) == .orderedSame else {
+            return false
+        }
+        return pathComponents.dropFirst().joined(separator: "/") == subpath
     }
 
     public static func webDAVID(
@@ -625,5 +765,41 @@ public struct MediaShareAccountConfigurationService: Sendable {
         let trimmed = path.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return "/" }
         return trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+    }
+
+    private static func validatedFilesystemPath(_ path: String) throws -> String {
+        let relative = try normalizedRelativeFilesystemPath(
+            path,
+            allowEmpty: true
+        )
+        return relative.isEmpty ? "/" : "/" + relative
+    }
+
+    private static func normalizedRelativeFilesystemPath(
+        _ path: String,
+        allowEmpty: Bool
+    ) throws -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.contains("\\"),
+              !trimmed.contains("\0") else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+        let components = trimmed.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        )
+        guard components.allSatisfy({ $0 != "." && $0 != ".." }),
+              allowEmpty || !components.isEmpty else {
+            throw MediaShareAccountConfigurationError.invalidAddress
+        }
+        return components.joined(separator: "/")
+    }
+
+    private static func joinedFilesystemPath(
+        root: String,
+        subpath: String
+    ) -> String {
+        guard !subpath.isEmpty else { return root }
+        return root == "/" ? "/\(subpath)" : "\(root)/\(subpath)"
     }
 }

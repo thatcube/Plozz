@@ -1773,7 +1773,8 @@ public final class AppState {
         share: String,
         username: String,
         password: String,
-        displayName: String
+        displayName: String,
+        subpath: String = ""
     ) {
         let service = MediaShareAccountConfigurationService(
             accountStore: accountsProviders.accountStore
@@ -1786,7 +1787,8 @@ public final class AppState {
                 share: share,
                 username: username,
                 password: password,
-                displayName: displayName
+                displayName: displayName,
+                subpath: subpath
             )
         } catch {
             apply(.authenticationFailed(.unknown("Invalid share address")))
@@ -1819,26 +1821,22 @@ public final class AppState {
     /// — e.g. to update its password — updates the existing account in place
     /// instead of creating a duplicate.
     ///
-    /// Identity = host + port + share + user, all case-folded, because SMB treats
-    /// host, share, and username as case-insensitive. Folding to lowercase means
-    /// `//NAS/Media` and `//nas/media`, and `COPILOT2` vs `Copilot2`, resolve to
-    /// the same account (no accidental fork). The username IS part of the identity
-    /// so genuinely different users on the SAME share (e.g. `brandon` and `sister`,
-    /// who may see different files) can both be added as separate accounts. An
-    /// empty username is a guest/anonymous share and folds to a stable `guest`
-    /// identity. Only the identity is normalized; the display name and the
-    /// connection `baseURL` keep the user's original casing (SMB ignores case on
-    /// the wire).
+    /// Identity = host + non-default port + share + exact selected subpath + user.
+    /// Host, share, and username are case-folded because SMB treats those values as
+    /// case-insensitive; the subpath keeps its case for Samba shares backed by a
+    /// case-sensitive filesystem. An empty username folds to `guest`.
     static func mediaShareServerID(
         host: String,
         port: Int?,
         share: String,
+        subpath: String = "",
         username: String
     ) -> String {
         MediaShareAccountConfigurationService.smbID(
             host: host,
             port: port,
             share: share,
+            subpath: subpath,
             username: username
         )
     }
@@ -2010,6 +2008,7 @@ public final class AppState {
         host: String,
         port: Int?,
         exportPath: String,
+        subpath: String = "",
         displayName: String
     ) {
         let service = MediaShareAccountConfigurationService(
@@ -2021,6 +2020,7 @@ public final class AppState {
                 host: host,
                 port: port,
                 exportPath: exportPath,
+                subpath: subpath,
                 displayName: displayName
             )
         } catch {
@@ -2145,10 +2145,6 @@ public final class AppState {
             previousAccount: prepared.previousAccount,
             isFirstRun: isFirstRun
         )
-    }
-
-    private static func normalizedFilesystemPath(_ raw: String) -> String {
-        MediaShareAccountConfigurationService.normalizedFilesystemPath(raw)
     }
 
     /// Begins adding another account from inside the signed-in app.

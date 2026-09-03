@@ -122,6 +122,140 @@ final class MediaShareAccountConfigurationServiceTests: XCTestCase {
         )
     }
 
+    func testSaveSMBPreservesNestedFolderCaseInURLAndIdentity() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let prepared = try service.saveSMB(
+            host: "NAS.Local",
+            port: nil,
+            share: "Multimedia",
+            username: "",
+            password: "",
+            displayName: "",
+            subpath: "Movies/Anime"
+        )
+
+        XCTAssertEqual(
+            prepared.account.id,
+            "share:smb://nas.local/multimedia/Movies/Anime#guest"
+        )
+        XCTAssertEqual(prepared.account.server.name, "Anime (SMB)")
+        XCTAssertEqual(
+            prepared.account.server.baseURL.absoluteString,
+            "smb://NAS.Local/Multimedia/Movies/Anime"
+        )
+    }
+
+    func testSMBDefaultPortDoesNotForkAccountIdentity() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let implicit = try service.prepareSMB(
+            host: "nas.local",
+            port: nil,
+            share: "Media",
+            username: "",
+            password: "",
+            displayName: ""
+        )
+        let explicit = try service.prepareSMB(
+            host: "nas.local",
+            port: 445,
+            share: "Media",
+            username: "",
+            password: "",
+            displayName: ""
+        )
+
+        XCTAssertEqual(implicit.account.id, explicit.account.id)
+        XCTAssertEqual(
+            explicit.account.server.baseURL.absoluteString,
+            "smb://nas.local/Media"
+        )
+    }
+
+    func testNestedSMBReusesLegacyFullyLowercasedAccountIdentity() throws {
+        let store = try makeStore()
+        let legacyID = "share:nas.local/multimedia/movies#guest"
+        let legacyAccount = Account(
+            id: legacyID,
+            server: MediaServer(
+                id: legacyID,
+                name: "Movies",
+                baseURL: URL(string: "smb://nas.local/Multimedia/Movies")!,
+                provider: .mediaShare
+            ),
+            userID: "guest",
+            userName: "",
+            deviceID: store.deviceID()
+        )
+        try store.addMediaShare(
+            legacyAccount,
+            credential: MediaShareCredentialEnvelope(
+                transport: .smb,
+                authentication: .anonymous
+            ),
+            generatedPrivateKey: nil
+        )
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let prepared = try service.prepareSMB(
+            host: "nas.local",
+            port: 445,
+            share: "Multimedia",
+            username: "",
+            password: "",
+            displayName: "",
+            subpath: "Movies"
+        )
+
+        XCTAssertEqual(prepared.account.id, legacyID)
+        XCTAssertEqual(prepared.previousAccount?.id, legacyID)
+    }
+
+    func testNestedSMBDoesNotReuseLegacyIdentityForDifferentPathCase() throws {
+        let store = try makeStore()
+        let legacyID = "share:nas.local/multimedia/movies#guest"
+        let legacyAccount = Account(
+            id: legacyID,
+            server: MediaServer(
+                id: legacyID,
+                name: "Movies",
+                baseURL: URL(string: "smb://nas.local/Multimedia/Movies")!,
+                provider: .mediaShare
+            ),
+            userID: "guest",
+            userName: "",
+            deviceID: store.deviceID()
+        )
+        try store.addMediaShare(
+            legacyAccount,
+            credential: MediaShareCredentialEnvelope(
+                transport: .smb,
+                authentication: .anonymous
+            ),
+            generatedPrivateKey: nil
+        )
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let prepared = try service.prepareSMB(
+            host: "nas.local",
+            port: nil,
+            share: "Multimedia",
+            username: "",
+            password: "",
+            displayName: "",
+            subpath: "movies"
+        )
+
+        XCTAssertEqual(
+            prepared.account.id,
+            "share:smb://nas.local/multimedia/movies#guest"
+        )
+        XCTAssertNil(prepared.previousAccount)
+    }
+
     func testSaveNFSPersistsStableAccountAndCredentialEnvelope() throws {
         let store = try makeStore()
         let service = MediaShareAccountConfigurationService(accountStore: store)
@@ -135,12 +269,12 @@ final class MediaShareAccountConfigurationServiceTests: XCTestCase {
 
         XCTAssertEqual(
             prepared.account.id,
-            "share:nfs://nas.local:2049/volume/Movies#anon"
+            "share:nfs://nas.local/volume/Movies#anon"
         )
         XCTAssertEqual(prepared.account.server.name, "Movies (NFS)")
         XCTAssertEqual(
             prepared.account.server.baseURL.absoluteString,
-            "nfs://NAS.Local:2049/volume/Movies/"
+            "nfs://NAS.Local/volume/Movies"
         )
         XCTAssertEqual(store.loadAccounts(), [prepared.account])
         let credential = try store.mediaShareCredential(
@@ -149,6 +283,59 @@ final class MediaShareAccountConfigurationServiceTests: XCTestCase {
         )
         XCTAssertEqual(credential.transport, .nfs)
         XCTAssertEqual(credential.authentication, .noCredentials)
+        XCTAssertNil(credential.transportRootPath)
+    }
+
+    func testSaveNFSKeepsExportBoundaryBelowSelectedFolder() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let prepared = try service.saveNFS(
+            host: "NAS.Local",
+            port: 2_049,
+            exportPath: "/volume1/Media",
+            subpath: "Movies/Family",
+            displayName: ""
+        )
+
+        XCTAssertEqual(
+            prepared.account.id,
+            "share:nfs://nas.local/volume1/Media/Movies/Family#anon"
+        )
+        XCTAssertEqual(prepared.account.server.name, "Family (NFS)")
+        XCTAssertEqual(
+            prepared.account.server.baseURL.absoluteString,
+            "nfs://NAS.Local/volume1/Media/Movies/Family"
+        )
+        let credential = try store.mediaShareCredential(
+            for: prepared.account.id,
+            revision: prepared.account.credentialRevision
+        )
+        XCTAssertEqual(credential.transportRootPath, "/volume1/Media")
+    }
+
+    func testNFSDefaultPortDoesNotForkAccountIdentity() throws {
+        let store = try makeStore()
+        let service = MediaShareAccountConfigurationService(accountStore: store)
+
+        let implicit = try service.prepareNFS(
+            host: "nas.local",
+            port: nil,
+            exportPath: "/volume1/Media",
+            displayName: ""
+        )
+        let explicit = try service.prepareNFS(
+            host: "nas.local",
+            port: 2_049,
+            exportPath: "/volume1/Media",
+            displayName: ""
+        )
+
+        XCTAssertEqual(implicit.account.id, explicit.account.id)
+        XCTAssertEqual(
+            explicit.account.server.baseURL.absoluteString,
+            "nfs://nas.local/volume1/Media"
+        )
     }
 
     func testPrepareNFSRejectsBlankHostWithoutPersisting() throws {

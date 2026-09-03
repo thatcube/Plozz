@@ -31,13 +31,18 @@ final class MediaCredentialVaultTests: XCTestCase {
             ),
             try MediaShareCredentialEnvelope(
                 transport: .nfs,
-                authentication: .noCredentials
+                authentication: .noCredentials,
+                transportRootPath: "/volume1/Media"
             )
         ]
 
         for envelope in envelopes {
             let encoded = try MediaShareCredentialCodec.encode(envelope)
-            XCTAssertTrue(encoded.hasPrefix(MediaShareCredentialCodec.prefix))
+            if envelope.transportRootPath == nil {
+                XCTAssertTrue(encoded.hasPrefix("plozz-share-v1:"))
+            } else {
+                XCTAssertTrue(encoded.hasPrefix(MediaShareCredentialCodec.prefix))
+            }
             XCTAssertEqual(
                 try MediaShareCredentialCodec.decode(
                     encoded,
@@ -110,7 +115,7 @@ final class MediaCredentialVaultTests: XCTestCase {
     }
 
     func testUnsupportedVersionIsRejectedBeforeVersionSpecificSchema() {
-        let futureEnvelope = Data(#"{"version":2}"#.utf8).base64EncodedString()
+        let futureEnvelope = Data(#"{"version":3}"#.utf8).base64EncodedString()
 
         XCTAssertThrowsError(
             try MediaShareCredentialCodec.decode(
@@ -120,6 +125,20 @@ final class MediaCredentialVaultTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? MediaCredentialError, .unsupportedVersion)
         }
+    }
+
+    func testVersionOneEnvelopeStillDecodesWithoutTransportRoot() throws {
+        let payload = Data(
+            #"{"authentication":{"kind":"noCredentials"},"transport":"nfs","trust":{"revision":"00000000-0000-0000-0000-000000000000"},"version":1}"#.utf8
+        ).base64EncodedString()
+
+        let envelope = try MediaShareCredentialCodec.decodeVersioned(
+            "plozz-share-v1:" + payload
+        )
+
+        XCTAssertEqual(envelope.transport, .nfs)
+        XCTAssertEqual(envelope.authentication, .noCredentials)
+        XCTAssertNil(envelope.transportRootPath)
     }
 
     func testOversizedEncodedPayloadIsRejectedBeforeDecoding() {
@@ -144,7 +163,10 @@ final class MediaCredentialVaultTests: XCTestCase {
             authentication: .anonymous
         )
         let encoded = try MediaShareCredentialCodec.encode(envelope)
-        let payload = String(encoded.dropFirst(MediaShareCredentialCodec.prefix.count))
+        let encodedPrefix = encoded.hasPrefix(MediaShareCredentialCodec.prefix)
+            ? MediaShareCredentialCodec.prefix
+            : "plozz-share-v1:"
+        let payload = String(encoded.dropFirst(encodedPrefix.count))
         let data = try XCTUnwrap(Data(base64Encoded: payload))
         var object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -154,7 +176,7 @@ final class MediaCredentialVaultTests: XCTestCase {
 
         XCTAssertThrowsError(
             try MediaShareCredentialCodec.decode(
-                MediaShareCredentialCodec.prefix + nonCanonical.base64EncodedString(),
+                encodedPrefix + nonCanonical.base64EncodedString(),
                 expectedTransport: .webDAV
             )
         ) { error in
@@ -208,6 +230,26 @@ final class MediaCredentialVaultTests: XCTestCase {
             )
         ) { error in
             XCTAssertEqual(error as? MediaCredentialError, .incompatibleTrust)
+        }
+
+        XCTAssertThrowsError(
+            try MediaShareCredentialEnvelope(
+                transport: .smb,
+                authentication: .anonymous,
+                transportRootPath: "/not-an-nfs-export"
+            )
+        ) { error in
+            XCTAssertEqual(error as? MediaCredentialError, .invalidIdentifier)
+        }
+
+        XCTAssertThrowsError(
+            try MediaShareCredentialEnvelope(
+                transport: .nfs,
+                authentication: .noCredentials,
+                transportRootPath: "/volume1/../private"
+            )
+        ) { error in
+            XCTAssertEqual(error as? MediaCredentialError, .invalidIdentifier)
         }
     }
 
